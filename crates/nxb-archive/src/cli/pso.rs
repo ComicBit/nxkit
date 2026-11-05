@@ -2,24 +2,23 @@
 //! [--gpu g18p[,g17p]|none] [--platform ios|macos] [--os-min 27.0] [--script-only] [--target 1000] [--tokens N]`
 //!
 //! `pso_offline.py` in Rust: the plan (pairs to bases), the script, `prebuilt.tsv`, `rest_pairs.tsv`, `archive.tsv`, and
-//! one archive per architecture through [`nxb_archive::build`] (content-cut batches, store, merge cache).
+//! one archive per architecture through [`crate::build`] (content-cut batches, store, merge cache).
 //! `--gpu none` writes the stamp and tables but no archive (the Mac's "no offline archive" mode).
 
 use std::path::PathBuf;
-use std::process::ExitCode;
 
-fn main() -> ExitCode {
-    match run() {
-        Ok(()) => ExitCode::SUCCESS,
+/// `nxb pso` / `nxb-pso`: returns the exit code (0 done, 1 failed).
+pub fn main(args: &[String]) -> i32 {
+    match run(args) {
+        Ok(()) => 0,
         Err(e) => {
             println!("[RED] pso_offline: {e}");
-            ExitCode::from(1)
+            1
         }
     }
 }
 
-fn run() -> Result<(), String> {
-    let a: Vec<String> = std::env::args().skip(1).collect();
+fn run(a: &[String]) -> Result<(), String> {
     let mut pairs = Vec::new();
     let mut o = std::collections::BTreeMap::new();
     let mut flags = std::collections::BTreeSet::new();
@@ -62,26 +61,26 @@ fn run() -> Result<(), String> {
         let s: std::collections::BTreeSet<String> = gpu
             .split(',')
             .filter(|x| !x.trim().is_empty())
-            .map(nxb_archive::plan::arch_name)
+            .map(crate::plan::arch_name)
             .collect();
         s.into_iter().collect()
     };
     let zero = o.get("depth").map(String::as_str) == Some("zero");
-    let text = nxb_archive::plan::pair_text(&pairs);
+    let text = crate::plan::pair_text(&pairs);
     if text.is_empty() {
         return Err("no pair list".into());
     }
     let t0 = std::time::Instant::now();
-    let ps = nxb_archive::plan::read_pairs(&text);
-    let p = nxb_archive::plan::plan(&lib_dir, &chain, &ps, zero);
+    let ps = crate::plan::read_pairs(&text);
+    let p = crate::plan::plan(&lib_dir, &chain, &ps, zero);
     std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
     let js = work.join("bases.mtl4-json");
-    let script = nxb_archive::plan::script_text(&lib_dir, &p.bases);
+    let script = crate::plan::script_text(&lib_dir, &p.bases);
     if std::fs::read(&js).ok().as_deref() != Some(script.as_bytes()) {
         std::fs::write(&js, &script).map_err(|e| e.to_string())?;
     }
-    let st = nxb_archive::plan::stamp(&chain, zero, &text);
+    let st = crate::plan::stamp(&chain, zero, &text);
     let l = p.left;
     println!(
         "pso_offline: {} pairs: {} bases, {} left to the device (function constants), left out as the host leaves them: reflection {}, stage inputs {}, library {}, layer {}, primitive ID {}, entry {} ({:.1} s)",
@@ -113,7 +112,7 @@ fn run() -> Result<(), String> {
         .ok_or("--os-min is required (pso_offline's default reads sw_vers / the SDK)")?;
     let mut toolchain = String::from("not used (function constants only)");
     for arch in &archs {
-        let mut c = nxb_archive::Config::for_tools(
+        let mut c = crate::Config::for_tools(
             &platform,
             arch,
             &osmin,
@@ -129,7 +128,7 @@ fn run() -> Result<(), String> {
             c.tokens = t;
         }
         toolchain = c.toolchain.clone();
-        let r = nxb_archive::build(&c)?;
+        let r = crate::build(&c)?;
         println!(
             "pso_offline: {arch}: {} MB, {} batches ({} from the store), merged {}",
             r.size >> 20,
@@ -153,7 +152,7 @@ fn run() -> Result<(), String> {
         }
     }
     write("prebuilt.tsv", &st)?;
-    match nxb_archive::plan::rest_tsv(&p.rest) {
+    match crate::plan::rest_tsv(&p.rest) {
         Some(t) => write("rest_pairs.tsv", &t)?,
         None => {
             let _ = std::fs::remove_file(out.join("rest_pairs.tsv"));
@@ -161,7 +160,7 @@ fn run() -> Result<(), String> {
     }
     write(
         "archive.tsv",
-        &nxb_archive::plan::archive_tsv(
+        &crate::plan::archive_tsv(
             &archs,
             &platform,
             &osmin,

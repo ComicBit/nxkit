@@ -30,10 +30,10 @@ flowchart LR
 | `air-emit` | LLVM text, metadata, function bodies, entry ABI and argument metadata, argument buffers, `air.*` intrinsics |
 | `air-bc` | a parser for the IR text that `air-emit` writes, and a bitcode writer in the LLVM 14 format. Other input is an error, and the caller uses the text path. |
 | `air-front` | the in-process API. `compile(msl, target)` gives bitcode and the back-half arguments. `id()` gives a version string for cache keys. |
-| `airc` | the command-line driver: `emit`, `bc`, `build`, `check`, `rank`, `deny`, `raw`, `rawcmp`, `rawcheck` |
+| `airc` | the command-line driver (the command `nxb airc`): `emit`, `bc`, `build`, `check`, `rank`, `deny`, `repack`, `time`, `raw`, `rawcmp`, `rawcheck` |
 | `mslcheck` | an accept or reject checker for engine MSL files |
 
-All crates use only the standard library and forbid `unsafe` code. `shaderbuild` reads the verdict file with `--own-front <verdict file>`.
+All crates use only the standard library and forbid `unsafe` code. `nxb shaders` reads the verdict file with `--own-front <verdict file>`.
 
 ## Results
 
@@ -54,7 +54,7 @@ resources in argument buffers.
 
 ## Verdicts
 
-`airc check --opt --ref-store DIR` writes one verdict for each input and each target convention:
+`nxb airc check --opt --ref-store DIR` writes one verdict for each input and each target convention:
 
 1. `own-identical`: the library bytes are equal to Apple's bytes. The own path is safe by proof. A GPU test is not necessary.
 2. `own-validated`: the library passes `air-validate`, but the bytes are different. By default the Apple front end compiles it.
@@ -62,7 +62,7 @@ resources in argument buffers.
    A family can go to the own path subsequently with a data change, after a clean GPU sample.
 3. `apple`: the input does not compile. The Apple front end compiles it.
 
-`airc deny --results R.jsonl` writes the deny list. `airc deny --allow` writes the allow list.
+`nxb airc deny --results R.jsonl` writes the deny list. `nxb airc deny --allow` writes the allow list.
 Mac: 8,533 permitted, 15,252 denied. iOS: 8,537 permitted, 15,248 denied.
 
 The allow list is the default. With a deny list, each shader that is not in the corpus (a new game or a new engine version)
@@ -99,7 +99,7 @@ The raw path is not byte-identical to Apple's output. It does not use `air-opt` 
 
 - `air-bc` splits the module into one module for each entry point and prunes the function constants.
 - The own optimizer in `air-bc` does `mem2reg`, removal of trivial phi nodes, block-local common subexpression removal and removal of dead code.
-- `air-front` writes the bitcode and the `MTLB` container itself. The call is `build_raw`. The commands `airc raw`, `rawcmp` and `rawcheck` use it.
+- `air-front` writes the bitcode and the `MTLB` container itself. The call is `build_raw`. The commands `nxb airc raw`, `rawcmp` and `rawcheck` use it.
 - The raw libraries are larger than Apple's libraries (1.33 times on 40 samples, measured).
 
 **Default since 0.4.0.** The raw path is on for each Mac shader that the front end accepts. Before, it was on only for shaders on a raw allow list.
@@ -137,7 +137,7 @@ and a GPU test of the side-unit cut of a raw library on its own.
 - Unit and case tests: `crates/msl-parse/tests`, `crates/air-emit/tests`.
 - GPU differential test of own libraries against Apple libraries: refer to [gpu-differential-testing.md](gpu-differential-testing.md).
 - `cargo test -p air-front -- --include-ignored` runs the tests that use Apple's tools.
-- The scripts in `tools/front` read environment variables and do not use a default path: `NXB_AIRC` (the `airc` binary),
+- The scripts in `tools/front` read environment variables and do not use a default path: `NXB_AIRC` (the `airc` program of the front end workspace),
   `NXB_PROTO` (the Python prototype), `NXB_REF` (reference folder with stored Apple libraries), `NXB_CORPUS`
   (one MSL path on each line), `NXB_SPECS` (prepared GPU test specs).
 

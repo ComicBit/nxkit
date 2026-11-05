@@ -38,7 +38,7 @@ The documents use Simplified Technical English (ASD-STE100). The terms below are
 | rewrite rules | The registered patches for code modules (cuts, observation gates, frame step stubs and others), kept as data in `data/rewrite-rules`. |
 | reuse key | A digest of all inputs of a stage. If the key does not change, the stage uses its previous output. |
 | ShaderInterface | The typed description of the bindings and the inputs and outputs of one translated shader. The Rust translator writes it as `<key>.iface.json`. |
-| shader step | The stage that translates and compiles the shaders of a game into libraries. The binary is `shaderbuild`. |
+| shader step | The stage that translates and compiles the shaders of a game into libraries. The command is `nxb shaders`. |
 | stage | One part of the build: extract, rewrite, split, shader step, pipeline archive, pack, sign. |
 | Unsupported | The result of a tool for an input that it does not cover. The exit code is 4, and the caller runs the reference step. |
 | store | The content-addressed result store (`nxb-store`). |

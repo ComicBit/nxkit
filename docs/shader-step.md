@@ -1,6 +1,6 @@
 # Shader step
 
-The shader step changes the GPU machine code of a game into Metal libraries. The binary is `shaderbuild`. The code is in
+The shader step changes the GPU machine code of a game into Metal libraries. The command is `nxb shaders`. The code is in
 `nxb-shader` (L1), the runtime crates (L2) and `nxb-stages` (L3).
 
 ## Rules
@@ -51,7 +51,7 @@ vertex shaders that wait for their pixel shaders (`vs_pad`) and the summary at t
 The step has three ways to translate one key. It tries them in this sequence for each key:
 
 1. **The Rust translator** (`nxb-xlate`, `nxb-maxwell` and `nxb-spvgen`). It runs in the process. It is on by default.
-   `--xlate-rust off` (for `shaderbuild build`) or `NXB_XLATE_RUST=0` (also for `nxb build`) turns it off.
+   `--xlate-rust off` (for `nxb shaders build`) or `NXB_XLATE_RUST=0` (also for `nxb build`) turns it off.
    A key that it cannot do returns an error that starts with `unported:`. A panic is caught. In both cases, the key goes to the next way. The step counts each reason (`rust unported`, `rust error`, `rust panic`).
 2. **The translator host.** One process loads the C# translator and does the work of many batches. It is the default when the program `dmsh_xlate_host` is next to `dmsh_xlate`.
    `--xlate-host "PROGRAM [ARGS]"` or `NXB_XLATE_HOST` selects it, and `--xlate-host off` or `NXB_XLATE_HOST=off` turns it off. The host has a watchdog of 60 s plus 10 s for each key.
@@ -107,7 +107,7 @@ Tests: derived facts, a round trip of the schema, a refusal of a different versi
 | V (chain version) | names the folder `b-<V>/` that the host loads | the files in `chain-files.txt`, the translator options, `OUTPUT_VERSION` |
 | DOMAIN_FP | cache validity of each shader | the same file set, hashed for each module |
 | TOOL_FP | the external tools that made a result | translator identity, `spirv-cross` version, `metal` identity, SDK version, deployment target, PCH convention, front-end id |
-| BIN_ID | the `shaderbuild` binary that ran | SHA-256 of the binary, rustc version, `Cargo.lock` digest, commit, flags |
+| BIN_ID | the `nxb` binary that ran | SHA-256 of the binary, rustc version, `Cargo.lock` digest, commit, flags |
 
 The rules for these identities:
 
@@ -115,7 +115,7 @@ The rules for these identities:
    the versions of their dependencies, the front-end verdict data and `OUTPUT_VERSION`.
 2. `OUTPUT_VERSION` is an integer. Increase it by hand for an output change that no hashed file shows.
 3. The runtime crates are not in V, and TOOL_FP does not contain BIN_ID. A new binary from the same sources keeps V and all cache keys.
-4. `shaderbuild self-check` compares BIN_ID with `shaderbuild.lock` at start. A mismatch is a `[RED]` build error.
+4. The design compares BIN_ID with a lock file at start, and a mismatch is a `[RED]` build error. The code does not have this check at this time. The command `nxb self-check` only finds the external tools and shows their versions.
 5. The reuse key of the build contains BIN_ID. After a runtime fix, the shader step runs one more time, with cache hits only.
 6. The first release of the own front end changes V. The Metal cache format changes from `dmsh_mtlcache 2` to `3`,
    and its identity gets the front-end id. Apple libraries and own libraries thus do not share a cache entry.
@@ -194,7 +194,7 @@ The new default has a check in the process, but no GPU test for each shader.
 - **Output.** A raw library is not byte-identical to Apple's library, and it is larger (1.33 times on 40 samples, measured). This is by design.
   A change of the optimizer does not change `air_front::id()`. Thus change the id when you ship a front-end change.
 
-Measured (subset of 160 keys, 261 shaders, cold store, load average 8 to 12, `shaderbuild build`): 363 library compiles gave 363 raw libraries, with no fallback, and Apple made 0.
+Measured (subset of 160 keys, 261 shaders, cold store, load average 8 to 12, `nxb shaders build`): 363 library compiles gave 363 raw libraries, with no fallback, and Apple made 0.
 All 699 output libraries load in Metal (1,092 functions, 0 failures). The wall time was 6.5 s with the tier and 14.4 s without it. This is not a benchmark.
 A smaller measurement (40 shaders, 44 raw libraries, loaded machine) gave a median compile CPU time of 97.5 ms against 109 ms without the tier (about 11 % less).
 Nobody measured a full cold build with the tier on all shaders. The estimate of 4 to 6 minutes less is **not measured**.

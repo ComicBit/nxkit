@@ -20,7 +20,7 @@ jobs:
         run: tools/no-game-data.sh
 
       - name: Build
-        run: cargo build --release --locked -p nxb-cli -p nxb-extract -p nxb-build -p airc
+        run: cargo build --release --locked -p nxb-cli
 
       - name: Pack, sign and write the notes
         run: tools/release-package.sh "${GITHUB_REF_NAME}"

@@ -4,7 +4,6 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Write as _;
-use std::process::ExitCode;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
@@ -77,7 +76,7 @@ fn read_results(path: &std::path::Path) -> HashMap<String, (String, String)> {
 }
 
 /// Builds the report.
-pub fn run(opts: &Opts) -> ExitCode {
+pub fn run(opts: &Opts) -> i32 {
     let n = opts.inputs.len();
     let next = AtomicUsize::new(0);
     let sets: Mutex<Vec<Option<Vec<String>>>> = Mutex::new(vec![None; n]);
@@ -241,5 +240,5 @@ pub fn run(opts: &Opts) -> ExitCode {
         let _ = writeln!(md, "| `{}` | {} | {} |", names[k], files_of[k].len(), okc);
     }
     print!("{md}");
-    ExitCode::SUCCESS
+    0
 }

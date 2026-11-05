@@ -2,6 +2,57 @@
 
 All notable changes are in this file. The format follows Keep a Changelog. Versions follow Semantic Versioning.
 
+## 0.5.0
+
+### Changed (read this first)
+
+- **At this time, there is one program: `nxb`.** The release ZIP file holds `nxb`, the folder `rewrite-rules`, `LICENSE` and `THIRD_PARTY.md` and nothing else.
+  The separate program names are gone: `nxb-extract`, `nxb-split`, `nxb-ios`, `nxb-macapp`, `nxb-ipa`, `nxb-pack`, `nxb-pso`, `nxb-archive`, `shaderbuild` and `airc`.
+  There are no links and no other names. The program does not use its own file name to select a command.
+  **This breaks a caller that runs a program by its old name.** Use the command instead. The command line after the command name is the same as before,
+  and the exit codes are the same.
+
+  | old program | new command |
+  |---|---|
+  | `nxb-extract` | `nxb extract` |
+  | `nxb-split` | `nxb split` |
+  | `nxb-ios` | `nxb ios` |
+  | `nxb-macapp` | `nxb app` |
+  | `nxb-ipa` | `nxb ipa` |
+  | `nxb-pack` | `nxb sign` |
+  | `nxb-pso` | `nxb pso` |
+  | `nxb-archive` | `nxb archive` |
+  | `shaderbuild` | `nxb shaders` |
+  | `airc` | `nxb airc` |
+
+- The usage text of `nxb shaders` and its error lines name `nxb shaders`. They do not name `shaderbuild` any more.
+- Some error lines still start with an old program name, for example `nxb-extract:`, `nxb-split:`, `nxb-archive:`, `nxb-macapp:`, `nxb-ios:` and `airc:`.
+  Only the text is old. The exit codes stay the same. A script must not read these prefixes.
+- If you downloaded the ZIP file with a browser, run `xattr -dr com.apple.quarantine <folder>` once on the unpacked folder.
+  A download with `gh release download` or `curl` has no quarantine flag.
+
+### Added
+
+- The command `nxb airc`. It is the own front end compiler (`emit`, `bc`, `check`, `build`, `rank`, `deny`, `repack`, `time`).
+  The crate `airc` has a library entry point, `airc::main`. The layer rule lets `nxb-cli` use `airc` (ADR W23).
+- The commands `nxb help` and `nxb <command> --help`. `nxb help` shows the commands in groups. `nxb version` shows the version.
+- The commands `nxb prune` (the same as `nxb cache prune`), `nxb regressions` and `nxb self-check`.
+  `nxb self-check` finds the external tools and shows their versions. It returns 1 if a required tool is missing.
+- The release script checks the ZIP file: it holds `nxb`, the rules and the two text files, it holds no link and no second program,
+  `nxb` has a valid signature, and the checksum matches.
+
+### Checked
+
+- The test `stage_commands` of `nxb-cli` runs the program on small inputs. It checks the exit codes for a missing argument or a missing file
+  of `extract`, `split`, `ios`, `archive`, `pso`, `ipa`, `app` and `sign`, the IPA writer on one text file, and `nxb airc emit` on one kernel.
+- The check script of the repository (format, clippy, tests, documentation, layer and size rules) passes.
+
+### Not checked
+
+- Exit code 4 (unsupported input) of the unified commands was not run again with the new command names. The code is the same as before, but no test covers it.
+- The new command names were not used with real game data. The earlier real-data results in this file and in the README are for the old program names.
+- The exit codes are the same as before only by design and in the small tests above. No full comparison exists.
+
 ## 0.4.0
 
 ### Changed (read this first)
