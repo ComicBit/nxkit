@@ -51,5 +51,9 @@ nxb-pack = { path = "crates/nxb-pack" }
 nxb-archive = { path = "crates/nxb-archive" }
 nxb-build = { path = "crates/nxb-build" }
 
+[profile.test]
+# the parser tests recurse deeply: optimise them as the front-end project did
+opt-level = 1
+
 [profile.release]
 debug = "line-tables-only"

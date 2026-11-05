@@ -1,6 +1,6 @@
-//! `nxb-macapp <out.app> --host <dmhost> --app binary <nxnative> --patched <dir> --romfs <img> --msl <dir> --tables <dir>
+//! `nxb-macapp <out.app> --host <dmhost> --companion-app <nxnative> --patched <dir> --romfs <img> --msl <dir> --tables <dir>
 //! --font <dir> --title-id <id> --name <name> [--version v] [--category c] [--lang l] [--marker m] [--bundle-id id]
-//! [--html <dir>] [--pso <dir>] [--pso-pairs <tsv>] [--env-file f] [--settings <launcher.json>] [--icns <AppIcon.icns>]
+//! [--html <dir>] [--pso <dir>] [--pso-pairs <tsv>] [--env-file f] [--settings <app settings json>] [--icns <AppIcon.icns>]
 //! [--fork-patches <fork_patches.txt>] [--commit c] [--msl-name n] [--previous <old.app>] [--threads N]
 //! [--dest-digests <tsv>]`
 //!
@@ -53,7 +53,7 @@ fn main() -> ExitCode {
     let (
         Some(out),
         Some(host),
-        Some(app_binary),
+        Some(companion),
         Some(patched),
         Some(romfs),
         Some(msl),
@@ -64,7 +64,7 @@ fn main() -> ExitCode {
     ) = (
         out,
         p("host"),
-        p("app binary"),
+        p("companion-app"),
         p("patched"),
         p("romfs"),
         p("msl"),
@@ -79,7 +79,7 @@ fn main() -> ExitCode {
     };
     let inputs = nxb_pack::macapp::MacAppInputs {
         host,
-        app_binary,
+        companion,
         patched,
         romfs,
         msl,

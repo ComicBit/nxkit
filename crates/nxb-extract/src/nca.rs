@@ -62,7 +62,9 @@ pub fn read_pfs0(s: &dyn Storage) -> Result<Vec<PfsEntry>> {
         let rest = &st[name_off..];
         let end = rest.iter().position(|&b| b == 0).unwrap_or(rest.len());
         let name = String::from_utf8_lossy(&rest[..end]).into_owned();
-        let offset = header_size + u64le(&hdr, e);
+        let Some(offset) = header_size.checked_add(u64le(&hdr, e)) else {
+            return Err(ExtractError::format("PFS0 entry offset overflows"));
+        };
         let size = u64le(&hdr, e + 8);
         if offset.checked_add(size).is_none_or(|x| x > s.size()) {
             return Err(ExtractError::format(format!(

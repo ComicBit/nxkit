@@ -27,7 +27,7 @@ use nxb_sched::{Budget, Executor, Task};
 use nxb_store::Store;
 use nxb_tool::{EnvPolicy, Invocation, ProcessRegistry, run_process};
 
-use crate::cut::{Base, cut};
+use crate::cut::{Base, cut_for_slots};
 use crate::script::Script;
 
 /// What to build.
@@ -338,7 +338,9 @@ pub fn build(c: &Config) -> Result<Report, String> {
     drop(text);
     let libs: Vec<(String, String)> = script.library_paths()?.into_iter().collect();
     let digests = hash_libraries(&libs, 8)?;
-    let batches = cut(script.bases(&digests)?, c.target);
+    // about four batches per run slot (cut_for_slots), the largest first (task priority = size)
+    let slots = (c.tokens / c.cost.max(1)).max(1) as usize;
+    let batches = cut_for_slots(script.bases(&digests)?, slots, c.target);
     let keys: Vec<ContentKey> = batches.iter().map(|b| batch_key(c, b)).collect();
     fs::create_dir_all(&c.work).map_err(|e| format!("{}: {e}", c.work.display()))?;
     let store = Arc::new(Store::open(&c.store).map_err(|e| e.to_string())?);

@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 pub use msl_parse::ty::{Scalar, Space};
 
-/// Index of a struct in [`crate::hir::Module::structs`].
+/// Index of a struct in `crate::hir::Module::structs`.
 pub type StructId = usize;
 
 /// The dimension and kind of a texture.

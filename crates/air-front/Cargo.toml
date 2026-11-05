@@ -19,3 +19,12 @@ air-lib = { path = "../air-lib" }
 
 [lints.rust]
 unsafe_code = "forbid"
+
+[lints.clippy]
+style = { level = "allow", priority = -1 }
+complexity = { level = "allow", priority = -1 }
+perf = { level = "allow", priority = -1 }
+
+[lints.rustdoc]
+broken_intra_doc_links = "allow"
+private_intra_doc_links = "allow"

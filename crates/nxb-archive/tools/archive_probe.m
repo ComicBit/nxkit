@@ -31,6 +31,7 @@ int main(int argc, char **argv) { @autoreleasepool {
     }
     NSArray *pipes = s[@"pipeline_descriptors"][@"render_pipeline_descriptors"];
     long found = 0, n = 0;
+    NSMutableArray<NSNumber *> *ms = [NSMutableArray array];
     for (NSDictionary *p in pipes) { @autoreleasepool {
         n++;
         MTL4RenderPipelineDescriptor *m = [MTL4RenderPipelineDescriptor new];
@@ -40,8 +41,17 @@ int main(int argc, char **argv) { @autoreleasepool {
             a.pixelFormat = MTLPixelFormatUnspecialized; a.writeMask = MTLColorWriteMaskUnspecialized; a.blendingState = MTL4BlendStateUnspecialized;
             a.sourceRGBBlendFactor = a.destinationRGBBlendFactor = a.sourceAlphaBlendFactor = a.destinationAlphaBlendFactor = MTLBlendFactorUnspecialized;
             a.rgbBlendOperation = a.alphaBlendOperation = MTLBlendOperationUnspecialized; }
+        uint64_t t0 = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
         for (id<MTL4Archive> a in archives) if ([a newRenderPipelineStateWithDescriptor:m error:nil]) { found++; break; }
+        [ms addObject:@((clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - t0) / 1e6)];
     } }
     printf("found %ld of %ld\n", found, n);
+    if (getenv("PROBE_TIMES") && ms.count) {   // first-lookup latency per base
+        NSArray *sorted = [ms sortedArrayUsingSelector:@selector(compare:)];
+        double sum = 0; long slow = 0; for (NSNumber *x in ms) { sum += x.doubleValue; if (x.doubleValue > 5) slow++; }
+        printf("lookup ms: mean %.3f median %.3f p95 %.3f p99 %.3f max %.1f, %ld over 5 ms, total %.1f s\n", sum / ms.count,
+               [sorted[sorted.count / 2] doubleValue], [sorted[sorted.count * 95 / 100] doubleValue], [sorted[sorted.count * 99 / 100] doubleValue],
+               [sorted.lastObject doubleValue], slow, sum / 1000);
+    }
     return found == n ? 0 : 1;
 } }
