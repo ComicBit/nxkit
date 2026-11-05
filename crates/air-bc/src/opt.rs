@@ -530,21 +530,21 @@ fn cse(f: &mut Function) {
         let mut drop: HashSet<usize> = HashSet::new();
         for (k, i) in insts.iter().enumerate() {
             let Some(r) = &i.res else { continue };
-            let pure = match &i.op {
+            let pure = matches!(
+                &i.op,
                 Op::Gep(..)
-                | Op::Cast(..)
-                | Op::Bin(..)
-                | Op::Cmp(..)
-                | Op::Select(..)
-                | Op::ExtractElt(..)
-                | Op::InsertElt(..)
-                | Op::Shuffle(..)
-                | Op::ExtractVal(..)
-                | Op::InsertVal(..)
-                | Op::FNeg(..) => true,
-                Op::Load(_, (Ty::Ptr(_, 2), _), _) => true,
-                _ => false,
-            };
+                    | Op::Cast(..)
+                    | Op::Bin(..)
+                    | Op::Cmp(..)
+                    | Op::Select(..)
+                    | Op::ExtractElt(..)
+                    | Op::InsertElt(..)
+                    | Op::Shuffle(..)
+                    | Op::ExtractVal(..)
+                    | Op::InsertVal(..)
+                    | Op::FNeg(..)
+                    | Op::Load(_, (Ty::Ptr(_, 2), _), _)
+            );
             if !pure {
                 continue;
             }

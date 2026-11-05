@@ -89,7 +89,7 @@ fn archive_config(b: &Build, lib: &Path, arch: &str) -> Result<nxb_archive::Conf
     let mut c = nxb_archive::Config::for_tools(
         "macos",
         arch,
-        &crate::graph::osmin()?,
+        &osmin()?,
         &work.join("bases.mtl4-json"),
         &abs(&out.join(format!("{arch}.mtl4a")))?,
         &abs(&work)?,
@@ -97,6 +97,17 @@ fn archive_config(b: &Build, lib: &Path, arch: &str) -> Result<nxb_archive::Conf
     c.store = abs(&c.store)?;
     let _ = lib;
     Ok(c)
+}
+
+/// Pairs per streamed group (about).
+const GROUP_TARGET: usize = 400;
+
+/// The streamed archive's workers once the shader step ended: one compiler run per slot, as many as the memory budget
+/// holds for a group of twice the average size (a group is at most 4x, PROGRESS X8: about 1.9 GiB per 1,000 bases).
+fn wide_workers(c: &nxb_archive::Config) -> usize {
+    let slots = (c.tokens / c.cost.max(1)).max(1) as u64;
+    let per = c.mem_per_batch * (2 * GROUP_TARGET as u64) / 1000 + (512 << 20);
+    slots.min(c.mem_budget / per.max(1)).max(3) as usize
 }
 
 /// What the combined step did.
@@ -120,13 +131,18 @@ pub fn shaders_and_archive(a: &Args, b: &Build, p: &Arc<Progress>) -> Result<Out
         b.work.join("shader/pso_pairs.tsv"),
     ];
     let text = nxb_archive::plan::pair_text(&pair_files);
+    let acfg = match &arch {
+        Some(arch) => Some(archive_config(b, &lib, arch)?),
+        None => None,
+    };
     let sinp = nxb_archive::stream::StreamInputs {
         lib_dir: std::path::absolute(&lib).map_err(|e| e.to_string())?,
         chain: cfg.chain.clone(),
         pairs: nxb_archive::plan::read_pairs(&text),
         zero,
-        group_target: 400,
+        group_target: GROUP_TARGET,
         workers: 3,
+        workers_after: acfg.as_ref().map_or(3, wide_workers),
     };
     let stream = arch
         .as_ref()
@@ -166,9 +182,8 @@ pub fn shaders_and_archive(a: &Args, b: &Build, p: &Arc<Progress>) -> Result<Out
     });
     let (shaders, archive) = std::thread::scope(
         |scope| -> Result<(String, Option<String>), String> {
-            let job = match (&stream, &arch) {
-                (Some(s), Some(arch)) => {
-                    let c = archive_config(b, &lib, arch)?;
+            let job = match (&stream, acfg) {
+                (Some(s), Some(c)) => {
                     let (s, sinp) = (s.clone(), sinp.clone());
                     Some(scope.spawn(move || s.run(&c, &sinp).map(|r| (r, c))))
                 }
@@ -198,7 +213,7 @@ pub fn shaders_and_archive(a: &Args, b: &Build, p: &Arc<Progress>) -> Result<Out
                     });
                     let ((rep, bases), c) = j.join().map_err(|_| "archive thread panicked")??;
                     let arch = arch.clone().unwrap_or_default();
-                    crate::graph::write_archive_stamps(b, &lib, &c, &arch, &text, zero, bases)?;
+                    write_archive_stamps(b, &lib, &c, &arch, &text, zero, bases)?;
                     Some(format!(
                         "{bases} bases, {} MB, {} batches ({} reused), streamed beside the shader step",
                         rep.size >> 20,
@@ -216,4 +231,116 @@ pub fn shaders_and_archive(a: &Args, b: &Build, p: &Arc<Progress>) -> Result<Out
         archive,
         lib,
     })
+}
+
+/// The minimum OS of the Mac archive: this Mac's major version (`sw_vers`), as `pso_offline.py`.
+pub(crate) fn osmin() -> Result<String, String> {
+    std::process::Command::new("/usr/bin/sw_vers")
+        .arg("-productVersion")
+        .output()
+        .map(|o| {
+            String::from_utf8_lossy(&o.stdout)
+                .trim()
+                .split('.')
+                .next()
+                .unwrap_or("27")
+                .to_string()
+                + ".0"
+        })
+        .map_err(|e| e.to_string())
+}
+
+/// `prebuilt.tsv`, `archive.tsv` and the script `bases.mtl4-json` of a streamed archive, from the whole plan as
+/// `pso_offline.py` (and the non-streamed [`stage_pso`]) writes them; the streamed groups must have compiled exactly the
+/// plan's bases.
+pub(crate) fn write_archive_stamps(
+    b: &Build,
+    lib: &Path,
+    c: &nxb_archive::Config,
+    arch: &str,
+    text: &[u8],
+    zero: bool,
+    bases: usize,
+) -> Result<(), String> {
+    use nxb_archive::plan;
+    let chain = lib
+        .file_name()
+        .and_then(|n| n.to_str())
+        .and_then(|n| n.strip_prefix("b-"))
+        .ok_or("library folder is not b-<chain>")?;
+    let p = plan::plan(lib, chain, &plan::read_pairs(text), zero);
+    if p.bases.len() != bases {
+        return Err(format!(
+            "streamed archive: {bases} bases compiled, the plan has {}",
+            p.bases.len()
+        ));
+    }
+    let out = b.work.join("pso/mac");
+    let js = b.work.join("pso/mac-work/bases.mtl4-json");
+    std::fs::write(&js, plan::script_text(lib, &p.bases)).map_err(|e| e.to_string())?;
+    std::fs::write(out.join("prebuilt.tsv"), plan::stamp(chain, zero, text))
+        .map_err(|e| e.to_string())?;
+    let tsv = plan::archive_tsv(
+        &[arch.to_string()],
+        "macos",
+        &c.osmin,
+        &c.toolchain,
+        bases,
+        p.rest.len(),
+    );
+    std::fs::write(out.join("archive.tsv"), tsv).map_err(|e| e.to_string())
+}
+
+/// One architecture's pipeline archive: the plan of `pso_offline.py` (profile pairs, then the split's pso_pairs.tsv)
+/// and `nxb_archive::build` (content-cut batches in the store). Output in `<work>/pso/mac`, as the NSP script's.
+pub(crate) fn stage_pso(b: &Build, arch: &str) -> Result<String, String> {
+    use nxb_archive::plan;
+    let pairs = [
+        b.profile.0.join("shader_pairs.tsv"),
+        b.work.join("shader/pso_pairs.tsv"),
+    ];
+    let text = plan::pair_text(&pairs);
+    let chain = b
+        .shaders
+        .file_name()
+        .and_then(|n| n.to_str())
+        .and_then(|n| n.strip_prefix("b-"))
+        .ok_or("library folder is not b-<chain>")?;
+    let zero = b.profile.1.get("depth_mode").map(String::as_str) == Some("zero");
+    let p = plan::plan(&b.shaders, chain, &plan::read_pairs(&text), zero);
+    let (out, work) = (b.work.join("pso/mac"), b.work.join("pso/mac-work"));
+    std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
+    let js = work.join("bases.mtl4-json");
+    std::fs::write(&js, plan::script_text(&b.shaders, &p.bases)).map_err(|e| e.to_string())?;
+    let osmin = osmin()?;
+    let c = nxb_archive::Config::for_tools(
+        "macos",
+        arch,
+        &osmin,
+        &js,
+        &out.join(format!("{arch}.mtl4a")),
+        &work,
+    )?;
+    let r = nxb_archive::build(&c)?;
+    std::fs::write(out.join("prebuilt.tsv"), plan::stamp(chain, zero, &text))
+        .map_err(|e| e.to_string())?;
+    std::fs::write(
+        out.join("archive.tsv"),
+        plan::archive_tsv(
+            &[arch.to_string()],
+            "macos",
+            &osmin,
+            &c.toolchain,
+            p.bases.len(),
+            p.rest.len(),
+        ),
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(format!(
+        "{} bases, {} MB, {} batches",
+        p.bases.len(),
+        r.size >> 20,
+        r.batches.len()
+    ))
 }

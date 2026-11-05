@@ -302,7 +302,12 @@ fn shader_task(s: &Arc<Shared>, key: String) {
         .field_str("compiler", &s.compiler_id)
         .field("msl", msl.as_bytes());
     if let Some(o) = &s.own {
-        kb = kb.field_str("frontend", o.tag());
+        // a side shader compiles its unit source first and the plain MSL as fallback: both decide the tier
+        let mut srcs = vec![msl.as_bytes()];
+        if let Some(u) = &unit {
+            srcs.insert(0, u.source.as_bytes());
+        }
+        kb = kb.field_str("frontend", &o.key_field_of(&srcs));
     }
     if let Some(u) = &unit {
         kb = kb.field_str("side", &u.side().join(","));

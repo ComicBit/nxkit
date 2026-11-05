@@ -111,6 +111,28 @@ maximum of 2 x log2(batch) runs for each bad key. For the other tools, a crash o
 - **Locks.** An exclusive `flock` on `b-<V>/.shaderbuild.lock` for each build. A shared lock on the store root for builds, and an exclusive lock for prune and migration.
 - **Target keys.** Each key contains the SDK, the deployment target, the compiler target version, the compile convention and the front-end id.
 
+## Raw container tier
+
+The raw tier (`own-raw`) is the first tier of the own front end in `build` and `recompile`. It is for the Mac target only.
+For a shader on its allow list, the step calls `air_front::build_raw` in the same process. This call does the front end,
+the split of the entries, the optimizer, the bitcode writer and the library writer. It uses no Apple tool and starts no process.
+
+- **Allow list.** A shader takes the raw path only when the SHA-256 of its MSL is in `raw-verified.txt` for the id of the front end.
+  Each entry passed the GPU differential test: 12 test vectors gave the same output words as Apple's library.
+  The list has 3,365 entries. The list is not in this repository. Without a list, the tier is off.
+- **Fallback.** If the raw path rejects a shader or fails, the shader goes to the next tier. The next tiers are the own `own-identical`
+  path and then Apple's `metal -c` with `metallib`. A shader that is not on the list keeps its path and its cache key.
+- **Cache key.** A raw shader has the key field `own-raw@` and the front-end id. A raw library is thus never given to a run with the tier off.
+- **Switches.** `NXB_OWN_RAW=0` turns only the raw tier off. `NXB_OWN_RAW=<file>` selects a different list.
+  `NXB_OWN_FRONT=0` or `--own-front off` turns all own tiers off. The tier needs the own front end to be on.
+- **Output.** A raw library is not byte-identical to Apple's library. This is by design. The GPU test is the evidence.
+  A change of the optimizer does not change `air_front::id()`. Thus make the list again and change the id before you ship a front-end change.
+
+Measured on a small sample (40 shaders, 20 on the list and 20 not, 105 libraries, loaded machine): 44 raw libraries, no fallback,
+and the 61 other libraries byte-identical to the reference. With `NXB_OWN_RAW=0`, all 105 libraries were byte-identical to the reference.
+The median compile CPU time of the 44 raw shaders was 97.5 ms with the tier and 109 ms without it (about 11 % less).
+This sample is small. Nobody measured a full build with the tier. The estimate of 4 to 6 minutes less on a cold build is not measured.
+
 ## Errors
 
 | class | scope | examples | effect |

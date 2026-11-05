@@ -128,7 +128,7 @@ fn one(s: &Arc<Shared>, key: &str, kind: Kind, msl: &str, refl: &Value, t: Insta
         .field_str("compiler", &s.compiler_id)
         .field("msl", src.as_bytes());
     if let Some(o) = &s.own {
-        kb = kb.field_str("frontend", o.tag());
+        kb = kb.field_str("frontend", o.key_field(src.as_bytes()));
     }
     let ckey = kb.finish();
     let field_text = dumps(&field);
