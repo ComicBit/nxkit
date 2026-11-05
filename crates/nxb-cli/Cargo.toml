@@ -25,6 +25,7 @@ nxb-error.workspace = true
 nxb-obs.workspace = true
 nxb-stages.workspace = true
 nxb-build.workspace = true
+nxb-extract.workspace = true
 nxb-tool.workspace = true
 nxb-store.workspace = true
 

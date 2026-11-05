@@ -10,7 +10,7 @@ One part is different: the own shader front end. It is on only for shaders on an
 
 ## Status
 
-Version 0.1.0 is the first public release. It is early software. Read this section before you use it.
+Version 0.1.1 is the second public release. It is early software. Read this section before you use it.
 
 - Mac only. The tools run on macOS on Apple silicon. Other systems are not supported.
 - The tools need Apple tools (`metal`, `metallib`, `air-opt`, `metal-tt`, `codesign`, `xcrun`) from your own Xcode.
@@ -29,6 +29,7 @@ more titles.
 | stage | compared on | result |
 |---|---|---|
 | Extract and split | reference title, base and update | both `RomFS.img`, ExeFS, 12 package files and all tables are byte-identical |
+| Extract, `.nup` | one real Switch 2 package (standalone update) and synthetic containers | the RomFS image digest and the ExeFS and icon files are identical to the reference script. Not checked on real data: base game with update and DLC, and the control data |
 | Extract | two more titles (one with an update, `--updates-only`) | `RomFS.img`, ExeFS, control data and icon are byte-identical |
 | Shader step, Mac | one full run | 74,421 of 74,422 files are byte-identical. The listing `_b_cas.txt` differs by design |
 | Shader step, iOS | 787 sample shaders | 2,889 of 2,889 iOS files are byte-identical |
@@ -88,7 +89,7 @@ Every binary prints its usage when you run it without arguments.
 | binary | purpose |
 |---|---|
 | `nxb` | the whole build. `nxb build --platform mac-app` runs all ported stages. `--dry-run` prints the stage graph and the cache keys |
-| `nxb-extract` | NSP package to RomFS images, ExeFS, control data and icon |
+| `nxb-extract` | NSP package or Switch 2 package (`.nup`, no keys needed) to RomFS images, ExeFS, control data and icon |
 | `nxb-split` | shader split of extracted images into package records and tables |
 | `shaderbuild` | the shader step: `build`, `recompile`, `guards`, `help`, `version` |
 | `nxb-pso` | plan and merge of the pipeline archive. Needs `metal-tt` and `metal-pack` |
