@@ -77,6 +77,8 @@ pub fn run(bin: Binary, args: &[String], out: &mut dyn Write, err: &mut dyn Writ
         "build" if bin == Binary::Shaderbuild => return build::main(&args[1..], out, err),
         // the whole build (ADR W19: nxb-build is the orchestrator crate)
         "build" if bin == Binary::Nxb => return nxb_build::main(&args[1..]),
+        // the extract stage: NSP and NUP packages (ADR W19)
+        "extract" if bin == Binary::Nxb => return nxb_extract::cli::main(&args[1..]),
         c if bin.commands().contains(&c) => {
             writeln!(err, "{}: {c}: not implemented yet", bin.name()).map(|_| 2)
         }
