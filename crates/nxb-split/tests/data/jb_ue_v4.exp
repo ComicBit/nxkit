@@ -1,0 +1,15 @@
+J	pak/pakchunk0-Switch.pak
+K	/pak/pakchunk0-Switch.pak#Game/A.uexp#UE18	vs	63484ea440594a21	49abf9a444e58d4f
+K	/pak/pakchunk0-Switch.pak#Game/A.uexp#UE90b	ps	875fc4d3489c6006	a7e6029145f0a20b
+K	/pak/pakchunk0-Switch.pak#Game/A.uexp#UE12bf	cs	e6c336a2548e7ba4	99f1c9f538d27e4c
+J	pak/pakchunk0-Switch.pak
+K	/pak/pakchunk0-Switch.pak#Game/C.uexp#UE4	ps	6381c834805430bc	911778a12990c1f4
+J	pak/pakchunk0-Switch.pak
+K	/pak/pakchunk0-Switch.pak#Game/G/GlobalShaderCache-GLSL_SWITCH.bin#UE948	ps	f341fd9bcedd1935	aa4007d631372e67
+K	/pak/pakchunk0-Switch.pak#Game/G/GlobalShaderCache-GLSL_SWITCH.bin#UE4	ps	6381c834805430bc	911778a12990c1f4
+J	pak/pakchunk0-Switch_0_P.pak
+K	/pak/pakchunk0-Switch_0_P.pak#Game/B.uexp#UE95c	vs	63484ea440594a21	49abf9a444e58d4f
+K	/pak/pakchunk0-Switch_0_P.pak#Game/B.uexp#UE4	ps	6381c834805430bc	911778a12990c1f4
+K	/pak/pakchunk0-Switch_0_P.pak#Game/B.uexp#UE124f	ps	875fc4d3489c6006	a7e6029145f0a20b
+K	/pak/pakchunk0-Switch_0_P.pak#Game/B.uexp#UE1c03	cs	e6c336a2548e7ba4	99f1c9f538d27e4c
+T	pak/pakchunk0-Switch.pak,pak/pakchunk0-Switch_0_P.pak

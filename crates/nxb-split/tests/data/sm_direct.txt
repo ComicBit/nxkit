@@ -1,0 +1,13 @@
+retro_main	rf_main
+retro_main	rf_main_none
+sdf	sdf_ok
+sdf	sdf_empty
+sdf	sdf_ver
+sdf	sdf_slot
+sdf	sdf_trunc
+raw	raw_rela
+raw	raw_relr
+raw	raw_adrp
+raw	raw_adrp_both
+raw	raw_none
+raw	raw_skip

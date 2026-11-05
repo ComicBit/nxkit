@@ -193,9 +193,48 @@ impl RawAllowList {
     }
 }
 
+/// The in-process check of a raw library: it parses as a `metallib`, writes back to the same bytes (the hash, size
+/// and offset tags are the writer's own), holds a function, and every function has a name and a bitcode blob with
+/// a valid wrapper header (`0x0B17C0DE`, offset and size inside the blob, `BC 0xC0DE` at the offset).
+pub fn validate_library(lib: &[u8]) -> Result<(), String> {
+    use air_front::air_lib;
+    let parsed = air_lib::parse(lib)?;
+    if parsed.functions.is_empty() {
+        return Err("no function".into());
+    }
+    if air_lib::write(&parsed) != lib {
+        return Err("the library does not write back to its own bytes".into());
+    }
+    for f in &parsed.functions {
+        let name = String::from_utf8_lossy(f.name()).into_owned();
+        if f.name().is_empty() {
+            return Err("a function has no name".into());
+        }
+        let bc = &f.bitcode;
+        let word = |o: usize| {
+            bc.get(o..o + 4)
+                .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as usize)
+        };
+        if word(0) != Some(0x0B17_C0DE) {
+            return Err(format!("{name}: no bitcode wrapper"));
+        }
+        let (Some(off), Some(size)) = (word(8), word(12)) else {
+            return Err(format!("{name}: short bitcode wrapper"));
+        };
+        if size == 0 || off < 20 || off.checked_add(size).is_none_or(|e| e > bc.len()) {
+            return Err(format!("{name}: bitcode wrapper outside the blob"));
+        }
+        if bc.get(off..off + 4) != Some(&[b'B', b'C', 0xC0, 0xDE]) {
+            return Err(format!("{name}: no bitcode magic"));
+        }
+    }
+    Ok(())
+}
+
 /// The raw container path: `air_front::build_raw` in process (front end, per-entry split, mem2reg, DCE, own bitcode
-/// and MTLB writer). No Apple tool and no process runs. The library is not byte-identical to Apple's: it ships only
-/// for shaders in a [`RawAllowList`], every other shader goes to the next tier.
+/// and MTLB writer), then [`validate_library`]. No Apple tool and no process runs. The library is not byte-identical to
+/// Apple's. A reject, an internal error, a panic or a failed validation is a [`FrontEndError::Reject`]: the caller
+/// uses the next tier. A [`RawAllowList`] can narrow the shaders the caller sends here.
 #[derive(Debug)]
 pub struct RawFrontEnd {
     target: air_front::Target,
@@ -231,6 +270,8 @@ impl FrontEnd for RawFrontEnd {
             Ok(Err(Err(e))) => return Err(FrontEndError::Reject(format!("raw: {e}"))),
             Err(_) => return Err(FrontEndError::Reject("raw: front end panicked".into())),
         };
+        validate_library(&lib)
+            .map_err(|e| FrontEndError::Reject(format!("raw: invalid library: {e}")))?;
         let wall = t.elapsed();
         Ok(FrontEndOutput {
             metallib: lib,
@@ -267,6 +308,12 @@ mod tests {
         let msl = b"#include <metal_stdlib>\nusing namespace metal;\nkernel void k(device float* o [[buffer(0)]], uint i [[thread_position_in_grid]]) { o[i] = 1.0; }\n";
         let out = fe.compile(msl).expect("raw library");
         assert_eq!(&out.metallib[..4], b"MTLB");
+        validate_library(&out.metallib).expect("valid");
+        let mut broken = out.metallib.clone();
+        let n = broken.len();
+        broken[n - 40] ^= 0x55;
+        assert!(validate_library(&broken[..n - 9]).is_err());
+        assert!(validate_library(b"MTLB").is_err());
         assert_eq!(out.frontend, fe.id());
         assert!(matches!(
             fe.compile(b"this is not metal {"),

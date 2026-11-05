@@ -1,0 +1,13 @@
+J	re_chunk_000.pak
+K	/re_chunk_000.pak#0000000000001111#SDF#var0	vs	c65d3c883070e744	d1da3eca732ba0c6
+K	/re_chunk_000.pak#0000000000001111#SDF#var0	ps	c982fc953be4f4e5	72e9a04b1f38ed8d
+P	0dceefc50b541083	90cc3dcbdfac8b06	false
+J	re_chunk_000.pak
+K	/re_chunk_000.pak#0000000000005555#SDF#var0	vs	8ad90a87eecac9ff	09876394b9bcdb46
+K	/re_chunk_000.pak#0000000000005555#SDF#var1	ps	1771a8374c9578ca	5ca9b2f8d75347b2
+J	re_chunk_000.pak.patch_001.pak
+K	/re_chunk_000.pak.patch_001.pak#0000000000003333#SDF#var0	vs	8ad90a87eecac9ff	09876394b9bcdb46
+K	/re_chunk_000.pak.patch_001.pak#0000000000003333#SDF#var1	ps	1771a8374c9578ca	5ca9b2f8d75347b2
+J	re_chunk_000.pak.patch_001.pak
+K	/re_chunk_000.pak.patch_001.pak#0000000000006666#SDF#var0	cs	8ad2cb6a3df0afc0	64719e9d45f26a89
+T	re_chunk_000.pak,re_chunk_000.pak.patch_001.pak

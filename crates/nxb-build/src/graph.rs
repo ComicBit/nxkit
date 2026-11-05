@@ -252,7 +252,7 @@ pub fn plan(a: &Args) -> Result<Build, String> {
         ),
         reused: None,
     });
-    Ok(Build {
+    let mut b = Build {
         title,
         base: base.2.clone(),
         updates,
@@ -265,7 +265,22 @@ pub fn plan(a: &Args) -> Result<Build, String> {
         gpus,
         engine,
         nodes,
-    })
+    };
+    if a.platform == "ios" {
+        // the IPA is named by the profile, beside the build folder, as the script names it
+        if a.out.is_none() {
+            let ipa = b
+                .profile
+                .1
+                .get("ipa")
+                .cloned()
+                .unwrap_or_else(|| format!("{name}.ipa"));
+            b.out = b.work.parent().unwrap_or(&a.nsp_dir).join(ipa);
+        }
+        b.gpus = Vec::new();
+        b.nodes = crate::iosbuild::nodes(a, &b);
+    }
+    Ok(b)
 }
 
 /// The plan as text (`--dry-run`).
@@ -299,13 +314,13 @@ pub fn describe(b: &Build) -> String {
     }
     let _ = writeln!(
         s,
-        "not ported, from the work folder: rewrite (patched_{}), button-icon font (font/)",
+        "rewrite: Rust when the work folder has no patched_{} and the engine matches, else taken from the work folder",
         b.package
     );
     s
 }
 
-fn stage_extract(a: &Args, b: &Build, p: &Progress) -> Result<String, String> {
+pub(crate) fn stage_extract(a: &Args, b: &Build, p: &Progress) -> Result<String, String> {
     let keys = a.keys.clone().ok_or("-k/--keys is required to extract")?;
     let out = |v: &str| b.work.join("extract").join(v);
     let pkg = b.work.join("shader/pkg");
@@ -326,6 +341,8 @@ fn stage_extract(a: &Args, b: &Build, p: &Progress) -> Result<String, String> {
         base_outputs: true,
         app: None,
         discard_images: false,
+        allow_damaged: false,
+        manifest: false,
         split: Some((
             b.profile.0.join("game.tsv"),
             nxb_extract::split::SplitOutputs {
@@ -339,7 +356,12 @@ fn stage_extract(a: &Args, b: &Build, p: &Progress) -> Result<String, String> {
     };
     p.say("extract and shader split in one pass (nxb-extract)");
     let s = nxb_extract::extract(&req).map_err(|e| e.to_string())?;
-    Ok(format!("{} images", s.images.len()))
+    let note = crate::rewrite::ensure(&b.engine, &b.profile.0, &b.work, &b.package)?;
+    Ok(format!(
+        "{} images{}",
+        s.images.len(),
+        note.map(|n| format!(", {n}")).unwrap_or_default()
+    ))
 }
 
 /// The app stage: stage and sign (an in-place update of `previous`, the app as it was when the build started) with the
@@ -398,7 +420,7 @@ fn stage_app(
         programs: Vec::new(),
     };
     let plan = nxb_pack::macapp::plan(&inputs).map_err(|e| e.to_string())?;
-    match previous {
+    let done = match previous {
         Some(prev) => {
             // the companion app comes from the previous app: keep a copy, the update rewrites it in place
             let keep = w.join("tmp/nxnative");
@@ -425,7 +447,12 @@ fn stage_app(
                 .map(|r| format!("{} files staged and signed", r.files))
                 .map_err(|e| e.to_string())
         }
-    }
+    }?;
+    // a partial library folder travels into the app as `msl/<b-V>/_b_partial.json`, the summary says so too
+    Ok(match nxb_sched::Partial::read(&b.shaders) {
+        Some(st) => format!("{done}; {}", st.note()),
+        None => done,
+    })
 }
 
 /// Runs the build. Stages overlap where the graph allows ([`crate::order`]): the Mac host from the start, the app's
@@ -438,6 +465,9 @@ pub fn run(a: &Args, p: &std::sync::Arc<Progress>) -> Result<(), String> {
     if a.dry_run {
         print!("{}", describe(&b));
         return Ok(());
+    }
+    if a.platform == "ios" {
+        return crate::iosbuild::run(a, &b, p);
     }
     p.plan(b.nodes.len());
     let b = &b;

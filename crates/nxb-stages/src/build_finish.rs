@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::sync::PoisonError;
 use std::time::Instant;
 
-pub(crate) use crate::build_shared::{Shared, Xlate};
+pub(crate) use crate::build_shared::Shared;
 
 /// A paired vertex shader's wait: its translation plus each pixel partner.
 pub(crate) struct Gate {

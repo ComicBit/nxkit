@@ -2,6 +2,90 @@
 
 All notable changes are in this file. The format follows Keep a Changelog. Versions follow Semantic Versioning.
 
+## 0.4.0
+
+### Changed (read this first)
+
+- **The raw container tier is now on for each Mac shader that the own front end accepts.** In 0.3.0 it was on only for shaders on an allow list.
+  The tier makes the library itself and does not start an Apple tool. If the front end rejects a shader, the shader goes to Apple's compiler.
+  The shader also goes to Apple's compiler when the library does not pass a check in the process.
+  **The raw libraries are not byte-identical to Apple's libraries.** A GPU test was done for a part of the corpus only.
+  It covered 3,625 of 23,752 candidates (about 15 %). In that test, 3,375 shaders gave the same output as Apple's library and 220 gave a different output.
+  Nobody ran a GPU test for the other shaders, thus the rate of different output for them is not known.
+  A smoke test of the GPU harness on 8 shaders gave 7 equal and 1 different (the largest error was 166 ulp). This is not a sample and gives no rate.
+  To turn the tier off, set `NXB_OWN_RAW=0`. To turn off all own tiers, set `NXB_OWN_FRONT=0` or use `--own-front off`.
+  `NXB_OWN_RAW=list` gives the old behavior (only the shaders of a raw allow list, which is not in this repository, thus the tier stays off unless you give a list).
+  The cache key of a raw library has the field `own-raw@<front-end id>` for each shader. Entries from the 0.3.0 list mode are not reused.
+- The exit code for an unsupported input is now 4 for `nxb extract`, `nxb-extract`, `nxb-split`, `nxb rewrite`, `nxb nro`, `nxb-ios` and `nxb build`. Exit code 3 means damaged data.
+  The 0.3.0 text said that `nxb-ios` returned 3. The signer binary `nxb-pack` still returns 3 for an unsupported input.
+- The translator host is the default when its binary is next to the translator (`--xlate-host off` turns it off).
+  The Rust translator is on by default (`--xlate-rust off` or `NXB_XLATE_RUST=0` turns it off).
+- Events have two new fields, `code` and `severity`. The old fields do not change, and `t` stays last.
+
+### Added
+
+- The code rewrite step in Rust (`nxb rewrite`, crates `nxb-a64` and `nxb-rewrite`). It has the command line of `patch_nso.py`. The extract stage of `nxb build` uses it.
+  It reads NSO and NRO modules, including modules with ZBIC compression. The decoder `nxb-a64` follows Capstone 5 for the fields that the rewriter uses.
+- The rewrite rules are data in `data/rewrite-rules` (117 rule files, `snapshot.tsv` and the licence notice of the engine that they come from).
+  The release ZIP file has the folder `rewrite-rules` next to the binaries. `nxb rewrite` finds it there. `nxb rewrite-rules` makes the files from a snapshot.
+- NRO collection in Rust (`nxb nro`, crate `nxb-nro`). It has the command line of `nro_collect.py`.
+- Translator host as the default (`xlatehost` in `nxb-stages`). One host process does the work of all batches. The counters for starts, restarts and fallbacks are in the run report.
+- Rust translator (crates `nxb-xlate`, `nxb-maxwell`, `nxb-spvgen`). It translates in the process, for Maxwell and for Ampere machine code (Switch 2).
+  A key that it cannot do goes to the C# translator, and the reason is counted. The translator also writes `<key>.iface.json` (the `ShaderInterface`) next to `<key>.res.json`.
+- `nxb-extract` and `nxb-split`: zstd dictionaries, many more readers (Unity bundles and serialized files, archive families with ranges, Needle, Sumo, Unreal Engine and more),
+  and the options `--allow-damaged`, `--manifest` and `--aoc`. A format that is not ported stops with exit code 4 and a named message.
+- iOS: games with more than one program and framework builds.
+- Also for iOS: the button-icon font, the header of multi-program profiles, the own signer for the iOS executable and the reuse of the previous IPA.
+  `nxb build --platform ios` runs the iOS flow with the usual events.
+- `nxb cache export`, `import`, `prune` and `list`: the cache of a title as one export file with a checksum.
+- Manifest-first order for `nxb build`: `--shader-manifest <file>` builds the listed shaders first. `--partial` builds only these shaders and writes `_b_partial.json`.
+- The crate `nxb-profile` (the profile of a game as typed data with a TOML reader and writer).
+
+### Checked
+
+- Rewrite: byte-identical to `patch_nso.py` on 25 of 25 real modules (all five tables, `.patched.bin` and the fixups). The modules include one Switch 2 title,
+  modules with ZBIC compression, modules with an NRO table and modules with frame step stubs. The 98 NRO modules of one title are also identical (98 of 98).
+  With the rules from `data/rewrite-rules`, 120 of 130 earlier cases ran again and all were identical. 14 cases cannot run again, because their input files are deleted (their rules are unchanged).
+- NRO collection: `nro.tsv` and 98 of 98 modules are byte-identical to `nro_collect.py` on one real image.
+- Rust translator: SPIR-V and `res.json` are byte-identical to the C# translator for all keys of three titles, first-attempt jobs only
+  (16,268 of 16,268, 19,592 of 19,592 and 28,669 of 28,669), and for 42,299 of 42,331 keys of one Switch 2 title (Ampere).
+  Of the 32 other keys, 17 fail in the C# translator also and 15 go to the C# path (`SharedStoreSmallIntCas`). The corpus has no job for task and mesh shaders.
+- Translator host: 802 of 802 results equal to the process bridge.
+- Extract and split: one real update image with a 17.6 GB archive gave all package files and tables byte-identical to the reference split. Real zstd dictionaries: byte-identical to `zstd -D`.
+  The readers for the other formats were compared with the reference functions on synthetic files.
+- iOS: 142 of 142 profiles byte-identical in the profile port. The framework flow, the multi-program flow and the IPA reuse were compared with the reference script on synthetic fixtures
+  (the framework IPA also with a real `xcodebuild` run: 47 of 47 entries equal, the executable, the framework binary and the font file equal in part).
+
+### Only synthetic or only partly checked
+
+- Unity readers, archive families without a local sample, layouts of very large text segments (100, 125.3 and 185.6 MB), three frame step builds, one build with registered cuts,
+  framework builds and multi-program builds: only synthetic files or fixtures. The rules for real code of those builds are not tested.
+- Switch 2 packages with an update and DLC. Ampere translation was checked on one title.
+- `nxb build --platform ios` was not run end to end. The wiring is checked up to the first check of the inputs.
+- `nxb-ios shell --build` was not run.
+- `nxb cache` makes and reads export files. The shader step does not yet write cache entries for it.
+- A full `nxb build` in one run with the new defaults was not timed.
+
+### Measured and estimated
+
+- Rewrite (release build, machine not quiet): 3.4 s for a 29 MB main module against 63 s for the script, and 8.9 s against 121 s for a larger one. Synthetic large modules: 1 to 3.5 s against 183 to 672 s.
+- NRO collection: 3.5 s against 4.5 s. The archive table dominates both times, so there is no gain in speed.
+- Translator host: 1.0 to 1.7 s against 6.3 to 8.4 s for 802 jobs (one start instead of 19). In a subset run of a shader step, the wall time was 20.2 s against 20.7 s, because the Metal compile dominates.
+  The change of the .NET starts from 667 to about 1 in a full build is an **estimate**. Nobody measured it on a full build.
+- Rust translator: in a subset run (160 keys, load average about 10) the wall time was 17 s against 16 s with the C# translator. The Metal compile dominates.
+- Raw tier on all shaders: in a subset run (160 keys, 261 shaders), 363 library compiles gave 363 raw libraries with no fallback, and all 699 output libraries load in Metal.
+  The wall time was 6.5 s against 14.4 s with the tier off. This is not a benchmark. The gain on a full cold build is **not measured**.
+
+### Limits
+
+- Not ported in the Rust translator (the key goes to the C# translator): geometry, tessellation, transform feedback, vertex shaders as compute, the interlock function match,
+  `SharedStoreSmallIntCas` and the task and mesh jobs. No corpus has the first four, thus they are not ported blind.
+- Not ported: the CRA archive family, and each format that needs Oodle (these stop with exit code 4). Also not ported: zip members in bzip2 or lzma, and encrypted Unreal indexes.
+- The rewrite port stops with exit code 4 when the engine files differ from the files that the rules come from. It needs the same engine version.
+- `nxb split`, `nxb app`, `nxb ipa`, `nxb pso` and `nxb sign` print "not implemented yet". Use `nxb-split`, `nxb-macapp`, `nxb-ipa`, `nxb-pso` and `nxb-pack`.
+- The own-identical allow list is not in this repository. The raw path does not use a list by default.
+- Mac only for the build tools. The raw tier is not available for iOS.
+
 ## 0.3.0
 
 ### Added

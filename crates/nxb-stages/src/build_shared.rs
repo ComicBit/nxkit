@@ -6,6 +6,7 @@ use crate::build::Span;
 use crate::build::fatal;
 use crate::build_finish::Gate;
 use crate::inputs::ShaderInputs;
+use crate::xlatehost::Xlate;
 use nxb_error::Fatal;
 use nxb_model::{ContentKey, FileDigest};
 use nxb_pyjson::{Value, dumps_indent};
@@ -14,7 +15,7 @@ use nxb_shader::pch;
 use nxb_shader::side::{self, Unit};
 use nxb_shader::target::{MAC, TargetConv};
 use nxb_store::Store;
-use nxb_tool::{Io, MetalTools, ProcessTool, ProcessTranslator, Tool};
+use nxb_tool::{Io, MetalTools, ProcessTool, Tool};
 use nxb_tool::{ProcessRegistry, Resolver, SdkRoots};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -39,43 +40,6 @@ pub(crate) struct Side {
 pub(crate) struct Libs {
     pub(crate) mac: FileDigest,
     pub(crate) ios: Option<FileDigest>,
-}
-
-/// The translator bridge of a build.
-pub(crate) enum Xlate {
-    /// A process per batch.
-    Batch(ProcessTranslator),
-    /// Persistent hosts.
-    Host(nxb_tool::HostTranslator),
-}
-
-impl nxb_tool::Translator for Xlate {
-    fn identity(&self) -> &nxb_tool::ToolId {
-        match self {
-            Xlate::Batch(t) => t.identity(),
-            Xlate::Host(t) => t.identity(),
-        }
-    }
-
-    fn translate(
-        &self,
-        b: &[nxb_tool::XlateJob],
-    ) -> Result<Vec<nxb_tool::XlateResult>, nxb_error::ToolError> {
-        match self {
-            Xlate::Batch(t) => t.translate(b),
-            Xlate::Host(t) => t.translate(b),
-        }
-    }
-}
-
-impl Xlate {
-    /// Translator processes started.
-    pub(crate) fn runs(&self) -> u64 {
-        match self {
-            Xlate::Batch(t) => t.runs(),
-            Xlate::Host(t) => t.starts(),
-        }
-    }
 }
 
 /// State shared by every task of a build.

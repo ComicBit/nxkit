@@ -13,7 +13,8 @@ use crate::keys::KeySet;
 use crate::nca::{Nca, open_package};
 use crate::storage::{FileStorage, Storage};
 use crate::version::{
-    base_data, display_version, open_romfs, pick_programs, read_control, read_exefs, title_name,
+    base_data, display_version, open_romfs_with, pick_programs, read_control, read_exefs,
+    title_name,
 };
 use crate::write::{ImageJob, ImageResult, write_images};
 
@@ -48,6 +49,34 @@ pub struct Request {
     pub app: Option<u64>,
     /// Compute the images' digests without writing the images (`RomFS.img` is not created).
     pub discard_images: bool,
+    /// `nx_extract --allow-damaged`: files whose data fails the hash check are written as read, listed, flagged in the
+    /// image index, and the run succeeds.
+    pub allow_damaged: bool,
+    /// `nx_extract --manifest`: no `RomFS.img`, a list `romfs_manifest.tsv` (path, size, first 32 bytes) and the
+    /// NRO modules under `romfs_nro/`.
+    pub manifest: bool,
+}
+
+impl Default for Request {
+    fn default() -> Request {
+        Request {
+            keys: PathBuf::new(),
+            base: PathBuf::new(),
+            out_base: PathBuf::new(),
+            updates: Vec::new(),
+            threads: 4,
+            mem_limit: 1 << 30,
+            cache_chunks: 512,
+            digests: None,
+            base_outputs: true,
+            html: false,
+            split: None,
+            app: None,
+            discard_images: false,
+            allow_damaged: false,
+            manifest: false,
+        }
+    }
 }
 
 /// What the run did.
@@ -127,6 +156,24 @@ fn small_outputs(
     Ok(())
 }
 
+/// A program with a sparse layer leaves out data that Horizon reads through the patch: the reader for it is not
+/// ported (`nx_extract` itself reads such a base only with its update, exit code 4).
+fn refuse_sparse(prog: &Nca, with_update: bool) -> Result<()> {
+    let sparse = prog
+        .sections
+        .iter()
+        .flatten()
+        .any(|(_, _, fs)| fs.is_sparse());
+    if sparse {
+        return Err(ExtractError::Unsupported(if with_update {
+            "the base game's program is sparse (sparse layers are not read yet)".into()
+        } else {
+            "the base game's program is sparse: it can be read only with its update NSP".into()
+        }));
+    }
+    Ok(())
+}
+
 /// Runs the extract. Prints `nx_extract`'s lines per version (`== <out dir>` before each block).
 pub fn extract(req: &Request) -> Result<Summary> {
     let t0 = Instant::now();
@@ -180,6 +227,7 @@ pub fn extract(req: &Request) -> Result<Summary> {
     let base_shared;
     {
         let (bp, _, ctrl) = pick_programs(&base, None)?;
+        refuse_sparse(bp, false)?;
         let shared = base_data(&ks, bp, &cache)?;
         if req.base_outputs {
             let mut log = format!("{base_log}title {:016x}\n", bp.title_id);
@@ -195,7 +243,7 @@ pub fn extract(req: &Request) -> Result<Summary> {
                 )?;
                 log.push_str(&h);
             }
-            let fs = open_romfs(&ks, shared.clone(), None, &cache)?;
+            let fs = open_romfs_with(&ks, shared.clone(), None, &cache, req.allow_damaged)?;
             logs.push(log);
             jobs.push((req.out_base.clone(), fs));
         }
@@ -204,6 +252,7 @@ pub fn extract(req: &Request) -> Result<Summary> {
     for ((u, u_log), (_, out)) in updates.iter().zip(&req.updates) {
         let (bp, up, ctrl) = pick_programs(&base, Some(u))?;
         let up = up.ok_or_else(|| ExtractError::format("no update program"))?;
+        refuse_sparse(bp, true)?;
         let mut log = format!(
             "{base_log}{u_log}title {:016x}, update {:016x}\n",
             bp.title_id, up.title_id
@@ -219,7 +268,13 @@ pub fn extract(req: &Request) -> Result<Summary> {
                 &cache,
             )?);
         }
-        let fs = open_romfs(&ks, base_shared.clone(), Some(up), &cache)?;
+        let fs = open_romfs_with(
+            &ks,
+            base_shared.clone(),
+            Some(up),
+            &cache,
+            req.allow_damaged,
+        )?;
         logs.push(log);
         jobs.push((out.clone(), fs));
     }
@@ -227,9 +282,36 @@ pub fn extract(req: &Request) -> Result<Summary> {
 
     // plans and merge keys: an update's file takes the index of the same path in v0
     let mut images = Vec::new();
+    let mut flagged: Vec<Vec<String>> = Vec::new();
+    let mut manifest_lines: Vec<(String, Vec<String>)> = Vec::new();
+    if req.manifest {
+        if req.split.is_some() || req.digests.is_some() {
+            return Err(ExtractError::Unsupported(
+                "--manifest with the split or digests".into(),
+            ));
+        }
+        for (out, fs) in &jobs {
+            manifest_lines.push(crate::manifest::write(fs, out)?);
+        }
+    }
     let mut v0_index: HashMap<Vec<u8>, u64> = HashMap::new();
     for (k, (out, fs)) in jobs.iter().enumerate() {
-        let plan = ImagePlan::plan(&fs.entries)?;
+        if req.manifest {
+            break;
+        }
+        let mut plan = ImagePlan::plan(&fs.entries)?;
+        let mut names = Vec::new();
+        if req.allow_damaged {
+            // every data block is read once and checked, a file is damaged when a failed block overlaps it
+            fs.fs.scan()?;
+            for e in plan.entries.iter_mut().filter(|e| !e.dir) {
+                if fs.fs.damaged_in(e.src, e.b) {
+                    e.damaged = true;
+                    names.push(String::from_utf8_lossy(&e.path).into_owned());
+                }
+            }
+        }
+        flagged.push(names);
         if k == 0 {
             v0_index = plan
                 .entries
@@ -263,9 +345,35 @@ pub fn extract(req: &Request) -> Result<Summary> {
     }
     let t1 = Instant::now();
     let templates = match &req.split {
-        Some((game, _)) => Some(crate::split::Templates::new(game)?),
+        Some((game, _)) => {
+            let mut t = crate::split::Templates::new(game)?;
+            if req.discard_images {
+                t.keep_deferred();
+            }
+            // Unity's common strings come from the first version's main, written before any file is scanned
+            if let Some(j) = jobs.first()
+                && let Ok(main) = std::fs::read(j.0.join("ExeFS/main"))
+            {
+                t.set_common(&main);
+            }
+            Some(t)
+        }
         None => None,
     };
+    if templates.is_some() {
+        let dirs: Vec<PathBuf> = jobs.iter().map(|j| j.0.clone()).collect();
+        crate::split_out::env_guards(&dirs)?;
+    }
+    if let Some(t) = &templates {
+        // zstd dictionaries of a title that ships them: read before any file is scanned
+        for (_, fs) in &jobs {
+            if let Some(pack) =
+                crate::romfs::read_file(fs.fs.as_ref(), &fs.entries, "/Pack/ZsDic.pack.zs")?
+            {
+                t.add_dict_pack(&pack)?;
+            }
+        }
+    }
     let tags: Vec<String> = jobs
         .iter()
         .enumerate()
@@ -308,6 +416,9 @@ pub fn extract(req: &Request) -> Result<Summary> {
         let hook = move |img: usize, path: &[u8], data: &[u8], d: &nxb_model::Digest| {
             if let Some(t) = templates {
                 let label = format!("{}{}", tags[img], String::from_utf8_lossy(path));
+                if t.defer(&label, data, *d) {
+                    return;
+                }
                 if data.len() >= 1 << 20 {
                     let _ = big_tx.send((label, data.to_vec(), *d));
                 } else {
@@ -351,6 +462,7 @@ pub fn extract(req: &Request) -> Result<Summary> {
                 files,
             });
         }
+        t.post_images(&tags, &results, req.threads)?;
         let scanned = t.scanned();
         let (_, bad) = t.merge(&vin, outs)?;
         for b in bad {
@@ -363,9 +475,16 @@ pub fn extract(req: &Request) -> Result<Summary> {
     }
 
     let mut stdout = std::io::stdout().lock();
-    for ((out, _), (log, r)) in jobs.iter().zip(logs.iter().zip(&results)) {
+    let mut all_damaged: Vec<String> = Vec::new();
+    for (k, ((out, _), log)) in jobs.iter().zip(&logs).enumerate() {
         let _ = writeln!(stdout, "== {}", out.display());
         let _ = write!(stdout, "{log}");
+        if let Some((line, bad)) = manifest_lines.get(k) {
+            let _ = writeln!(stdout, "{line}");
+            all_damaged.extend(bad.iter().cloned());
+            continue;
+        }
+        let r = &results[k];
         let _ = writeln!(
             stdout,
             "{}: {} files {:.1} MB, image with {} entries",
@@ -374,6 +493,22 @@ pub fn extract(req: &Request) -> Result<Summary> {
             r.bytes as f64 / 1_048_576.0,
             r.entries
         );
+        all_damaged.extend(flagged[k].iter().cloned());
+    }
+    if !all_damaged.is_empty() {
+        if req.allow_damaged {
+            for p in &all_damaged {
+                let _ = writeln!(stdout, "[RED] hash check failed: {p}");
+            }
+            let _ = writeln!(
+                stdout,
+                "[RED] the NSP is damaged: {} files written as read (--allow-damaged)",
+                all_damaged.len()
+            );
+        } else {
+            drop(stdout);
+            return Err(ExtractError::Damaged(all_damaged));
+        }
     }
     if let Some(p) = &req.digests {
         let mut t = String::from("# image\tpath\toffset\tsize\tsha256\n");

@@ -373,7 +373,7 @@ impl Nup {
         } else {
             let raw = self.st.read_vec(f.off, f.stored as usize)?;
             if f.zstd {
-                nxb_split::zstd::decompress(&raw)
+                nxb_split::zstd::decompress_max(&raw, usize::try_from(f.size).unwrap_or(usize::MAX))
                     .map_err(|e| bad(&self.path, format!("{shown}: {e}")))?
             } else {
                 raw

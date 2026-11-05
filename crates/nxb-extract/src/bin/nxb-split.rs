@@ -63,7 +63,7 @@ fn main() -> ExitCode {
         }
         Err(e) => {
             println!("[RED] {e}");
-            ExitCode::from(1)
+            ExitCode::from(u8::try_from(e.exit_code()).unwrap_or(1))
         }
     }
 }

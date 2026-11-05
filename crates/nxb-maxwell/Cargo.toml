@@ -1,0 +1,15 @@
+[package]
+name = "nxb-maxwell"
+description = "Maxwell instruction decoder: generated bitfields, instruction table, block and control flow decoder (std only)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[package.metadata.nxb]
+layer = "L0"
+in_v = true
+
+[lints]
+workspace = true

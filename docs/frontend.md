@@ -1,9 +1,10 @@
 # Own shader front end
 
 The own front end changes the machine-generated MSL of the engine into AIR. Apple's back half then makes the library.
-By default, the own front end compiles only the shaders on the allow list. The allow list is the shipped verdict file.
-It contains only shaders with the verdict `own-identical`. The Apple front end compiles all other shaders.
-To use the Apple front end for all shaders, set `NXB_OWN_FRONT=0`.
+The own front end has two paths. The identical path compiles only the shaders on the allow list. The allow list is the shipped verdict file.
+It contains only shaders with the verdict `own-identical`. The raw path (new as the default in 0.4.0) compiles every Mac shader that the front end accepts.
+**The raw path is not byte-identical to Apple's output.** The Apple front end compiles all other shaders.
+To use the Apple front end for all shaders, set `NXB_OWN_FRONT=0`. To turn off only the raw path, set `NXB_OWN_RAW=0`.
 
 All numbers come from measurements on the reference machine (macOS 27.2, Metal toolchain 32023.922), unless they have the label "estimate".
 The corpus has 23,785 compile inputs of the reference title. It stays on the local machine. Other programs used the CPU during some measurements.
@@ -19,7 +20,7 @@ flowchart LR
     E --> F["Apple air-opt -O1 --discard-value-names"]
     F --> G["Apple metallib"]
     X["Apple metal -c: all shaders not on the allow list"] -.-> G
-    E -.->|raw path, raw allow list| R["own optimizer and own MTLB writer"]
+    E -.->|raw path, all accepted shaders| R["own optimizer and own MTLB writer"]
 ```
 
 | crate | function |
@@ -94,25 +95,41 @@ Thus Apple's `air-opt -O1` and `metallib` stay for the default path (decision D1
 
 ## Raw container path
 
-Version 0.3.0 adds a second path, the raw path. It is not byte-identical to Apple's output. It does not use `air-opt` or `metallib`.
+The raw path is not byte-identical to Apple's output. It does not use `air-opt` or `metallib`.
 
 - `air-bc` splits the module into one module for each entry point and prunes the function constants.
 - The own optimizer in `air-bc` does `mem2reg`, removal of trivial phi nodes, block-local common subexpression removal and removal of dead code.
 - `air-front` writes the bitcode and the `MTLB` container itself. The call is `build_raw`. The commands `airc raw`, `rawcmp` and `rawcheck` use it.
 - The raw libraries are larger than Apple's libraries (1.33 times on 40 samples, measured).
 
-The evidence for a raw library is the GPU differential test, not byte identity. A shader is on the raw allow list only when 12 test vectors
-gave the same output words as Apple's library and the current front end rebuilds the tested library byte for byte.
-Of 3,625 candidates (23,752 inputs are possible), 3,375 were the same, 220 were different, 29 were not deterministic and 1 was not built.
-10 of the same sources no longer exist on the test machine, thus they are not on the list. The list has 3,365 entries (about 14 % of the corpus).
-[shader-step.md](shader-step.md) describes the nxbuild tier that uses the list.
+**Default since 0.4.0.** The raw path is on for each Mac shader that the front end accepts. Before, it was on only for shaders on a raw allow list.
+Each library goes through a check in the process. The library must parse as a metallib and write back to the same bytes. Its functions must have names and valid bitcode wrappers.
+If the front end rejects the shader or the check fails, the shader goes to the next tier. The check does not run the shader on a GPU.
+
+The evidence for a raw library is the GPU differential test, not byte identity. The test covered only a part of the corpus:
+
+| result of the GPU test (12 vectors) | shaders |
+|---|---|
+| candidates tested | 3,625 of 23,752 (about 15 %) |
+| same output as Apple's library | 3,375 |
+| different output | 220 |
+| not deterministic (the reference also) | 29 |
+| not built | 1 |
+
+The old raw allow list has 3,365 entries (about 14 % of the corpus). Each entry is a shader that matched in this test and that the front end rebuilds byte for byte.
+10 of the matching sources no longer exist on the test machine. The list is not in this repository. `NXB_OWN_RAW=list` uses it when you have the file.
+**Nobody ran a GPU test for the other shaders.** In the tested sample, 220 of 3,625 differed. The sample was not random.
+Thus the rate for the other shaders is not known, and some of them can give a different output than Apple's library.
+A smoke test of the harness on 8 shaders gave 7 equal and 1 different (the largest error was 166 ulp). This is not a sample.
+If you see a visual difference, set `NXB_OWN_RAW=0` and build again. The cache key has the field `own-raw@`, thus the libraries of the two modes do not mix.
 
 Speed (measured, 20 large vertex shaders, loaded machine): the raw path used a median of 39 ms for the emit, 35 ms for the text IR to bitcode step,
 18 ms for the split and the writer, and 40 ms for the optimizer. This is more than the earlier estimate of 15 to 20 ms for each shader.
 A full-corpus run at 6 threads gave a median of 33 ms and a mean of 71 ms for each input (measured).
 The next cheap decrease is to write the bitcode without the text IR (about 35 ms, estimate).
+[shader-step.md](shader-step.md) describes the tier in the shader step and the measured gain.
 
-Not done: the raw path for iOS (there is no GPU test for iOS libraries), a list for the other 86 % of the corpus,
+Not done: the raw path for iOS (there is no GPU test for iOS libraries), a GPU test for the other 85 % of the corpus,
 and a GPU test of the side-unit cut of a raw library on its own.
 
 ## Tests

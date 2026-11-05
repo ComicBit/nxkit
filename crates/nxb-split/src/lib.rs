@@ -6,11 +6,33 @@
 //! container, never a silent difference.
 
 pub mod bahs;
+pub mod capcom;
+pub mod engines;
+pub mod glslc;
+pub mod inflate;
+pub mod jobs;
 pub mod lz4;
+pub mod mgfx;
+pub mod misc;
+pub mod monolith;
+pub mod narc;
 pub mod nso;
+pub mod packs;
+pub mod raw;
+pub(crate) mod rd;
 pub mod records;
+pub mod retro;
+pub mod scanfile;
 pub mod shaders;
+pub mod sized;
+pub mod snowdrop;
+pub mod src;
+pub mod sumo;
+pub mod ue3;
+pub mod unity;
+pub mod xnb;
 pub mod yaz0;
+pub mod zlibx;
 pub mod zstd;
 
 use std::fmt;

@@ -34,6 +34,7 @@ and shared APIs. The designs set the behavior.
 | W19 | The stage crates with I/O (`nxb-extract`, `nxb-pack`, `nxb-archive`) and the orchestrator `nxb-build` are L3 crates with listed sideways edges. | Each stage crate has one owner. |
 | W20 | The front-end crates are a separate layer F with their own names. | They are standalone and use only the standard library. Only `nxb-tool` can use `air-front`. |
 | W21 | Early cutoff: each stage output has a key from the stage version and the content hash of its inputs. No key contains V. A V change does not delete data. The MSL passes run again in each build. | A change of one line in the chain must not compile all shaders of all games again. Measured: a V change alone took 47 s with 0 compiles (refer to [early-cutoff.md](early-cutoff.md)). |
+| W22 | The shader step translates each key with the Rust translator first, then with the translator host, then with the process bridge. Each fallback is counted by reason. | The Rust translator does not cover geometry, tessellation, transform feedback, vertex shaders as compute and some rare cases. The output is byte-identical for the keys that were compared, thus the cache identity does not change. |
 
 ## Part 2: design decisions
 
@@ -59,6 +60,7 @@ and shared APIs. The designs set the behavior.
 | D16 | Typed task graph in memory. Each external tool is behind a `Tool` adapter. The first adapter is a child process. | A tool changes to a persistent worker only when a benchmark shows a better time and parity stays. |
 | D17 | No own optimizer and no own `metallib` writer. | No pass subset in the test gave Apple's machine code (0 of 15). |
 | D18 | The own front end uses the allow list by default: only shaders with the verdict `own-identical` in the shipped verdict file. | With a deny list, a shader that is not in the corpus goes through the own path without a check. |
+| D19 | Since 0.4.0, the raw path is on by default for each Mac shader that the own front end accepts. It has a check in the process and a fallback to Apple. `NXB_OWN_RAW=0` turns it off. It supersedes D18 for the raw path only. | The path is faster and needs no Apple tool. The cost is that its output is not byte-identical to Apple's output, and a GPU test covered only about 15 % of the corpus. D17 stays for the identical path. |
 
 ### Other stages
 

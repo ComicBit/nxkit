@@ -18,10 +18,11 @@ fn copy(fs: &dyn Storage, entries: &[RomEntry], dst: &Path) -> Result<String> {
     std::fs::create_dir_all(dst)
         .map_err(|e| ExtractError::io(format!("create {}", dst.display()), e))?;
     for e in entries {
-        let rel = String::from_utf8_lossy(&e.path)
-            .trim_start_matches('/')
-            .to_string();
-        let op = dst.join(&rel);
+        let op = dst.join(crate::safe_path::rel(
+            "RomFS",
+            &String::from_utf8_lossy(&e.path),
+            false,
+        )?);
         if e.dir {
             std::fs::create_dir_all(&op)
                 .map_err(|x| ExtractError::io(format!("create {}", op.display()), x))?;

@@ -268,8 +268,7 @@ pub fn build(
 }
 
 /// The stage "Mac host" of `nxb build`: the host for the profile into `<work>/tools/dmhost` (the work folder
-/// resolved, as the script resolves it). The button-icon font (`make_ext_font.py`) is not ported: it stays the work
-/// folder's `font/`.
+/// resolved, as the script resolves it). The button-icon font is `ios::extfont`.
 pub fn stage(engine: &Path, work: &Path, game: &str) -> Result<String, String> {
     std::fs::create_dir_all(work).map_err(|e| format!("{}: {e}", work.display()))?;
     let work = std::fs::canonicalize(work).map_err(|e| format!("{}: {e}", work.display()))?;
