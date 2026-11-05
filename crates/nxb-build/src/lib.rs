@@ -9,7 +9,7 @@
 //! staging the non-shader files during the shader step) is the next step. `--dry-run` prints the graph and the keys.
 //!
 //! Not ported yet, taken from the work folder (the Python build's outputs) and named in the plan: the rewrite
-//! (`patch_nso.py`), the Mac host and app binary builds, the app binary settings, the icon, the survey and profile steps. The
+//! (`patch_nso.py`), the Mac host and companion app builds, the app settings, the icon, the survey and profile steps. The
 //! shader step is an existing library folder (`--shaders`, or the work folder's `shader/cache/b-<chain>`), running the
 //! lead's `shaderbuild build` as a process from here is not wired yet.
 
@@ -19,7 +19,7 @@ pub mod pipeline;
 
 use std::path::PathBuf;
 
-/// The command line (the NSP script's names, extras: `--dry-run`, `--engine`, `--shaders`, `--app binary`, `--threads`).
+/// The command line (the NSP script's names, extras: `--dry-run`, `--engine`, `--shaders`, `--companion-app`, `--threads`).
 #[derive(Clone, Debug, Default)]
 pub struct Args {
     /// The folder holding one game's NSPs.
@@ -54,8 +54,9 @@ pub struct Args {
     pub engine: Option<PathBuf>,
     /// `--shaders`: an existing `b-<chain>` library folder.
     pub shaders: Option<PathBuf>,
-    /// `--app binary`: the app binary binary (built by clang + swiftc in the Python build).
-    pub app_binary: Option<PathBuf>,
+    /// `--companion-app`: the companion app binary embedded next to the built app (`Contents/MacOS/nxnative`, built by
+    /// clang + swiftc in the Python build).
+    pub companion: Option<PathBuf>,
     /// Worker threads.
     pub threads: usize,
     /// `--xlate`: the shader translator (default the engine's `dmsh_xlate_bin/dmsh_xlate`).
@@ -70,6 +71,8 @@ pub struct Args {
     pub also_ios: bool,
 }
 
+/// `--companion-app` under its old name: compatibility alias for the reference build scripts.
+const COMPAT_ALIAS: &str = "--launcher";
 const VALUE: &[&str] = &[
     "-k",
     "--keys",
@@ -89,7 +92,8 @@ const VALUE: &[&str] = &[
     "--progress",
     "--engine",
     "--shaders",
-    "--app-binary",
+    "--companion-app",
+    COMPAT_ALIAS,
     "--threads",
     "--xlate",
     "--dotnet-root",
@@ -179,7 +183,7 @@ pub fn parse(argv: &[String]) -> Result<Args, (i32, String)> {
                 "--xlate" => a.xlate = Some(v.into()),
                 "--dotnet-root" => a.dotnet_root = Some(v.into()),
                 "--own-front" => a.own_front = v,
-                "--app-binary" => a.app_binary = Some(v.into()),
+                _ if k == "--companion-app" || k == COMPAT_ALIAS => a.companion = Some(v.into()),
                 _ => a.threads = v.parse().map_err(|_| (2, format!("--threads: {v}")))?,
             }
         } else if s.starts_with('-') {

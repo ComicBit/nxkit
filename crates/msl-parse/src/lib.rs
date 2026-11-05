@@ -1,4 +1,4 @@
-//! Strict parser and type checker for the Metal Shading Language that the nxnative engine
+//! Strict parser and type checker for the Metal Shading Language that the reference build engine
 //! generates, a port of the phase 1 prototype `msl_parse.py`.
 //!
 //! The checker accepts only the subset the corpus survey found and rejects everything else

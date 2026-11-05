@@ -1,6 +1,6 @@
 //! The Mac app's file set (`dm/mac/pack_app.py`): which build outputs go where in `<Game>.app`, the generated
 //! `Info.plist` and `PkgInfo`. The result is a [`StagePlan`] for [`crate::appstage`] (clones, digests, signing) or for
-//! [`crate::incremental`]. The app binary (`clang` + `swiftc`) and the icon (`sips` + `iconutil`) are built by tools and
+//! [`crate::incremental`]. The companion app (`clang` + `swiftc`) and the icon (`sips` + `iconutil`) are built by tools and
 //! come in as files.
 
 use std::path::{Path, PathBuf};
@@ -11,6 +11,9 @@ use crate::appstage::{Content, StageEntry, StagePlan};
 use crate::error::{Error, Result, format_err};
 use crate::pyplist::{PyValue, dumps};
 
+/// The settings file name the engine's host reads (in the bundle and in the work folder): a format fact of the
+/// host, kept as it is so the app stays byte-identical.
+pub const SETTINGS_JSON: &str = "launcher.json";
 const MODULE_FILES: [&str; 7] = [
     "*.patched.bin",
     "*.fixups.tsv",
@@ -36,8 +39,8 @@ const PSO_FILES: [&str; 4] = ["*.mtl4a", "prebuilt.tsv", "rest_pairs.tsv", "arch
 pub struct MacAppInputs {
     /// `--host`: the Mac host.
     pub host: PathBuf,
-    /// The app binary built by `build_app_binary` (`Contents/MacOS/nxnative`).
-    pub app_binary: PathBuf,
+    /// The companion app embedded next to the built app (`Contents/MacOS/nxnative`), built by the engine's script.
+    pub companion: PathBuf,
     /// `--patched`.
     pub patched: PathBuf,
     /// `--romfs` (an image file or a folder).
@@ -192,14 +195,13 @@ fn str_of(v: Option<&Value>) -> String {
     v.and_then(Value::as_str).unwrap_or("").to_string()
 }
 
-/// `settings_rules` and the `DM_LANG` default of the app binary settings.
+/// `settings_rules` and the `DM_LANG` default of the app settings.
 fn settings(json: &str) -> Result<(PyValue, Option<String>)> {
-    let v =
-        nxb_pyjson::parse(json).map_err(|e| format_err(format!("app binary settings: {e:?}")))?;
+    let v = nxb_pyjson::parse(json).map_err(|e| format_err(format!("app settings: {e:?}")))?;
     let listed = v
         .get("settings")
         .and_then(Value::as_list)
-        .ok_or_else(|| format_err("app binary settings: no list"))?;
+        .ok_or_else(|| format_err("app settings: no list"))?;
     let mut rules = Vec::new();
     let mut lang = None;
     for s in listed {
@@ -432,7 +434,7 @@ pub fn plan(a: &MacAppInputs) -> Result<StagePlan> {
             a.msl.display()
         )));
     }
-    e.push(file("Contents/MacOS/nxnative".into(), &a.app_binary));
+    e.push(file("Contents/MacOS/nxnative".into(), &a.companion));
     e.push(file("Contents/MacOS/dmhost".into(), &a.host));
     for m in &mods {
         e.push(file(format!("Contents/Resources/dm/{}", file_name(m)), m));
@@ -460,7 +462,7 @@ pub fn plan(a: &MacAppInputs) -> Result<StagePlan> {
         e.push(file("Contents/Resources/dm/env.txt".into(), p));
     }
     if let Some(p) = &a.settings {
-        e.push(file("Contents/Resources/dm/launcher.json".into(), p));
+        e.push(file(format!("Contents/Resources/dm/{SETTINGS_JSON}"), p));
     }
     let msl_name = a.msl_name.clone().unwrap_or_else(|| file_name(&a.msl));
     for m in &msls {

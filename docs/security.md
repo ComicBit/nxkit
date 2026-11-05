@@ -62,7 +62,7 @@ These gaps are open in version 0.1.0. Until they are closed, treat a package fro
 | 2 | Yaz0 reserves memory for the size in the header (up to 4 GiB) before it reads the data | large allocation | `nxb-split/src/yaz0.rs` |
 | 3 | The file names of an ExeFS and the RomFS entry paths are joined to the output folder without a check for `..` | a file can be written outside the output folder | `nxb-extract/src/run.rs`, `nxb-extract/src/html.rs` |
 | 4 | `Storage::read_vec` reserves memory for the requested length before it checks the range | large allocation | `nxb-extract/src/storage.rs` |
-| 5 | The offset of a PFS0 entry is added to the header size without an overflow check | a panic in a debug build, a wrong offset in a release build. The next range check rejects the entry | `nxb-extract/src/nca.rs` |
+| 5 | The offset of a PFS0 entry was added to the header size without an overflow check. The robustness test found it. The public tree fixes it with `checked_add`, and the live source still needs the same change | a panic in a debug build, a wrong offset in a release build | `nxb-extract/src/nca.rs` |
 | 6 | The package signatures are not checked | a changed package is accepted | `nxb-extract` |
 | 7 | The deterministic robustness tests cover a small set of seeds. They are not a replacement for a coverage-guided fuzzer | other defects can exist | `crates/*/tests/robustness.rs` |
 | 8 | The plist, Mach-O and BNSH/SARC readers have no dedicated robustness tests yet | other defects can exist | `nxb-pack`, `nxb-split` |

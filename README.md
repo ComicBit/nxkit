@@ -115,6 +115,7 @@ The tools read no fixed private path. Inputs come from arguments or from these v
 | `NXB_AIRC` | `tools/front` | the `airc` binary. Default is `target/release/airc` |
 | `NXB_PROTO`, `NXB_REF`, `NXB_CORPUS`, `NXB_SPECS`, `NXB_CAS` | `tools/front`, `tools/gpudiff` | inputs that you provide. See `tools/README.md` |
 | `NXB_PARITY_*` | parity tests | game files for the comparison tests. Without them the tests skip |
+| `NXB_ORACLE_EXACT` | signer tests | set to `1` to compare bytes with the `codesign` of the host. Without it, the tests check that `codesign --verify` accepts our output. Set it on the Mac where the signer was proven |
 | `NXB_OWN_FRONT` | `shaderbuild` | set to `0` to switch off the own front end |
 
 ## Architecture

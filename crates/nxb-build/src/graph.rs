@@ -293,8 +293,9 @@ pub fn describe(b: &Build) -> String {
     }
     let _ = writeln!(
         s,
-        "not ported, from the work folder: rewrite (patched_{}), Mac host (tools/dmhost), app binary (previous app or --app-binary), app binary settings (app/launcher.json), icon (previous app)",
-        b.package
+        "not ported, from the work folder: rewrite (patched_{}), Mac host (tools/dmhost), companion app (previous app or --companion-app), app settings (app/{}), icon (previous app)",
+        b.package,
+        nxb_pack::macapp::SETTINGS_JSON
     );
     s
 }
@@ -338,11 +339,11 @@ fn stage_app(a: &Args, b: &Build) -> Result<String, String> {
     let w = &b.work;
     let prof = &b.profile.1;
     let previous = b.out.is_dir().then(|| b.out.clone());
-    let app_binary = a
-        .app_binary
+    let companion = a
+        .companion
         .clone()
         .or_else(|| previous.as_ref().map(|p| p.join("Contents/MacOS/nxnative")))
-        .ok_or("no app binary: pass --app-binary (the app binary build is not ported)")?;
+        .ok_or("no companion app: pass --companion-app (its build is not ported)")?;
     let icns = previous
         .as_ref()
         .map(|p| p.join("Contents/Resources/AppIcon.icns"))
@@ -360,7 +361,7 @@ fn stage_app(a: &Args, b: &Build) -> Result<String, String> {
     let pso_pairs = w.join("shader/pso_pairs.tsv");
     let inputs = nxb_pack::macapp::MacAppInputs {
         host: w.join("tools/dmhost"),
-        app_binary: app_binary.clone(),
+        companion: companion.clone(),
         patched: w.join(format!("patched_{}", b.package)),
         romfs: ex.join("RomFS.img"),
         msl: b.shaders.clone(),
@@ -371,7 +372,7 @@ fn stage_app(a: &Args, b: &Build) -> Result<String, String> {
         pso_pairs: pso_pairs.is_file().then_some(pso_pairs),
         html: Some(ex.join("html")),
         env_file: None,
-        settings: Some(w.join("app/launcher.json")).filter(|p| p.is_file()),
+        settings: Some(w.join("app").join(nxb_pack::macapp::SETTINGS_JSON)).filter(|p| p.is_file()),
         icns,
         title_id: b.title.clone(),
         name,
@@ -393,15 +394,15 @@ fn stage_app(a: &Args, b: &Build) -> Result<String, String> {
     let plan = nxb_pack::macapp::plan(&inputs).map_err(|e| e.to_string())?;
     match previous {
         Some(prev) => {
-            // the app binary comes from the previous app: keep a copy, the update rewrites it in place
+            // the companion app comes from the previous app: keep a copy, the update rewrites it in place
             let keep = w.join("tmp/nxnative");
-            if app_binary.starts_with(&prev) {
+            if companion.starts_with(&prev) {
                 std::fs::create_dir_all(w.join("tmp")).map_err(|e| e.to_string())?;
-                std::fs::copy(&app_binary, &keep).map_err(|e| e.to_string())?;
+                std::fs::copy(&companion, &keep).map_err(|e| e.to_string())?;
             }
             let mut plan = plan;
             for e in &mut plan.entries {
-                if e.dest == "Contents/MacOS/nxnative" && app_binary.starts_with(&prev) {
+                if e.dest == "Contents/MacOS/nxnative" && companion.starts_with(&prev) {
                     e.content = nxb_pack::appstage::Content::File(keep.clone());
                 }
             }

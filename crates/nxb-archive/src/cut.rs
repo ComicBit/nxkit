@@ -26,15 +26,34 @@ fn u64_of(h: &[u8; 32]) -> u64 {
 /// Cuts `bases` into batches: the vertex-function hash space is split into a power of two of equal ranges (about
 /// `bases / target` of them), one batch per non-empty range, a batch over `2 * target` split further. An insertion
 /// changes its range's batch only, until the base count crosses a power of two (then every batch changes once).
-pub fn cut(mut bases: Vec<Base>, target: usize) -> Vec<Vec<Base>> {
+pub fn cut(bases: Vec<Base>, target: usize) -> Vec<Vec<Base>> {
     let target = target.max(1);
+    let ranges = (bases.len() / target).max(1).next_power_of_two();
+    cut_ranges(bases, ranges, 2 * target)
+}
+
+/// The batches for `slots` parallel compiler runs: about four batches per slot, so the last wave is short (one batch
+/// per slot left the last few batches running alone). The range count is `next_power_of_two(4 * slots)`
+/// (more when `max_target` asks for it), independent of the base count: an inserted base changes only the batch of its
+/// range. Batches over twice the average are split, so sizes stay within about 2x of each other.
+pub fn cut_for_slots(bases: Vec<Base>, slots: usize, max_target: usize) -> Vec<Vec<Base>> {
+    let n = bases.len();
+    let ranges = (4 * slots.max(1))
+        .max(n / max_target.max(1))
+        .max(1)
+        .next_power_of_two();
+    let cap = (2 * n.div_ceil(ranges)).max(64);
+    cut_ranges(bases, ranges, cap)
+}
+
+fn cut_ranges(mut bases: Vec<Base>, ranges: usize, cap: usize) -> Vec<Vec<Base>> {
     bases.sort_by(|a, b| {
         a.group
             .cmp(&b.group)
             .then(a.hash.cmp(&b.hash))
             .then(a.index.cmp(&b.index))
     });
-    let ranges = (bases.len() / target).max(1).next_power_of_two() as u64;
+    let ranges = ranges.max(1) as u64;
     let shift = 64 - ranges.trailing_zeros();
     let range_of = |b: &Base| {
         if ranges == 1 {
@@ -47,7 +66,7 @@ pub fn cut(mut bases: Vec<Base>, target: usize) -> Vec<Vec<Base>> {
     let mut cur: Vec<Base> = Vec::new();
     for b in bases {
         let boundary = cur.last().is_some_and(|l| range_of(l) != range_of(&b));
-        if !cur.is_empty() && (boundary || cur.len() >= 2 * target) {
+        if !cur.is_empty() && (boundary || cur.len() >= cap) {
             out.push(std::mem::take(&mut cur));
         }
         cur.push(b);
@@ -115,5 +134,62 @@ mod tests {
             "{split} of {} groups split",
             seen.len()
         );
+    }
+
+    /// Bases in groups of uneven size (1 to 40 bases per vertex function), as in a real game.
+    fn uneven(n: usize, salt: u8) -> Vec<Base> {
+        let mut out = Vec::new();
+        let mut g = 0u64;
+        while out.len() < n {
+            let size = 1 + (nxb_model::sha256(&g.to_le_bytes()).0[0] as usize % 40);
+            let group = nxb_model::sha256(&g.to_be_bytes()).0;
+            for _ in 0..size.min(n - out.len()) {
+                let mut v = (out.len() as u64).to_le_bytes().to_vec();
+                v.push(salt);
+                out.push(Base {
+                    hash: nxb_model::sha256(&v).0,
+                    group,
+                    index: out.len(),
+                });
+            }
+            g += 1;
+        }
+        out
+    }
+
+    #[test]
+    fn about_four_batches_per_slot_balanced() {
+        let b = cut_for_slots(uneven(18_300, 0), 12, 2000);
+        let total: usize = b.iter().map(Vec::len).sum();
+        assert_eq!(total, 18_300);
+        assert!(b.len() >= 48 && b.len() <= 96, "{} batches", b.len());
+        let avg = 18_300 / b.len();
+        let max = b.iter().map(Vec::len).max().unwrap_or(0);
+        assert!(max <= 3 * avg, "largest {max}, average {avg}");
+    }
+
+    #[test]
+    fn slots_cut_stable_under_insertion_and_removal() {
+        let a = uneven(18_300, 0);
+        let before = cut_for_slots(a.clone(), 12, 2000);
+        let key = |v: &Vec<Base>| v.iter().map(|x| x.hash).collect::<Vec<_>>();
+        let old: std::collections::BTreeSet<_> = before.iter().map(key).collect();
+        let mut ins = a.clone();
+        ins.push(Base {
+            index: 99_999,
+            ..uneven(1, 7)[0]
+        });
+        let changed = cut_for_slots(ins, 12, 2000)
+            .iter()
+            .filter(|v| !old.contains(&key(v)))
+            .count();
+        assert!(changed <= 3, "{changed} batches changed by an insertion");
+        let mut del = a;
+        del.remove(5_000);
+        let changed = cut_for_slots(del, 12, 2000)
+            .iter()
+            .filter(|v| !old.contains(&key(v)))
+            .count();
+        assert!(changed <= 3, "{changed} batches changed by a removal");
     }
 }
