@@ -9,10 +9,9 @@
 //! Exit codes: 0 done, 1 failed, 2 bad arguments, 4 unsupported here (a game of several programs, a route C framework
 //! build): the caller runs the script.
 
-use nxb_build::host::Runner;
-use nxb_build::ios::{ipa, shell};
+use crate::host::Runner;
+use crate::ios::{ipa, shell};
 use std::path::PathBuf;
-use std::process::ExitCode;
 
 fn var(k: &str) -> Option<String> {
     std::env::var(k).ok()
@@ -95,18 +94,19 @@ fn shell_inputs(engine: PathBuf) -> shell::Inputs {
     }
 }
 
-fn main() -> ExitCode {
-    let a: Vec<String> = std::env::args().skip(1).collect();
+/// `nxb ios` / `nxb-ios`: returns the exit code.
+pub fn main(args: &[String]) -> i32 {
+    let a = args;
     let usage = "usage: nxb-ios ipa [<out.ipa> | --prepare-xcode] | nxb-ios shell --prepare-xcode | --build";
     let Some(e) = engine() else {
         eprintln!("[RED] nxb-ios: no engine (set NXB_ENGINE to the folder holding dm/)");
-        return ExitCode::from(2);
+        return 2;
     };
     let r = match Runner::from_parent() {
         Ok(r) => r,
         Err(err) => {
             eprintln!("[RED] nxb-ios: {err}");
-            return ExitCode::from(1);
+            return 1;
         }
     };
     let res = match a.iter().map(String::as_str).collect::<Vec<_>>()[..] {
@@ -132,18 +132,18 @@ fn main() -> ExitCode {
         }
         _ => {
             eprintln!("{usage}");
-            return ExitCode::from(2);
+            return 2;
         }
     };
     match res {
-        Ok(_) => ExitCode::SUCCESS,
+        Ok(_) => 0,
         Err(m) if m.starts_with("unsupported") => {
             eprintln!("[RED] nxb-ios: {m}");
-            ExitCode::from(4)
+            4
         }
         Err(m) => {
             stamp(&m);
-            ExitCode::from(1)
+            1
         }
     }
 }

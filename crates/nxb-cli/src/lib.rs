@@ -1,21 +1,44 @@
-//! The command line of the `nxb` and `shaderbuild` binaries (layer L3).
+//! The command line of the `nxb` binary (layer L3).
 //!
-//! Both binaries share this code. `nxb` is the whole build and the stage commands (design-pipeline-rest 11).
-//! `shaderbuild` is the shader-step CLI (design-v2 7.2). Implemented: `version`, `help`, `shaderbuild recompile`.
-//! every other command answers "not implemented yet" with exit code 2.
+//! `nxb` is the one binary: the whole build and every stage as a subcommand (design-pipeline-rest 11). There are no
+//! other program names and no dispatch by `argv[0]`. Each subcommand calls a library main with the command line and
+//! exit codes of the reference scripts:
+//!
+//! | `nxb` command | calls |
+//! |---|---|
+//! | `build` | `nxb_build::main` |
+//! | `extract` | `nxb_extract::cli::main` |
+//! | `split` | `nxb_extract::split_cli::main` |
+//! | `rewrite`, `nro`, `rewrite-rules` | `nxb_build::rewrite` |
+//! | `shaders recompile|guards|own-verdicts|build` | this crate (the shader-step command line) |
+//! | `app` | `nxb_pack::cli::macapp::main` |
+//! | `ipa` | `nxb_pack::cli::ipa::main` |
+//! | `sign` | `nxb_pack::cli::sign::main` |
+//! | `pso` | `nxb_archive::cli::pso::main` |
+//! | `archive` | `nxb_archive::cli::archive::main` |
+//! | `ios` | `nxb_build::ios_cli::main` |
+//! | `airc` | `airc::main` (the own front end compiler) |
+//! | `cache`, `prune` | `cache` (store export, import, prune, list) |
+//! | `regressions` | `regressions` (`shader_regressions.py`) |
+//! | `self-check` | `selfcheck` (external tools and versions) |
+//!
+//! `nxb help` lists the commands by group and `nxb <command> --help` prints the usage. An unknown command exits with 2.
 
 use std::io::Write;
 
 mod build;
 mod cache;
+pub mod help;
 mod recompile;
+mod regressions;
+mod selfcheck;
 
 /// Which binary is running.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Binary {
     /// `nxb`
     Nxb,
-    /// `shaderbuild`
+    /// `nxb shaders`
     Shaderbuild,
 }
 
@@ -24,90 +47,125 @@ impl Binary {
     pub fn name(self) -> &'static str {
         match self {
             Binary::Nxb => "nxb",
-            Binary::Shaderbuild => "shaderbuild",
+            Binary::Shaderbuild => "nxb shaders",
         }
     }
 
-    /// The planned commands, in help order.
-    pub fn commands(self) -> &'static [&'static str] {
+    /// The commands, in help order.
+    pub fn commands(self) -> Vec<&'static str> {
         match self {
-            Binary::Nxb => &[
-                "build",
-                "cache",
-                "extract",
-                "rewrite",
-                "rewrite-rules",
-                "nro",
-                "split",
-                "app",
-                "ipa",
-                "pso",
-                "sign",
-                "parity",
-                "bench",
-                "explain",
-                "version",
-                "help",
-            ],
-            Binary::Shaderbuild => &[
-                "build",
-                "recompile",
-                "guards",
-                "own-verdicts",
-                "parity",
-                "explain",
-                "bench",
-                "prune",
-                "regressions",
-                "fe-verify",
-                "self-check",
-                "version",
-                "help",
-            ],
+            Binary::Nxb => help::names(help::NXB),
+            Binary::Shaderbuild => help::SHADERBUILD.iter().map(|(n, _)| *n).collect(),
         }
+    }
+}
+
+/// The usage text of a command, if the binary has it.
+fn usage(bin: Binary, cmd: &str) -> Option<&'static str> {
+    match bin {
+        Binary::Nxb => help::usage_of(cmd),
+        Binary::Shaderbuild => help::shaderbuild_usage(cmd),
+    }
+}
+
+/// `nxb shaders <sub> ...`: the shader-step command line.
+fn shaders(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
+    match args.first().map(String::as_str) {
+        None | Some("--help" | "-h" | "help") => {
+            let u = help::usage_of("shaders").unwrap_or_default();
+            writeln!(out, "{u}").map_or(1, |_| 0)
+        }
+        Some(_) => run(Binary::Shaderbuild, args, out, err),
     }
 }
 
 /// Run a binary with its arguments (without the program name) and return the exit code.
 pub fn run(bin: Binary, args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
     let cmd = args.first().map(String::as_str).unwrap_or("help");
+    // `<command> --help`: the usage, exit 0 (no stage takes these as arguments)
+    if args.len() > 1
+        && matches!(args[1].as_str(), "--help" | "-h")
+        && !(bin == Binary::Nxb && cmd == "shaders")
+        && let Some(u) = usage(bin, cmd)
+    {
+        return writeln!(out, "{u}").map_or(1, |_| 0);
+    }
+    let rest = &args.get(1..).unwrap_or_default();
     let res = match cmd {
         "version" | "--version" | "-V" => {
             writeln!(out, "{} {}", bin.name(), env!("CARGO_PKG_VERSION")).map(|_| 0)
         }
-        "help" | "--help" | "-h" => {
-            let list = bin.commands().join(", ");
-            writeln!(
+        "help" | "--help" | "-h" => match (bin, rest.first()) {
+            (Binary::Nxb, None) => help::write_nxb_help(out).map(|_| 0),
+            (_, Some(c)) if usage(bin, c).is_some() => {
+                writeln!(out, "{}", usage(bin, c).unwrap_or_default()).map(|_| 0)
+            }
+            _ => {
+                let list = bin.commands().join(", ");
+                writeln!(
+                    out,
+                    "usage: {} <command> [args]\ncommands: {list}",
+                    bin.name()
+                )
+                .map(|_| 0)
+            }
+        },
+        // commands of both binaries
+        "prune" => {
+            return cache::main(
+                &[vec!["prune".to_string()], rest.to_vec()].concat(),
                 out,
-                "usage: {} <command> [args]\ncommands: {list}",
-                bin.name()
-            )
-            .map(|_| 0)
+                err,
+            );
         }
-        "recompile" if bin == Binary::Shaderbuild => {
-            return recompile::main(&args[1..], out, err);
-        }
-        "guards" if bin == Binary::Shaderbuild => return guards(&args[1..], out, err),
-        "own-verdicts" if bin == Binary::Shaderbuild => return own_verdicts(&args[1..], out, err),
-        "build" if bin == Binary::Shaderbuild => return build::main(&args[1..], out, err),
+        "regressions" => return regressions::main(rest, out, err),
+        "self-check" => return selfcheck::main(rest, out, err),
+        "recompile" if bin == Binary::Shaderbuild => return recompile::main(rest, out, err),
+        "guards" if bin == Binary::Shaderbuild => return guards(rest, out, err),
+        "own-verdicts" if bin == Binary::Shaderbuild => return own_verdicts(rest, out, err),
+        "build" if bin == Binary::Shaderbuild => return build::main(rest, out, err),
         // the whole build (ADR W19: nxb-build is the orchestrator crate)
-        "build" if bin == Binary::Nxb => return nxb_build::main(&args[1..]),
+        "build" if bin == Binary::Nxb => return nxb_build::main(rest),
+        // the shader step under its own name
+        "shaders" if bin == Binary::Nxb => return shaders(rest, out, err),
         // a title's shader and pipeline cache as a store export
-        "cache" if bin == Binary::Nxb => return cache::main(&args[1..], out, err),
+        "cache" if bin == Binary::Nxb => return cache::main(rest, out, err),
         // the extract stage: NSP and NUP packages (ADR W19)
-        "extract" if bin == Binary::Nxb => return nxb_extract::cli::main(&args[1..]),
+        "extract" if bin == Binary::Nxb => return nxb_extract::cli::main(rest),
+        "split" if bin == Binary::Nxb => return nxb_extract::split_cli::main(rest),
         // the rewrite step (`patch_nso.py`'s command line, exit code 4 = unsupported, run the script)
-        "rewrite" if bin == Binary::Nxb => return nxb_build::rewrite::main(&args[1..]),
+        "rewrite" if bin == Binary::Nxb => return nxb_build::rewrite::main(rest),
         // the NRO collection (`nro_collect.py`'s command line, exit code 4 = unsupported)
-        "nro" if bin == Binary::Nxb => return nxb_build::rewrite::nro_main(&args[1..]),
+        "nro" if bin == Binary::Nxb => return nxb_build::rewrite::nro_main(rest),
         // the registered patches as private rule files
-        "rewrite-rules" if bin == Binary::Nxb => return nxb_build::rewrite::rules_main(&args[1..]),
-        c if bin.commands().contains(&c) => {
-            writeln!(err, "{}: {c}: not implemented yet", bin.name()).map(|_| 2)
-        }
+        "rewrite-rules" if bin == Binary::Nxb => return nxb_build::rewrite::rules_main(rest),
+        // pack and sign stages
+        "app" if bin == Binary::Nxb => return nxb_pack::cli::macapp::main(rest),
+        "ipa" if bin == Binary::Nxb => return nxb_pack::cli::ipa::main(rest),
+        "sign" if bin == Binary::Nxb => return nxb_pack::cli::sign::main(rest),
+        // pipeline archive stages
+        "pso" if bin == Binary::Nxb => return nxb_archive::cli::pso::main(rest),
+        "archive" if bin == Binary::Nxb => return nxb_archive::cli::archive::main(rest),
+        // the iOS scripts
+        "ios" if bin == Binary::Nxb => return nxb_build::ios_cli::main(rest),
+        // the own front end compiler
+        "airc" if bin == Binary::Nxb => return airc_main(rest),
         c => writeln!(err, "{}: unknown command {c:?} (try help)", bin.name()).map(|_| 2),
     };
     res.unwrap_or(1)
+}
+
+/// `nxb airc ...`: the front end compiler (`airc::main`), exit code 3 (unsupported) when built without the front end.
+#[cfg(feature = "air-front")]
+fn airc_main(args: &[String]) -> i32 {
+    airc::main(args)
+}
+
+/// Without the `air-front` feature there is no front end in the binary.
+#[cfg(not(feature = "air-front"))]
+fn airc_main(_args: &[String]) -> i32 {
+    eprintln!("nxb airc: this build has no own front end (feature air-front)");
+    3
 }
 
 /// `shaderbuild own-verdicts <validation.jsonl> [data-dir]`: write the shipped verdict file of this front end and this
@@ -116,7 +174,7 @@ fn own_verdicts(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i3
     let Some(jsonl) = args.first() else {
         let _ = writeln!(
             err,
-            "usage: shaderbuild own-verdicts <validation.jsonl> [data-dir]"
+            "usage: nxb shaders own-verdicts <validation.jsonl> [data-dir]"
         );
         return 2;
     };
@@ -141,7 +199,7 @@ fn own_verdicts(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i3
 /// `shaderbuild guards <b-dir> <out-dir> [jobs]`: write `c1_full.tsv` and `cb_extent.tsv`.
 fn guards(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
     let (Some(b), Some(o)) = (args.first(), args.get(1)) else {
-        let _ = writeln!(err, "usage: shaderbuild guards <b-dir> <out-dir> [jobs]");
+        let _ = writeln!(err, "usage: nxb shaders guards <b-dir> <out-dir> [jobs]");
         return 2;
     };
     let jobs = args.get(2).and_then(|j| j.parse().ok()).unwrap_or(6);
@@ -179,17 +237,46 @@ mod tests {
     fn version_and_help() {
         let (c, o, _) = call(Binary::Shaderbuild, &["version"]);
         assert_eq!(c, 0);
-        assert!(o.starts_with("shaderbuild "));
+        assert!(o.starts_with("nxb shaders "));
         let (c, o, _) = call(Binary::Nxb, &[]);
         assert_eq!(c, 0);
         assert!(o.contains("extract"));
     }
 
     #[test]
-    fn unknown_and_planned() {
+    fn unknown_help_and_usage() {
         assert_eq!(call(Binary::Nxb, &["frobnicate"]).0, 2);
-        let (c, _, e) = call(Binary::Shaderbuild, &["prune"]);
-        assert_eq!(c, 2);
-        assert!(e.contains("not implemented"));
+        assert_eq!(call(Binary::Shaderbuild, &["parity"]).0, 2);
+        let (c, o, _) = call(Binary::Nxb, &["help"]);
+        assert_eq!(c, 0);
+        for cmd in Binary::Nxb.commands() {
+            assert!(o.contains(cmd), "help lacks {cmd}");
+            let (c, o, _) = call(Binary::Nxb, &[cmd, "--help"]);
+            assert_eq!(c, 0, "{cmd} --help");
+            assert!(o.starts_with("usage: nxb"), "{cmd}: {o}");
+        }
+        for sub in ["recompile", "guards", "own-verdicts", "build"] {
+            let (c, o, _) = call(Binary::Nxb, &["shaders", sub]);
+            assert!(c == 2 && o.is_empty() || c == 1, "{sub}");
+            let (c, o, _) = call(Binary::Shaderbuild, &[sub, "--help"]);
+            assert!(c == 0 && o.contains(sub));
+        }
+    }
+
+    #[test]
+    fn shaders_is_shaderbuild() {
+        for args in [
+            vec!["guards"],
+            vec!["own-verdicts"],
+            vec!["recompile"],
+            vec!["prune"],
+            vec!["regressions", "/nonexistent-dir"],
+            vec!["frobnicate"],
+        ] {
+            let sb = call(Binary::Shaderbuild, &args);
+            let mut a = vec!["shaders"];
+            a.extend(&args);
+            assert_eq!(sb, call(Binary::Nxb, &a), "{args:?}");
+        }
     }
 }

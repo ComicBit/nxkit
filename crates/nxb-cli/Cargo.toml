@@ -1,6 +1,6 @@
 [package]
 name = "nxb-cli"
-description = "The nxb and shaderbuild binaries"
+description = "The nxb binary (multicall: the old program names are links to it)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -15,10 +15,6 @@ in_v = false
 name = "nxb"
 path = "src/bin/nxb.rs"
 
-[[bin]]
-name = "shaderbuild"
-path = "src/bin/shaderbuild.rs"
-
 [dependencies]
 nxb-model.workspace = true
 nxb-error.workspace = true
@@ -28,10 +24,15 @@ nxb-build.workspace = true
 nxb-extract.workspace = true
 nxb-tool.workspace = true
 nxb-store.workspace = true
+nxb-pack.workspace = true
+nxb-archive.workspace = true
+nxb-pyjson.workspace = true
+# The own front end command line (layer F, a member of this workspace): optional, see deps.toml.
+airc = { path = "../airc", optional = true }
 
 [features]
 default = ["air-front"]
-air-front = ["nxb-stages/air-front"]
+air-front = ["nxb-stages/air-front", "dep:airc"]
 
 [lints]
 workspace = true

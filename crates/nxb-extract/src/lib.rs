@@ -38,6 +38,7 @@ pub mod romfs;
 pub mod run;
 pub mod safe_path;
 pub mod split;
+pub mod split_cli;
 pub mod split_out;
 pub mod storage;
 pub mod version;

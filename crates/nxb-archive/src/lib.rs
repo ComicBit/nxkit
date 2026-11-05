@@ -11,6 +11,7 @@
 //! The planning half of `pso_offline.py` (pairs to bases, the script, `prebuilt.tsv`) is not ported yet: the stage
 //! takes the script it writes.
 
+pub mod cli;
 pub mod cut;
 pub mod plan;
 pub mod script;

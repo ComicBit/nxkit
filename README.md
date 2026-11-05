@@ -30,7 +30,7 @@ Version 0.4.0 is the fifth public release. It is early software. Read this secti
 - Not ported: the CRA archive family and each format that needs Oodle. These stop with exit code 4.
 - The reference scripts remain the fallback. If a stage fails or does not support an input, run the reference script for that stage.
   The tools return exit code 4 for an unsupported input. The caller then runs the reference script. Exit code 3 means damaged data.
-  The signer binary `nxb-pack` returns 3 for unsupported input, and the caller runs `codesign`.
+  The signer command `nxb sign` returns 3 for unsupported input, and the caller runs `codesign`.
 
 ### What is byte-identical to the reference scripts
 
@@ -52,7 +52,7 @@ more titles.
 | App stage and signer | tested bundles | app tree, `Info.plist` and `CodeResources` are byte-identical. The signer matches `codesign` |
 | Pipeline archive planning | 18,301 pairs | the plan files are byte-identical. `metal-tt` output is not deterministic, so archives are compared by content |
 | IPA writer | a 59-entry sample and a bundle with a 300 MB file | byte-identical. A full game IPA was not built |
-| iOS stages (`nxb-ios`) | generators and workspace writer on real and synthetic inputs, one title for the IPA | the generators are byte-identical. 75 of 75 IPA entries are equal in name, method, sizes, CRC and attributes. Two entries are equal in part only: the executable (only `__LINKEDIT` differs) and the font file |
+| iOS stages (`nxb ios`) | generators and workspace writer on real and synthetic inputs, one title for the IPA | the generators are byte-identical. 75 of 75 IPA entries are equal in name, method, sizes, CRC and attributes. Two entries are equal in part only: the executable (only `__LINKEDIT` differs) and the font file |
 | Overlap in `nxb build` | one title, extract, split and shaders reused | the event streams are the same, except the times. 58,211 of 58,211 paths exist in both outputs. All files are byte-identical, except two rebuilt Mach-O files and their lines in `CodeResources` |
 | Rewrite (`nxb rewrite`) | 25 real modules, with ZBIC, NRO and frame step stubs | all tables, `.patched.bin` and the fixups are byte-identical. 98 of 98 NRO modules also |
 | Rewrite, very large modules and three frame step builds | synthetic modules only | byte-identical to the script. The rules for real code of these builds are not tested |
@@ -99,7 +99,7 @@ limits it. The own front end is not byte-identical in the validated mode.
   vertex shaders as compute and the interlock function match are not ported. The C# translator does these keys.
 - The own-identical allow list is not in this repository. Without it, only the raw path runs. The rewrite rules are in `data/rewrite-rules`.
 - `nxb rewrite` stops with exit code 4 when the engine files are not the files that the rules come from.
-- `nxb split`, `nxb app`, `nxb ipa`, `nxb pso` and `nxb sign` print "not implemented yet". Use the separate binaries.
+- There is one program, `nxb`. The separate program names of earlier releases (`nxb-extract`, `nxb-split`, `nxb-ios`, `nxb-macapp`, `nxb-ipa`, `nxb-pack`, `nxb-pso`, `nxb-archive`, `shaderbuild`, `airc`) are gone. Use `nxb <command>`.
 - Not done: Windows and Linux. The process runner and the locks refuse to run there.
 - Two processes can write the same store key at the same time. The last writer wins. The files stay valid.
 - Parsers read untrusted files. Read [SECURITY.md](SECURITY.md) and [docs/security.md](docs/security.md) for the limits.
@@ -108,17 +108,19 @@ limits it. The own front end is not byte-identical in the validated mode.
 
 1. Download the ZIP file and the `SHA256SUMS` file from the release page.
 2. Check the file: `shasum -a 256 -c SHA256SUMS`.
-3. Unpack the ZIP file. The binaries have an ad-hoc signature.
-4. If macOS blocks a binary, remove the quarantine flag: `xattr -d com.apple.quarantine <file>`.
+3. Unpack the ZIP file. The binary `nxb` has an ad-hoc signature.
+4. If you downloaded the ZIP file with a browser, macOS can block the binary. Remove the quarantine flag of the whole folder: `xattr -dr com.apple.quarantine <folder>`.
 
 ## How to try this release
 
 This is a short path for a first test. The reference scripts stay the fallback.
 
-1. Unpack the ZIP file into one folder. Keep `nxb`, `nxb-extract`, `nxb-split`, `nxb-ios`, `airc` and the folder `rewrite-rules` together.
-   Add the folder to `PATH`, or give the full path of each binary.
+1. Unpack the ZIP file into one folder. The folder holds one program, `nxb`, and the folder `rewrite-rules`. Keep them together.
+   If you used a browser, run `xattr -dr com.apple.quarantine <folder>` first.
+   Add the folder to `PATH`, or give the full path of `nxb`. Every stage is a command of `nxb`: `nxb extract`, `nxb split`, `nxb shaders`, `nxb ios`, `nxb airc` and more. Run `nxb help` for the list.
 2. If the reference engine calls the tools for the extract and the split, set `DM_EXPERIMENTAL_BUILDER=1` and set `NXB_BIN` to the folder from step 1.
-   The engine then runs `nxb-extract` and `nxb-split`. It runs the reference step again when a tool returns a code that is not 0.
+   The engine then runs `nxb extract` and `nxb split`. It runs the reference step again when the command returns a code that is not 0.
+   An engine that still runs `nxb-extract` or `nxb-split` does not find them in this release. Make sure that your engine runs the commands.
 3. Test the rewrite step alone: `NXB_ENGINE=<engine folder> nxb rewrite <module> <out dir> <name>`. The engine folder must be the version that the rules come from. If not, the exit code is 4.
 4. Test the build: `nxb build --dry-run <arguments>` prints the stage graph. Then run `nxb build <arguments>`.
    The default platform is `ios`, as in the reference script. For a Mac app, add `--platform mac-app`.
@@ -131,33 +133,37 @@ This is a short path for a first test. The reference scripts stay the fallback.
 You need Rust 1.99 or newer and Xcode command line tools. The workspace has no external crates.
 
 ```sh
-cargo build --release      # output in ./target/release
+cargo build --release -p nxb-cli   # output: ./target/release/nxb
 tools/check.sh             # format, lints, tests, documentation, layer and size checks
 ```
 
 Set `CARGO_BUILD_JOBS` to limit parallel compiler processes. Set `CARGO_TARGET_DIR` to move the output.
 
-## Binaries
+## The program
 
-Every binary prints its usage when you run it without arguments.
+There is one program, `nxb`. Every stage is a command. Run `nxb help` for the list and `nxb <command> --help` for the usage of one command.
+The stage commands keep the command line and the exit codes of the programs of earlier releases. The table in [CHANGELOG.md](CHANGELOG.md) gives each old program name and its new command.
+The tests for this are small. Refer to the section 0.5.0 of the changelog.
 
-| binary | purpose |
+| command | purpose |
 |---|---|
-| `nxb` | the whole build. `nxb build --platform mac-app` (or `ios`) runs all ported stages. `--dry-run` prints the stage graph and the cache keys. Other commands: `extract`, `rewrite`, `rewrite-rules`, `nro`, `cache` |
-| `nxb-extract` | NSP, XCI, NSZ, XCZ, Switch 2 package (`.nup`, no keys needed) or dump folder (`--dump`) to RomFS images, ExeFS, control data and icon |
-| `nxb-split` | shader split of extracted images into package records and tables. Exit code 4 means unsupported format |
-| `shaderbuild` | the shader step: `build`, `recompile`, `guards`, `help`, `version` |
-| `nxb-pso` | plan and merge of the pipeline archive. Needs `metal-tt` and `metal-pack` |
-| `nxb-macapp` | the Mac app stage |
-| `nxb-ipa` | IPA writer |
-| `nxb-ios` | the iOS stages: `ipa [<out.ipa> \| --prepare-xcode]` and `shell --prepare-xcode \| --build`. Same command lines as the reference scripts. Exit code 4 means unsupported |
-| `nxb-pack` | ad-hoc signer for bundles and Mach-O files |
-| `airc` | the own MSL to AIR front end: `emit`, `bc`, `build`, `check`, `rank` |
+| `nxb build` | the whole build. `nxb build --platform mac-app` (or `ios`) runs all ported stages. `--dry-run` prints the stage graph and the cache keys |
+| `nxb extract` | NSP, XCI, NSZ, XCZ, Switch 2 package (`.nup`, no keys needed) or dump folder (`--dump`) to RomFS images, ExeFS, control data and icon |
+| `nxb split` | shader split of extracted images into package records and tables. Exit code 4 means unsupported format |
+| `nxb rewrite`, `nxb rewrite-rules`, `nxb nro` | the code rewrite step, the rule files and the NRO collection |
+| `nxb shaders` | the shader step: `build`, `recompile`, `guards`, `own-verdicts` |
+| `nxb pso`, `nxb archive` | plan and merge of the pipeline archive, and one archive from a script. They need `metal-tt` and `metal-pack` |
+| `nxb app` | the Mac app stage |
+| `nxb ipa` | IPA writer |
+| `nxb ios` | the iOS stages: `ipa [<out.ipa> \| --prepare-xcode]` and `shell --prepare-xcode \| --build`. Exit code 4 means unsupported |
+| `nxb sign` | ad-hoc signer for bundles and Mach-O files |
+| `nxb airc` | the own MSL to AIR front end: `emit`, `bc`, `build`, `check`, `rank` |
+| `nxb cache`, `nxb prune`, `nxb regressions`, `nxb self-check` | the shader cache of a title, the store and checks |
 
 ### Example
 
 ```sh
-nxb-extract --keys <prod.keys> --base <base.nsp> --out <dir> --update <update.nsp> <dir-v2>
+nxb extract --keys <prod.keys> --base <base.nsp> --out <dir> --update <update.nsp> <dir-v2>
 nxb build --dry-run <arguments>     # print the stage graph first
 ```
 
@@ -169,18 +175,18 @@ The tools read no fixed private path. Inputs come from arguments or from these v
 |---|---|---|
 | `NXB_TEST_TMP` | tests | scratch folder for store and I/O tests |
 | `DEVELOPER_DIR`, `SDKROOT` | `nxb-tool` | location of the Apple tools. They are passed to child tools |
-| `NXB_AIRC` | `tools/front` | the `airc` binary. Default is `target/release/airc` |
+| `NXB_AIRC` | `tools/front` | the `airc` binary of the front end workspace (`cargo build --release -p airc`). Default is `target/release/airc` |
 | `NXB_PROTO`, `NXB_REF`, `NXB_CORPUS`, `NXB_SPECS`, `NXB_CAS` | `tools/front`, `tools/gpudiff` | inputs that you provide. See `tools/README.md` |
 | `NXB_PARITY_*` | parity tests | game files for the comparison tests. Without them the tests skip |
 | `NXB_ORACLE_EXACT` | signer tests | set to `1` to compare bytes with the `codesign` of the host. Without it, the tests check that `codesign --verify` accepts our output. Set it on the Mac where the signer was proven |
-| `NXB_OWN_FRONT` | `shaderbuild` | set to `0` to turn off the own front end |
-| `NXB_OWN_RAW` | `shaderbuild`, `nxb build` | not set: the raw path is on for each shader that the front end accepts. `0`: off. `list`: only the shaders of the shipped raw allow list. A file name: only the shaders of that list |
-| `NXB_XLATE_RUST` | `shaderbuild`, `nxb build` | set to `0`, `off` or `false` to use only the C# translator |
-| `NXB_XLATE_HOST` | `shaderbuild`, `nxb build` | the translator host program and its arguments. `off` uses one process for each batch |
+| `NXB_OWN_FRONT` | `nxb shaders` | set to `0` to turn off the own front end |
+| `NXB_OWN_RAW` | `nxb shaders`, `nxb build` | not set: the raw path is on for each shader that the front end accepts. `0`: off. `list`: only the shaders of the shipped raw allow list. A file name: only the shaders of that list |
+| `NXB_XLATE_RUST` | `nxb shaders`, `nxb build` | set to `0`, `off` or `false` to use only the C# translator |
+| `NXB_XLATE_HOST` | `nxb shaders`, `nxb build` | the translator host program and its arguments. `off` uses one process for each batch |
 | `NXB_REWRITE_RULES` | `nxb rewrite` | a folder with rule files. The default is `rewrite-rules` next to the binary, then `data/rewrite-rules` of the checkout |
 | `NXB_REWRITE_PATCHES` | `nxb rewrite` | a snapshot file instead of the rule folder |
-| `NXB_TMP` | `nxb-extract` | a folder for decoded streams that do not fit in memory |
-| `NXB_ENGINE` | `nxb-ios`, `nxb rewrite` | the folder with the engine files that the iOS stages and the rewrite step read |
+| `NXB_TMP` | `nxb extract` | a folder for decoded streams that do not fit in memory |
+| `NXB_ENGINE` | `nxb ios`, `nxb rewrite` | the folder with the engine files that the iOS stages and the rewrite step read |
 | `NXB_ORACLE_*` | iOS tests | inputs for the tests that compare with the reference scripts. Without them the tests skip |
 
 ## Architecture

@@ -4,10 +4,10 @@
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::process::ExitCode;
 
-fn main() -> ExitCode {
-    let a: Vec<String> = std::env::args().skip(1).collect();
+/// `nxb archive` / `nxb-archive`: returns the exit code.
+pub fn main(args: &[String]) -> i32 {
+    let a = args;
     let mut o: BTreeMap<String, String> = BTreeMap::new();
     let mut i = 0;
     while i + 1 < a.len() {
@@ -24,7 +24,7 @@ fn main() -> ExitCode {
         g("o"),
     ) else {
         eprintln!("usage: see the header of nxb-archive.rs");
-        return ExitCode::from(2);
+        return 2;
     };
     let platform = g("platform").unwrap_or_else(|| "macos".into());
     let sdk = if platform == "ios" {
@@ -32,10 +32,10 @@ fn main() -> ExitCode {
     } else {
         "macosx"
     };
-    let find = |t: &str| nxb_archive::xcrun_find(sdk, t);
+    let find = |t: &str| crate::xcrun_find(sdk, t);
     let (Ok(metal_tt), Ok(metal_pack)) = (find("metal-tt"), find("metal-pack")) else {
         eprintln!("nxb-archive: metal-tt / metal-pack not found");
-        return ExitCode::from(1);
+        return 1;
     };
     let sdkroot = std::process::Command::new("/usr/bin/xcrun")
         .args(["-sdk", sdk, "--show-sdk-path"])
@@ -51,7 +51,7 @@ fn main() -> ExitCode {
     let cores = std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(8) as f64;
-    let c = nxb_archive::Config {
+    let c = crate::Config {
         script: script.into(),
         arch,
         platform,
@@ -76,15 +76,15 @@ fn main() -> ExitCode {
     };
     let mut c = c;
     if let Some(j) = g("nt-jobs").and_then(|v| v.parse().ok()) {
-        match nxb_archive::Direct::find(&c.metal_tt, &c.toolchain, sdk, j) {
+        match crate::Direct::find(&c.metal_tt, &c.toolchain, sdk, j) {
             Ok(d) => c.direct = Some(d),
             Err(e) => {
                 eprintln!("nxb-archive: {e}");
-                return ExitCode::from(1);
+                return 1;
             }
         }
     }
-    match nxb_archive::build(&c) {
+    match crate::build(&c) {
         Ok(r) => {
             let compiled: Vec<_> = r.batches.iter().filter(|b| !b.reused).collect();
             let cpu: f64 = compiled.iter().map(|b| b.cpu.as_secs_f64()).sum();
@@ -105,11 +105,11 @@ fn main() -> ExitCode {
                 rss as f64 / (1u64 << 30) as f64,
                 r.peak_mem as f64 / (1u64 << 30) as f64
             );
-            ExitCode::SUCCESS
+            0
         }
         Err(e) => {
             eprintln!("nxb-archive: {e}");
-            ExitCode::from(1)
+            1
         }
     }
 }

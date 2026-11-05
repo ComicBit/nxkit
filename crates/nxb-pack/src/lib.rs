@@ -30,6 +30,7 @@
 pub mod appstage;
 pub mod blob;
 pub mod bundle;
+pub mod cli;
 pub mod der;
 pub mod digest;
 pub mod error;
