@@ -1,0 +1,14 @@
+J	io/G-Switch.pak
+K	/io/G-Switch.pak#Game/Content/Q.uexp#UE4	ps	f341fd9bcedd1935	aa4007d631372e67
+J	io/G-Switch.pak
+K	/io/G-Switch.pak#Game/GlobalShaderCache-SF_GLSL_SWITCH.bin#UE4	ps	6381c834805430bc	911778a12990c1f4
+J	io/G-Switch.utoc
+K	/io/G-Switch.utoc#Game/Game/Content/Ia.uexp#UE18	vs	63484ea440594a21	49abf9a444e58d4f
+K	/io/G-Switch.utoc#Game/Game/Content/Ia.uexp#UE2f08	ps	f341fd9bcedd1935	aa4007d631372e67
+K	/io/G-Switch.utoc#Game/Game/Content/Ia.uexp#UE90b	ps	875fc4d3489c6006	a7e6029145f0a20b
+K	/io/G-Switch.utoc#Game/Game/Content/Ia.uexp#UE12bf	cs	e6c336a2548e7ba4	99f1c9f538d27e4c
+J	io/G-Switch.utoc
+K	/io/G-Switch.utoc#Game/Game/Content/Ib.uexp#UE4	ps	6381c834805430bc	911778a12990c1f4
+J	io/G-Switch_0_P.utoc
+K	/io/G-Switch_0_P.utoc#040000000000000000000002#UE4	ps	f341fd9bcedd1935	aa4007d631372e67
+T	io/G-Switch.pak,io/G-Switch.ucas,io/G-Switch.utoc,io/G-Switch_0_P.ucas,io/G-Switch_0_P.utoc

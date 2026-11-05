@@ -31,6 +31,31 @@ pub fn decompress_stream(
     limit: u64,
     sink: &mut Sink<'_>,
 ) -> R<u64> {
+    stream_n(input, input_len, limit, sink, false).map(|x| x.0)
+}
+
+/// The first frame of `d` only: its output and the bytes it took (`ZstdDecompressor().decompress` with `unused_data`).
+pub fn decompress_one(d: &[u8], limit: u64, sink: &mut Sink<'_>) -> R<(u64, usize)> {
+    let mut at = 0usize;
+    let mut input = |buf: &mut [u8]| -> R<()> {
+        let part = d
+            .get(at..at + buf.len())
+            .ok_or_else(|| err("input ends inside a frame"))?;
+        buf.copy_from_slice(part);
+        at += buf.len();
+        Ok(())
+    };
+    let (n, used) = stream_n(&mut input, d.len() as u64, limit, sink, true)?;
+    Ok((n, used as usize))
+}
+
+fn stream_n(
+    input: &mut Input<'_>,
+    input_len: u64,
+    limit: u64,
+    sink: &mut Sink<'_>,
+    one: bool,
+) -> R<(u64, u64)> {
     let mut used = 0u64;
     let mut total = 0u64;
     let take = |n: usize, used: &mut u64, input: &mut Input<'_>| -> R<Vec<u8>> {
@@ -132,8 +157,11 @@ pub fn decompress_stream(
         sink(&out)?;
         total += out.len() as u64;
         out.clear();
+        if one {
+            break;
+        }
     }
-    Ok(total)
+    Ok((total, used))
 }
 
 /// Like [`super::decompress`] with a limit on the size of the output.

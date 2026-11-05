@@ -4,11 +4,11 @@ version = 4
 
 [[package]]
 name = "air-bc"
-version = "0.3.0"
+version = "0.4.0"
 
 [[package]]
 name = "air-emit"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "msl-parse",
  "msl-sema",
@@ -16,7 +16,7 @@ dependencies = [
 
 [[package]]
 name = "air-front"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "air-bc",
  "air-emit",
@@ -26,11 +26,11 @@ dependencies = [
 
 [[package]]
 name = "air-lib"
-version = "0.3.0"
+version = "0.4.0"
 
 [[package]]
 name = "airc"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "air-bc",
  "air-emit",
@@ -42,25 +42,25 @@ dependencies = [
 
 [[package]]
 name = "msl-lex"
-version = "0.3.0"
+version = "0.4.0"
 
 [[package]]
 name = "msl-parse"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "msl-lex",
 ]
 
 [[package]]
 name = "msl-sema"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "msl-parse",
 ]
 
 [[package]]
 name = "mslcheck"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "msl-lex",
  "msl-parse",
@@ -68,14 +68,14 @@ dependencies = [
 
 [[package]]
 name = "nxb-a64"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "nxb-model",
 ]
 
 [[package]]
 name = "nxb-air"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "nxb-model",
  "nxb-shader",
@@ -83,7 +83,7 @@ dependencies = [
 
 [[package]]
 name = "nxb-archive"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "nxb-model",
  "nxb-pyjson",
@@ -95,29 +95,33 @@ dependencies = [
 
 [[package]]
 name = "nxb-build"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "nxb-archive",
  "nxb-extract",
  "nxb-model",
+ "nxb-nro",
+ "nxb-obs",
  "nxb-pack",
  "nxb-pyjson",
+ "nxb-rewrite",
  "nxb-sched",
  "nxb-shader",
  "nxb-stages",
+ "nxb-sys",
  "nxb-tool",
 ]
 
 [[package]]
 name = "nxb-bundle"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "nxb-model",
 ]
 
 [[package]]
 name = "nxb-cli"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "nxb-build",
  "nxb-error",
@@ -131,21 +135,21 @@ dependencies = [
 
 [[package]]
 name = "nxb-codec"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "nxb-model",
 ]
 
 [[package]]
 name = "nxb-crypto"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "nxb-model",
 ]
 
 [[package]]
 name = "nxb-error"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "nxb-model",
  "nxb-testkit",
@@ -153,7 +157,7 @@ dependencies = [
 
 [[package]]
 name = "nxb-extract"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "nxb-model",
  "nxb-pyjson",
@@ -164,7 +168,7 @@ dependencies = [
 
 [[package]]
 name = "nxb-hos"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "nxb-error",
  "nxb-model",
@@ -172,7 +176,7 @@ dependencies = [
 
 [[package]]
 name = "nxb-io"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "nxb-error",
  "nxb-model",
@@ -180,16 +184,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "nxb-maxwell"
+version = "0.4.0"
+
+[[package]]
 name = "nxb-model"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "nxb-sys",
  "nxb-testkit",
 ]
 
 [[package]]
+name = "nxb-nro"
+version = "0.4.0"
+dependencies = [
+ "nxb-model",
+ "nxb-split",
+]
+
+[[package]]
 name = "nxb-obs"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "nxb-error",
  "nxb-model",
@@ -198,7 +214,7 @@ dependencies = [
 
 [[package]]
 name = "nxb-pack"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "nxb-model",
  "nxb-pyjson",
@@ -207,21 +223,25 @@ dependencies = [
 
 [[package]]
 name = "nxb-plist"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "nxb-model",
 ]
 
 [[package]]
+name = "nxb-profile"
+version = "0.4.0"
+
+[[package]]
 name = "nxb-pso"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "nxb-model",
 ]
 
 [[package]]
 name = "nxb-pyjson"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "nxb-model",
  "nxb-testkit",
@@ -229,22 +249,23 @@ dependencies = [
 
 [[package]]
 name = "nxb-rewrite"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
+ "nxb-a64",
  "nxb-error",
  "nxb-model",
 ]
 
 [[package]]
 name = "nxb-romfs"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "nxb-model",
 ]
 
 [[package]]
 name = "nxb-sched"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "nxb-error",
  "nxb-model",
@@ -254,7 +275,7 @@ dependencies = [
 
 [[package]]
 name = "nxb-shader"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "nxb-error",
  "nxb-model",
@@ -264,15 +285,19 @@ dependencies = [
 
 [[package]]
 name = "nxb-split"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "nxb-error",
  "nxb-model",
 ]
 
 [[package]]
+name = "nxb-spvgen"
+version = "0.4.0"
+
+[[package]]
 name = "nxb-stages"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "nxb-air",
  "nxb-error",
@@ -289,7 +314,7 @@ dependencies = [
 
 [[package]]
 name = "nxb-store"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "nxb-error",
  "nxb-model",
@@ -299,30 +324,51 @@ dependencies = [
 
 [[package]]
 name = "nxb-sys"
-version = "0.3.0"
+version = "0.4.0"
 
 [[package]]
 name = "nxb-testkit"
-version = "0.3.0"
+version = "0.4.0"
 
 [[package]]
 name = "nxb-tool"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "air-front",
  "nxb-error",
  "nxb-model",
  "nxb-sys",
  "nxb-testkit",
+ "nxb-xlate",
+]
+
+[[package]]
+name = "nxb-xlate"
+version = "0.4.0"
+dependencies = [
+ "nxb-maxwell",
+ "nxb-model",
+ "nxb-pyjson",
+ "nxb-spvgen",
+]
+
+[[package]]
+name = "nxb-xlatedev"
+version = "0.4.0"
+dependencies = [
+ "nxb-pyjson",
+ "nxb-shader",
+ "nxb-stages",
+ "nxb-xlate",
 ]
 
 [[package]]
 name = "nxb-zip"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "nxb-model",
 ]
 
 [[package]]
 name = "xtask"
-version = "0.3.0"
+version = "0.4.0"

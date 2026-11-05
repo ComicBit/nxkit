@@ -11,8 +11,7 @@ use nxb_sched::{Budget, Executor, Report, SingleFlight, Task};
 use nxb_shader::{pch, target::MAC};
 use nxb_store::{Durability, Store};
 use nxb_tool::{
-    EnvPolicy, Io, MetalTools, ProcessRegistry, ProcessTool, ProcessTranslator, Resolver, SdkRoots,
-    ToolId, XlateConfig,
+    EnvPolicy, Io, MetalTools, ProcessRegistry, ProcessTool, Resolver, SdkRoots, ToolId,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -64,12 +63,18 @@ pub struct BuildConfig {
     pub on_done: Option<OnDone>,
     /// The key list, once known.
     pub on_start: Option<OnStart>,
-    /// Drive the translator as a persistent host with these arguments (`HostTranslator`).`None`: a process per batch.
+    /// Drive the translator as a persistent host: program and arguments (`xlatehost::resolve`).`None`: a process per batch.
     pub xlate_host: Option<Vec<String>>,
+    /// Translate in process with the Rust translator, the C# bridge taking each key it refuses (`xlatehost::resolve_rust`).
+    pub xlate_rust: bool,
     /// Also build the iOS libraries (same sources, `ios_metal.py` convention) into `<ios_out>/b-<chain>/`.
     pub ios_out: Option<PathBuf>,
     /// Keys to translate first, in this order (empty: pixel and compute shaders, then paired vertex shaders).
     pub order: Vec<String>,
+    /// Keys a title used: translated first, in this order (empty: no change).
+    pub manifest: Vec<String>,
+    /// Build only the manifest's keys, mark the folder partial (`_b_partial.json`).
+    pub partial: bool,
 }
 
 /// One line of the timeline: what ran, when, how long.
@@ -96,14 +101,18 @@ pub struct BuildReport {
     pub spans: Vec<Span>,
     /// Wall time.
     pub wall: Duration,
-    /// Own front end: libraries made, fallbacks to Apple.
+    /// Own front end: libraries made, fallbacks to Apple, and why it is on or off.
     pub own: Option<(u64, u64)>,
-    /// Why the own front end is on or off.
+    /// The note on the own front end.
     pub own_note: String,
     /// Translator processes started (.NET launches).
     pub xlate_runs: u64,
     /// Translations answered from the store (early cutoff).
     pub xlate_hits: u64,
+    /// Translator host restarts after a crash or hang.
+    pub xlate_restarts: u32,
+    /// Keys sent to the process bridge after a host failure, by reason.
+    pub xlate_fallbacks: Vec<(String, u64)>,
 }
 
 pub(crate) fn fatal(what: &str, e: impl std::fmt::Display) -> Fatal {
@@ -111,7 +120,7 @@ pub(crate) fn fatal(what: &str, e: impl std::fmt::Display) -> Fatal {
 }
 
 /// Run the build.
-pub fn build(cfg: BuildConfig) -> Result<BuildReport, Fatal> {
+pub fn build(mut cfg: BuildConfig) -> Result<BuildReport, Fatal> {
     let t0 = Instant::now();
     let out = cfg.out.join(format!("b-{}", cfg.chain));
     let tmp = cfg.scratch.join("tmp");
@@ -123,6 +132,7 @@ pub fn build(cfg: BuildConfig) -> Result<BuildReport, Fatal> {
     }
     let inputs =
         ShaderInputs::load(&cfg.pkg, &cfg.profile).map_err(|e| fatal("profile tables", e))?;
+    let total = crate::build_partial::prepare(&mut cfg, &out, &inputs.loc)?;
     let pairs = crate::build_shared::pairs(&cfg);
     let keys: Vec<String> = if cfg.keys.is_empty() {
         inputs.loc.keys().cloned().collect()
@@ -212,23 +222,15 @@ pub fn build(cfg: BuildConfig) -> Result<BuildReport, Fatal> {
         path: cfg.xlate.clone(),
         version: String::new(),
     };
-    // a persistent host when asked for (`xlate_host`: its arguments), else a process per batch
-    let translator = match &cfg.xlate_host {
-        Some(args) => crate::build_finish::Xlate::Host(nxb_tool::HostTranslator::new(
-            xid,
-            nxb_tool::HostConfig {
-                program: cfg.xlate.clone(),
-                args: args.clone(),
-                env: xenv,
-                per_job: Duration::from_secs(60),
-            },
-        )),
-        None => crate::build_finish::Xlate::Batch(ProcessTranslator::new(
-            xid,
-            registry.clone(),
-            XlateConfig::new(cfg.scratch.join("x"), xenv),
-        )),
-    };
+    let translator = crate::xlatehost::open(
+        xid,
+        &registry,
+        &cfg.scratch,
+        xenv,
+        cfg.xlate_host.as_deref(),
+        cfg.xlate_rust,
+    )
+    .map_err(|e| fatal("translator host work folder", e))?;
     let sc = ProcessTool::new(
         ToolId {
             name: "spirv-cross".into(),
@@ -305,12 +307,7 @@ pub fn build(cfg: BuildConfig) -> Result<BuildReport, Fatal> {
     // Batches: small ones first so every token gets work at once, then large ones (one .NET start per batch).
     let mut tasks = Vec::new();
     let mut order: Vec<&String> = phase_a.iter().chain(&phase_b).collect();
-    if !cfg.order.is_empty() {
-        // a consumer's order first (the archive's pair groups), the rest after, each part stable
-        let pos: BTreeMap<&String, usize> =
-            cfg.order.iter().enumerate().map(|(i, k)| (k, i)).collect();
-        order.sort_by_key(|k| pos.get(k).copied().unwrap_or(usize::MAX));
-    }
+    crate::build_partial::sort(&cfg, &mut order);
     let (small, large) = (cfg.batch_first.max(1), cfg.batch.max(1));
     let mut at = 0;
     let mut n = 0usize;
@@ -375,19 +372,22 @@ pub fn build(cfg: BuildConfig) -> Result<BuildReport, Fatal> {
         crate::guard_tables::write(&out, &cfg.work.join("tables"), cfg.jobs)
             .map_err(|e| fatal("guard tables", e))?;
     }
+    crate::build_partial::mark(&cfg, &out, &results, total)?;
     for d in ["tmp", "x"] {
         let _ = fs::remove_dir_all(cfg.scratch.join(d));
     }
     let _ = fs::remove_dir(&cfg.scratch);
     let spans = std::mem::take(&mut *shared.spans.lock().unwrap_or_else(PoisonError::into_inner));
-    let own = shared.own.as_ref().map(|o| {
-        use std::sync::atomic::Ordering::Relaxed;
-        (o.own.load(Relaxed), o.fallback.load(Relaxed))
-    });
+    let own_note = shared
+        .own
+        .as_ref()
+        .map_or(own_note.clone(), |o| o.note(&own_note));
     Ok(BuildReport {
-        own,
+        own: shared.own.as_ref().map(|o| o.counts()),
         own_note,
         xlate_runs: shared.translator.inner().runs(),
+        xlate_restarts: shared.translator.inner().restarts(),
+        xlate_fallbacks: shared.translator.inner().fallbacks(),
         xlate_hits: shared
             .translator
             .hits

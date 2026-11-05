@@ -86,7 +86,7 @@ fn every_profile_equals_the_reference_scripts() {
     };
     let engine = Path::new(&engine);
     let text = std::fs::read_to_string(&manifest).unwrap();
-    let (mut same, mut skipped) = (0, 0);
+    let mut same = 0;
     for line in text.lines() {
         let c: Vec<&str> = line.split('\t').collect();
         let (kind, gid, plat, gfx, lang, patched, control, want) =
@@ -94,11 +94,7 @@ fn every_profile_equals_the_reference_scripts() {
         let p = Profiles::new(engine, &|_| None);
         if kind == "header" {
             let g = p.load(gid).unwrap();
-            if !g.get_or("programs", "").is_empty() {
-                skipped += 1; // game.py header writes the multi-program table
-                continue;
-            }
-            let got = header_one(&g, &p.here);
+            let got = super::header_multi::header(&g, &p);
             if want == "-" {
                 assert!(got.is_err(), "{gid}: the reference refused the header");
             } else {
@@ -129,7 +125,7 @@ fn every_profile_equals_the_reference_scripts() {
         }
         same += 1;
     }
-    eprintln!("{same} outputs identical, {skipped} multi-program headers skipped");
+    eprintln!("{same} outputs identical");
     assert!(same > 0);
 }
 

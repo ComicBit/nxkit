@@ -5,14 +5,23 @@
 
 pub mod embed;
 pub mod etree;
+pub mod extfont;
+mod fontpen;
 pub mod genbuild;
 pub mod ipa;
+mod ipafw;
 mod ipagen;
 pub mod ipapack;
+mod ipaprog;
 pub mod manifest;
+pub mod nacp;
+pub mod pso;
 pub mod resources;
+pub mod romfs;
 pub mod script;
 pub mod shell;
+mod ttf;
+mod ttf_read;
 pub mod workspace;
 
 /// `shlex.quote`.

@@ -1,13 +1,33 @@
 //! Executable module parsing (NSO, NRO) and the AArch64 rewriter with its rules and TSV outputs (replaces `patch_nso.py`).
 //!
-//! Status: skeleton. The modules below are placeholders that fix the crate's shape, see
-//! `docs/workspace-layout.md` for the planned public surface.
+//! Oracle: the reference script on real modules, byte-identical output (`tests/oracle.rs`, environment variables
+//! `NXB_REWRITE_*`).
 
+mod analyse;
+mod cuts;
+mod error;
+mod frame;
+mod jumps;
+mod jumps2;
+mod jumps3;
+mod matchfn;
 /// NSO and NRO parsing.
-pub mod nso {}
+pub mod nso;
+mod obs;
+mod pat;
+/// The registered patches of the engine.
+pub mod patches;
+mod rewrite;
+/// The registered patches as `rules/*.toml`.
+pub mod rules;
+mod rw;
+mod scan;
+mod sites;
+mod spin;
+mod spin2;
+mod spinreg;
+mod windows;
+mod zbic;
 
-/// One file per rewrite rule, collected by `registry()`.
-pub mod rules {}
-
-/// The five TSV outputs per module.
-pub mod tables {}
+pub use error::RewriteError;
+pub use rewrite::{Options, Output, rewrite};

@@ -11,6 +11,7 @@ pub mod shaders {}
 pub mod build;
 mod build_finish;
 mod build_hooks;
+mod build_partial;
 mod build_shared;
 mod build_xlate;
 pub mod front;
@@ -24,6 +25,7 @@ pub mod recompile_summary;
 mod recompile_variants;
 pub mod vertex;
 pub mod xlate_cache;
+pub mod xlatehost;
 
 /// The extract stage.
 pub mod extract {}

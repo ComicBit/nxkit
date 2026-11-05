@@ -7,7 +7,7 @@ For the decisions behind this structure, refer to [decisions.md](decisions.md).
 
 - The repository is one Cargo workspace. All crates are in `crates/`. The developer tools are in `xtask/`.
 - Each crate has the name `nxb-<concern>`. The front-end crates of layer F keep their names (`msl-*`, `air-*`, `airc`, `mslcheck`).
-- `nxb-cli` makes two binaries from the same code: `nxb` (the full build) and `shaderbuild` (the shader step).
+- `nxb-cli` makes two binaries from the same code: `nxb` (the full build, with the commands `build`, `extract`, `rewrite`, `rewrite-rules`, `nro` and `cache`) and `shaderbuild` (the shader step).
 - `nxb-build` makes the binary `nxb-ios` (the iOS stages) in addition to the library of the orchestrator.
 - The workspace uses the standard library only. At this time, it has no external crates.
 
@@ -20,9 +20,9 @@ A crate can use only crates of a lower layer, plus the sideways edges in the tab
 ```mermaid
 flowchart TD
   L3["L3 connection code: nxb-stages, nxb-cli, nxb-extract, nxb-pack, nxb-archive, nxb-build"]
-  L2["L2 runtime, not in V: nxb-obs, nxb-tool, nxb-store, nxb-sched, nxb-io"]
-  L1["L1 domain, no I/O: nxb-pyjson, nxb-shader, nxb-air, nxb-crypto, nxb-codec, nxb-a64, nxb-plist, nxb-hos, nxb-romfs, nxb-rewrite, nxb-split, nxb-bundle, nxb-zip, nxb-pso"]
-  L0["L0 foundation: nxb-model, nxb-error (in V), nxb-sys (the only unsafe code)"]
+  L2["L2 runtime, not in V: nxb-obs, nxb-tool, nxb-store, nxb-sched, nxb-io, nxb-nro, nxb-profile"]
+  L1["L1 domain, no I/O: nxb-pyjson, nxb-shader, nxb-air, nxb-xlate, nxb-crypto, nxb-codec, nxb-a64, nxb-plist, nxb-hos, nxb-romfs, nxb-rewrite, nxb-split, nxb-bundle, nxb-zip, nxb-pso"]
+  L0["L0 foundation: nxb-model, nxb-error, nxb-maxwell, nxb-spvgen (in V), nxb-sys (the only unsafe code)"]
   LF["F front end, standard library only: msl-lex, msl-parse, msl-sema, air-emit, air-bc, air-front, airc, mslcheck"]
   L3 --> L2 --> L0
   L3 --> L1 --> L0
@@ -53,6 +53,8 @@ The rules:
 | nxb-split | nxb-codec, nxb-romfs | decompression, the walk through the image |
 | nxb-bundle | nxb-plist | `Info.plist` |
 | nxb-zip | nxb-codec | deflate |
+| nxb-xlate | nxb-pyjson, nxb-maxwell, nxb-spvgen | the JSON of `res.json`, the machine code decoders, the SPIR-V generator |
+| nxb-nro | nxb-split | the reader of the large archive |
 | nxb-pso | nxb-pyjson | tables and stamps |
 | nxb-cli, nxb-build | nxb-extract, nxb-pack, nxb-archive | the L3 stage crates (W19) |
 | nxb-cli | nxb-build | the `nxb build` orchestrator (W19) |
@@ -68,23 +70,30 @@ The rules:
 | nxb-model | L0 | yes | impl | identifiers (`ShaderKey`, `TitleId`, `Target`, `StageId`), `Digest`, own SHA-256, `ContentKey`, `HashingWriter` |
 | nxb-error | L0 | yes | impl | error classes, reason strings, `BuildError`, `EnvError` with errno classes |
 | nxb-sys | L0 | no | impl | process groups, memory size, core counts, locks, clonefile, zlib, AES, SHA instructions |
+| nxb-maxwell | L0 | yes | impl | decoders for Maxwell and Ampere (sm_86) machine code of the game GPU |
+| nxb-spvgen | L0 | yes | impl | the SPIR-V generator (generated builder and enum tables) |
 | nxb-pyjson | L1 | yes | impl | a JSON writer that gives the same bytes as Python `json.dumps`. Measured: byte-identical on 16,269 JSON files of the reference title. |
 | nxb-shader | L1 | yes | impl | MSL lexer, parser, passes, NVN decode, reflection, variants, guards, keys, `OutputFile` |
 | nxb-air | L1 | yes | skel | the in-process front end (planned, W18) |
-| nxb-crypto, nxb-codec, nxb-a64, nxb-plist, nxb-hos, nxb-romfs, nxb-rewrite, nxb-bundle, nxb-zip, nxb-pso | L1 | no | skel | pure domain logic. Some of it is in the stage crates at this time. |
-| nxb-split | L1 | no | impl | containers, shader keys, package records and tables. It supports the container formats of the three tested titles. Other formats stop with a named `Unsupported` error. |
-| nxb-obs | L2 | no | impl | NDJSON events and sinks |
-| nxb-tool | L2 | no | impl | `Tool` trait, `Invocation`, environment allow list, watchdog, circuit breaker, `Translator` trait, `FrontEnd` trait |
-| nxb-store | L2 | no | impl | content-addressed blobs, keyed entries with manifests, quarantine |
+| nxb-xlate | L1 | yes | impl | the Rust translator: decode, control flow, SSA, passes, structured IR, SPIR-V and `ShaderInterface`. Refer to [translator.md](translator.md) |
+| nxb-a64 | L1 | no | impl | an AArch64 decoder and the encoders for the rewrite step. It follows Capstone 5 for the fields that the rewriter uses |
+| nxb-rewrite | L1 | no | impl | the code rewrite: NSO and NRO load, ZBIC decoder, rules as data, the five tables |
+| nxb-crypto, nxb-codec, nxb-plist, nxb-hos, nxb-romfs, nxb-bundle, nxb-zip, nxb-pso | L1 | no | skel | pure domain logic. Some of it is in the stage crates at this time. |
+| nxb-split | L1 | no | impl | containers, shader keys, package records and tables. It supports many container families (refer to [pipeline-stages.md](pipeline-stages.md)). Formats that are not ported stop with a named `Unsupported` error and exit code 4. |
+| nxb-obs | L2 | no | impl | NDJSON events, sinks and the code table (`code` and `severity`) |
+| nxb-nro | L2 | no | impl | the NRO collection (`nxb nro`) |
+| nxb-profile | L2 | no | impl | the profile of a game as typed data, with a TOML reader and writer. No stage uses it yet |
+| nxb-tool | L2 | no | impl | `Tool` trait, `Invocation`, environment allow list, watchdog, circuit breaker, `Translator` trait (Rust translator, host and process bridge), `FrontEnd` trait |
+| nxb-store | L2 | no | impl | content-addressed blobs, keyed entries with manifests, quarantine, cache export and import |
 | nxb-sched | L2 | no | impl | work-stealing executor with token and memory budgets, single-flight |
 | nxb-io | L2 | no | impl | parallel reader, ordered writer, tree clone, digest index |
 | nxb-stages | L3 | no | impl | one module for each stage, the shader step |
 | nxb-cli | L3 | no | impl | the binaries `nxb` and `shaderbuild` |
-| nxb-extract | L3 | no | impl | extract and fused split for NSP packages |
+| nxb-extract | L3 | no | impl | extract and fused split for NSP, XCI, NSZ, NUP and dump folders. The binaries are `nxb-extract` and `nxb-split` |
 | nxb-pack | L3 | no | impl | the Mac app stage, the ad-hoc signer, the IPA writer |
 | nxb-archive | L3 | no | impl | the pipeline archive: plan, batches, merge |
-| nxb-build | L3 | no | impl | the orchestrator `nxb build` |
-| nxb-testkit, xtask | dev | no | impl | seeded generators, the parity differ, the layer and size checks |
+| nxb-build | L3 | no | impl | the orchestrator `nxb build`, the rewrite step, the host stages and the iOS stages |
+| nxb-testkit, nxb-xlatedev, xtask | dev | no | impl | seeded generators, the parity differ, the corpus tools of the Rust translator (`xlate-corpus`, `xlate-diff`), the layer and size checks |
 | msl-lex, msl-parse, msl-sema, air-emit, air-bc, air-front, airc, mslcheck | F | no | impl | the own front end. Refer to [frontend.md](frontend.md). |
 
 ## Data flow of the stages

@@ -37,6 +37,8 @@ pub mod fat;
 pub mod hash;
 pub mod incremental;
 pub mod ipa;
+mod ipa_reuse;
+mod ipa_zip;
 pub mod macapp;
 pub mod macho;
 pub mod macho_sign;

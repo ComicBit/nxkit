@@ -5,13 +5,15 @@
 
 use crate::SplitError;
 
+mod dict;
 mod huf;
 mod stream;
 #[cfg(test)]
 mod tests;
 
+pub use dict::{Dicts, decompress_dict, dict_id};
 use huf::Huf;
-pub use stream::{Input, Sink, decompress_limited, decompress_stream};
+pub use stream::{Input, Sink, decompress_limited, decompress_one, decompress_stream};
 
 pub(crate) fn err(m: &str) -> SplitError {
     SplitError::Format(format!("zstd: {m}"))
@@ -476,8 +478,26 @@ fn block(d: &[u8], st: &mut State, out: &mut Vec<u8>, frame_start: usize) -> R<(
     Ok(())
 }
 
-/// Decompresses every frame of `d` (skippable frames skipped). A frame naming a dictionary is `Unsupported`.
+/// Output limit of [`decompress`]: a frame of RLE blocks expands about 30,000 times, so a small file could ask for
+/// terabytes. Larger outputs are `Unsupported` (the reference step decodes them).
+pub const DEFAULT_LIMIT: usize = 1 << 30;
+
+/// Decompresses every frame of `d` (skippable frames skipped). A frame naming a dictionary, or more than
+/// [`DEFAULT_LIMIT`] bytes of output, is `Unsupported`.
 pub fn decompress(d: &[u8]) -> R<Vec<u8>> {
+    frames(d, DEFAULT_LIMIT, &Dicts::new(), |n| {
+        SplitError::Unsupported(format!("zstd output over {n} bytes"))
+    })
+}
+
+/// Like [`decompress`] when the size of the output is known: more than `limit` bytes is a format error.
+pub fn decompress_max(d: &[u8], limit: usize) -> R<Vec<u8>> {
+    frames(d, limit, &Dicts::new(), |n| {
+        err(&format!("output larger than {n} bytes"))
+    })
+}
+
+fn frames(d: &[u8], limit: usize, dicts: &Dicts, over: impl Fn(usize) -> SplitError) -> R<Vec<u8>> {
     let mut out = Vec::new();
     let mut i = 0usize;
     while i < d.len() {
@@ -506,19 +526,36 @@ pub fn decompress(d: &[u8]) -> R<Vec<u8>> {
             _ => 8,
         };
         let mut at = i + 5 + usize::from(!single);
-        if d.get(at..at + did)
-            .is_some_and(|x| x.iter().any(|&b| b != 0))
-        {
-            return Err(SplitError::Unsupported(
-                "zstd frames with a dictionary".into(),
-            ));
-        }
+        let id = d.get(at..at + did).map_or(0, |b| {
+            b.iter().rev().fold(0u32, |a, &x| a << 8 | u32::from(x))
+        });
         at += did + fcs;
-        let start_len = out.len();
+        let frame_base = out.len();
         let mut st = State {
             rep: [1, 4, 8],
             ..State::default()
         };
+        let mut dict_len = 0;
+        if id != 0 {
+            let Some(dict) = dicts.0.get(&id) else {
+                return Err(if dicts.is_empty() {
+                    SplitError::Unsupported("zstd frames with a dictionary".into())
+                } else {
+                    SplitError::Red(format!(
+                        "a frame needs zstd dictionary {id}, which Pack/ZsDic.pack.zs does not have"
+                    ))
+                });
+            };
+            // the dictionary's content is the history before the frame: matches may reach into it
+            out.extend_from_slice(&dict.content);
+            dict_len = dict.content.len();
+            st.huf = dict.huf.clone();
+            st.ll = Some(dict.ll.clone());
+            st.of = Some(dict.of.clone());
+            st.ml = Some(dict.ml.clone());
+            st.rep = dict.rep;
+        }
+        let start_len = out.len() - dict_len;
         loop {
             let h = d.get(at..at + 3).ok_or_else(|| err("block header"))?;
             let h = h[0] as usize | (h[1] as usize) << 8 | (h[2] as usize) << 16;
@@ -542,6 +579,10 @@ pub fn decompress(d: &[u8]) -> R<Vec<u8>> {
                 }
                 _ => return Err(err("reserved block type")),
             }
+            // a block adds at most 2 MiB (RLE), so the check after the block bounds the memory
+            if out.len() > limit {
+                return Err(over(limit));
+            }
             at += if ty == 1 { 1 } else { size };
             if last {
                 break;
@@ -549,6 +590,9 @@ pub fn decompress(d: &[u8]) -> R<Vec<u8>> {
         }
         if fhd & 4 != 0 {
             at += 4;
+        }
+        if dict_len > 0 {
+            out.drain(frame_base..frame_base + dict_len);
         }
         i = at;
     }

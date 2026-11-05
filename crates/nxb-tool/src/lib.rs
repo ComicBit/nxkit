@@ -9,6 +9,7 @@ mod apple;
 mod breaker;
 mod env;
 mod frontend;
+mod hostwire;
 mod invocation;
 mod process;
 mod tool;
@@ -16,6 +17,7 @@ mod toolchain;
 mod translator;
 mod xlate_host;
 mod xlate_process;
+mod xlate_rust;
 
 #[cfg(feature = "air-front")]
 pub mod airfront;
@@ -33,3 +35,4 @@ pub use toolchain::{MissingSdk, Resolver, SdkRoots};
 pub use translator::{Translator, XlateFailure, XlateJob, XlateOutput, XlateResult};
 pub use xlate_host::{HostConfig, HostTranslator};
 pub use xlate_process::{ProcessTranslator, XlateConfig};
+pub use xlate_rust::{ENV_SWITCH as XLATE_RUST_ENV, RustTranslator};

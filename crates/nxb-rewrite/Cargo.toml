@@ -14,6 +14,7 @@ in_v = false
 [dependencies]
 nxb-model.workspace = true
 nxb-error.workspace = true
+nxb-a64.workspace = true
 
 [lints]
 workspace = true

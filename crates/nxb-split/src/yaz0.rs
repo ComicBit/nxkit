@@ -7,7 +7,9 @@ pub fn decode(s: &[u8], label: &str) -> Result<Vec<u8>, SplitError> {
     let n = s
         .get(4..8)
         .map_or(0, |b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]) as usize);
-    let mut out: Vec<u8> = Vec::with_capacity(n);
+    // `n` comes from the header (up to 4 GiB): reserve no more than the input can give (at most about 87 bytes of
+    // output per byte of input), the vector grows past that only as bytes are decoded
+    let mut out: Vec<u8> = Vec::with_capacity(n.min(s.len().saturating_mul(88)));
     let mut si = 16usize;
     let short = |out: &Vec<u8>| {
         SplitError::Red(format!(
@@ -77,5 +79,13 @@ mod tests {
         s.extend_from_slice(&[0xe0, b'a', b'b', b'c', 0x40, 0x02]);
         assert_eq!(decode(&s, "t").ok(), Some(b"abcabcabc".to_vec()));
         assert!(decode(&s[..20], "t").is_err());
+    }
+
+    #[test]
+    fn huge_header_size_is_not_reserved() {
+        // a header claiming 4 GiB with 4 bytes of data: an error without a 4 GiB allocation
+        let mut s = b"Yaz0\xff\xff\xff\xff\0\0\0\0\0\0\0\0".to_vec();
+        s.extend_from_slice(&[0x80, b'a', 0x00, 0x00]);
+        assert!(decode(&s, "t").is_err());
     }
 }

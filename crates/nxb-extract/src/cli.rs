@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 fn usage() -> i32 {
     eprintln!(
-        "usage: nxb-extract --keys <prod.keys> --base <base.nsp> --out <dir> [--update <update.nsp> <dir>]... [--threads N] [--mem-mib N] [--cache-mib N] [--digests <tsv>]"
+        "usage: nxb-extract --keys <prod.keys> --base <base.nsp> --out <dir> [--update <update.nsp> <dir>]... [--threads N] [--mem-mib N] [--cache-mib N] [--digests <tsv>] [--allow-damaged] [--manifest] | --keys <prod.keys> --aoc <dlc.nsp> [<title ID>] --out <dir>"
     );
     2
 }
@@ -43,6 +43,8 @@ pub fn main(args: &[String]) -> i32 {
     let mut html = false;
     let mut app = None;
     let mut discard_images = false;
+    let (mut allow_damaged, mut manifest) = (false, false);
+    let mut aoc: Option<(PathBuf, Option<u64>)> = None;
     let mut base_outputs = true;
     let mut split: std::collections::BTreeMap<String, PathBuf> = std::collections::BTreeMap::new();
     let mut i = 0;
@@ -74,6 +76,28 @@ pub fn main(args: &[String]) -> i32 {
                 i += 1;
                 continue;
             }
+            "--allow-damaged" => {
+                allow_damaged = true;
+                i += 1;
+                continue;
+            }
+            "--manifest" => {
+                manifest = true;
+                i += 1;
+                continue;
+            }
+            // `--aoc <dlc.nsp> [<DLC title ID>]`: the RomFS of an add-on content package as `<out>/RomFS.img`
+            "--aoc" => {
+                let Some(p) = next(i + 1) else {
+                    return usage();
+                };
+                let id = a
+                    .get(i + 2)
+                    .filter(|x| !x.starts_with("--"))
+                    .and_then(|x| u64::from_str_radix(x, 16).ok());
+                aoc = Some((PathBuf::from(p), id));
+                i += if id.is_some() { 2 } else { 1 };
+            }
             "--updates-only" => {
                 base_outputs = false;
                 i += 1;
@@ -94,6 +118,32 @@ pub fn main(args: &[String]) -> i32 {
             _ => return usage(),
         }
         i += 2;
+    }
+    if let Some((pkg, id)) = aoc {
+        let (Some(keys), Some(out_base)) = (keys, out) else {
+            return usage();
+        };
+        let req = crate::Request {
+            keys,
+            base: pkg,
+            out_base,
+            threads,
+            mem_limit: mem << 20,
+            cache_chunks: cache,
+            discard_images,
+            allow_damaged,
+            ..crate::Request::default()
+        };
+        return match crate::aoc::aoc(&req, id) {
+            Ok(s) => {
+                s.closing.wait();
+                0
+            }
+            Err(e) => {
+                println!("[RED] {e}");
+                e.exit_code()
+            }
+        };
     }
     let (Some(keys), Some(base), Some(out_base)) = (keys, base, out) else {
         return usage();
@@ -134,6 +184,8 @@ pub fn main(args: &[String]) -> i32 {
         split,
         app,
         discard_images,
+        allow_damaged,
+        manifest,
     };
     match crate::extract(&req) {
         Ok(mut s) => {
@@ -227,7 +279,7 @@ fn nup_main(a: &[String]) -> Option<i32> {
         Ok(_) => 0,
         Err(e) => {
             println!("[RED] {e}");
-            1
+            e.exit_code()
         }
     })
 }

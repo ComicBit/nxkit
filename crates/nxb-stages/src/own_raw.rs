@@ -1,40 +1,51 @@
-//! The raw tier of the own front end (first tier, Mac only): a shader whose MSL digest is in the raw allow list
-//! (`raw-verified.txt`, every entry passed the GPU differential test) goes through `air_front::build_raw` in process,
-//! with no Apple tool. Its cache-key field is `own-raw@<air-front id>`. A raw reject or failure hands the shader to the
-//! next tier (own-identical verdicts, then Apple). Shaders not in the list keep their keys and their path unchanged.
-//! `NXB_OWN_RAW=0` turns only the raw tier off, `NXB_OWN_FRONT=0` turns every own tier off.
+//! The raw tier of the own front end (first tier, Mac only): a shader goes through `air_front::build_raw` in process,
+//! with no Apple tool, when the front end accepts it and the library passes the in-process validation
+//! (`nxb_tool::airfront::validate_library`). A reject, an internal error, a panic or a failed validation hands the
+//! shader to the next tier (own-identical verdicts, then Apple). The cache-key field is `own-raw@<air-front id>`.
+//!
+//! Switches: `NXB_OWN_RAW=0` turns only the raw tier off, `NXB_OWN_RAW=list` takes only the shaders of the shipped
+//! allow list (`raw-verified.txt`, the old semantics: every entry passed the GPU differential test), `NXB_OWN_RAW=<file>`
+//! the shaders of another allow list, `NXB_OWN_FRONT=0` turns every own tier off. Without a value every shader is tried.
 
 use crate::own_front::{DATA_DIR, front_id};
 use std::path::{Path, PathBuf};
 
-/// The raw tier's switch: `NXB_OWN_RAW=0` turns it off, `NXB_OWN_RAW=<file>` selects another allow list.
+/// The raw tier's switch: `0` off, `list` the shipped allow list, a file name another allow list, else every shader.
 pub const RAW_SWITCH: &str = "NXB_OWN_RAW";
 
 /// File name of the raw allow list in `<DATA_DIR>/<air-front id>/`.
 pub const RAW_LIST: &str = "raw-verified.txt";
 
-/// The raw allow list of this run: `NXB_OWN_RAW` (`0` off, else a file), or the shipped list of this front end.
-/// Returns the list file (`None`: tier off) and a note for the run report.
-pub fn list_file() -> (Option<PathBuf>, String) {
-    let shipped = |id: String| {
-        let f = Path::new(DATA_DIR).join(id).join(RAW_LIST);
-        if f.is_file() {
-            let note = format!("raw tier on ({})", f.display());
-            (Some(f), note)
-        } else {
-            (None, format!("raw tier off ({} missing)", f.display()))
-        }
+/// Which shaders the raw tier tries.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Mode {
+    /// Every shader: a reject or a failed validation falls back.
+    All,
+    /// Only the shaders of this allow list file.
+    List(PathBuf),
+}
+
+/// The mode of this run from `NXB_OWN_RAW`, and a note for the run report. `None`: the tier is off.
+pub fn mode() -> (Option<Mode>, String) {
+    let Some(id) = front_id() else {
+        return (None, "raw tier off (no air-front feature)".into());
     };
     match std::env::var_os(RAW_SWITCH) {
         Some(v) if v == "0" => (None, format!("raw tier off ({RAW_SWITCH}=0)")),
-        Some(v) if !v.is_empty() => {
-            let note = format!("raw tier on ({})", Path::new(&v).display());
-            (Some(PathBuf::from(v)), note)
+        Some(v) if v == "list" => {
+            let f = Path::new(DATA_DIR).join(id).join(RAW_LIST);
+            if f.is_file() {
+                let note = format!("raw tier on, allow list {}", f.display());
+                (Some(Mode::List(f)), note)
+            } else {
+                (None, format!("raw tier off ({} missing)", f.display()))
+            }
         }
-        _ => match front_id() {
-            Some(id) => shipped(id),
-            None => (None, "raw tier off (no air-front feature)".into()),
-        },
+        Some(v) if !v.is_empty() => {
+            let note = format!("raw tier on, allow list {}", Path::new(&v).display());
+            (Some(Mode::List(PathBuf::from(v))), note)
+        }
+        _ => (Some(Mode::All), "raw tier on, every shader".to_string()),
     }
 }
 
@@ -42,34 +53,41 @@ pub fn list_file() -> (Option<PathBuf>, String) {
 #[cfg(feature = "air-front")]
 pub struct RawTier {
     fe: nxb_tool::airfront::RawFrontEnd,
-    list: nxb_tool::airfront::RawAllowList,
+    list: Option<nxb_tool::airfront::RawAllowList>,
     id: String,
     /// Libraries the raw tier made.
     pub libs: std::sync::atomic::AtomicU64,
-    /// Listed shaders the raw tier rejected or failed on (the next tier made them).
+    /// Shaders the raw tier rejected or failed on (the next tier made them).
     pub fallback: std::sync::atomic::AtomicU64,
 }
 
 #[cfg(feature = "air-front")]
 impl RawTier {
-    /// The tier of this run ([`list_file`]), `None` when it is off. A damaged list is an error.
+    /// The tier of this run ([`mode`]), `None` when it is off. A damaged list is an error.
     pub fn open() -> Result<Option<RawTier>, String> {
-        let Some(f) = list_file().0 else {
-            return Ok(None);
+        let list = match mode().0 {
+            None => return Ok(None),
+            Some(Mode::All) => None,
+            Some(Mode::List(f)) => {
+                let text =
+                    std::fs::read_to_string(&f).map_err(|e| format!("{}: {e}", f.display()))?;
+                Some(nxb_tool::airfront::RawAllowList::parse(&text)?)
+            }
         };
-        let text = std::fs::read_to_string(&f).map_err(|e| format!("{}: {e}", f.display()))?;
         Ok(Some(RawTier {
             fe: nxb_tool::airfront::RawFrontEnd::new(false),
-            list: nxb_tool::airfront::RawAllowList::parse(&text)?,
+            list,
             id: nxb_tool::airfront::raw_id(),
             libs: Default::default(),
             fallback: Default::default(),
         }))
     }
 
-    /// True when the raw tier takes the shader with this MSL.
+    /// True when the raw tier tries the shader with this MSL (every shader, or the ones of the allow list).
     pub fn takes(&self, msl: &[u8]) -> bool {
-        self.list.allows_digest(&nxb_model::sha256(msl))
+        self.list
+            .as_ref()
+            .is_none_or(|l| l.allows_digest(&nxb_model::sha256(msl)))
     }
 
     /// The cache-key field of the raw libraries: `own-raw@<air-front id>`.
@@ -77,17 +95,14 @@ impl RawTier {
         &self.id
     }
 
-    /// Number of listed shaders.
-    pub fn len(&self) -> usize {
-        self.list.len()
+    /// Number of listed shaders, `None` when every shader is tried.
+    pub fn listed(&self) -> Option<usize> {
+        self.list
+            .as_ref()
+            .map(nxb_tool::airfront::RawAllowList::len)
     }
 
-    /// True when the list is empty.
-    pub fn is_empty(&self) -> bool {
-        self.list.is_empty()
-    }
-
-    /// The raw library of a listed shader, `None` when the shader is not listed or the build fails.
+    /// The raw library of a shader, `None` when the tier does not take it or the build or validation fails.
     pub fn compile(&self, msl: &[u8]) -> Option<(Vec<u8>, nxb_tool::StepCost)> {
         use std::sync::atomic::Ordering::Relaxed;
         if !self.takes(msl) {
@@ -109,6 +124,22 @@ impl RawTier {
 #[cfg(all(test, feature = "air-front"))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_shader_mode_takes_all_and_list_mode_only_listed() {
+        let msl = b"fragment float4 f() { return 0; }";
+        let mut t = RawTier {
+            fe: nxb_tool::airfront::RawFrontEnd::new(false),
+            list: None,
+            id: nxb_tool::airfront::raw_id(),
+            libs: Default::default(),
+            fallback: Default::default(),
+        };
+        assert!(t.takes(msl) && t.takes(b"other") && t.listed().is_none());
+        let text = format!("{}\n", nxb_model::sha256(msl).to_hex());
+        t.list = Some(nxb_tool::airfront::RawAllowList::parse(&text).expect("list"));
+        assert!(t.takes(msl) && !t.takes(b"other") && t.listed() == Some(1));
+    }
 
     #[test]
     fn shipped_list_matches_the_front_end() {

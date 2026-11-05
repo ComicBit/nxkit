@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*", "xtask"]
 
 [workspace.package]
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 rust-version = "1.99"
 license = "MIT"
@@ -50,6 +50,12 @@ nxb-extract = { path = "crates/nxb-extract" }
 nxb-pack = { path = "crates/nxb-pack" }
 nxb-archive = { path = "crates/nxb-archive" }
 nxb-build = { path = "crates/nxb-build" }
+nxb-nro = { path = "crates/nxb-nro" }
+nxb-profile = { path = "crates/nxb-profile" }
+nxb-xlatedev = { path = "crates/nxb-xlatedev" }
+nxb-xlate = { path = "crates/nxb-xlate" }
+nxb-maxwell = { path = "crates/nxb-maxwell" }
+nxb-spvgen = { path = "crates/nxb-spvgen" }
 
 [profile.test]
 # the parser tests recurse deeply: optimise them as the front-end project did

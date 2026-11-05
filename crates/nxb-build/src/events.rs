@@ -6,6 +6,7 @@ use std::io::Write;
 use std::sync::Mutex;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
+use nxb_obs::codes::{self, Code};
 use nxb_pyjson::Value;
 
 /// Console mode (`--progress`).
@@ -99,7 +100,10 @@ impl Progress {
         }
     }
 
-    fn json(&self, mut fields: Vec<(String, Value)>) {
+    /// One event line: the fields, then `code` and `severity` (the code table of `nxb-obs`), then `t`.
+    fn json(&self, code: &Code, mut fields: Vec<(String, Value)>) {
+        fields.push(("code".into(), Value::Str(code.code.into())));
+        fields.push(("severity".into(), Value::Str(code.severity.name().into())));
         fields.push(("t".into(), Value::Float(now())));
         if let Ok(mut o) = self.out.lock() {
             let _ = writeln!(o, "{}", nxb_pyjson::dumps(&Value::Object(fields)));
@@ -144,13 +148,16 @@ impl Progress {
             Err(_) => return,
         };
         match self.mode {
-            Mode::Json => self.json(vec![
-                ("ev".into(), Value::Str("stage".into())),
-                ("k".into(), Value::Int(k as i64)),
-                ("n".into(), Value::Int(n as i64)),
-                ("name".into(), Value::Str(name.into())),
-                ("step".into(), Value::Str(step.into())),
-            ]),
+            Mode::Json => self.json(
+                &codes::STAGE,
+                vec![
+                    ("ev".into(), Value::Str("stage".into())),
+                    ("k".into(), Value::Int(k as i64)),
+                    ("n".into(), Value::Int(n as i64)),
+                    ("name".into(), Value::Str(name.into())),
+                    ("step".into(), Value::Str(step.into())),
+                ],
+            ),
             Mode::Lines => self.line(&format!(
                 "[{}] [{k}/{n}] {name}{} …",
                 clock(),
@@ -173,17 +180,24 @@ impl Progress {
         let Some(c) = cur else { return };
         let el = c.t0.elapsed().as_secs_f64();
         match self.mode {
-            Mode::Json => self.json(vec![
-                ("ev".into(), Value::Str("stage_end".into())),
-                ("k".into(), Value::Int(c.k as i64)),
-                ("name".into(), Value::Str(c.name)),
-                ("ok".into(), Value::Bool(ok)),
-                ("summary".into(), Value::Str(summary.into())),
-                (
-                    "elapsed".into(),
-                    Value::Float((el * 1000.0).round() / 1000.0),
-                ),
-            ]),
+            Mode::Json => self.json(
+                if ok {
+                    &codes::STAGE_END_OK
+                } else {
+                    &codes::STAGE_END_FAIL
+                },
+                vec![
+                    ("ev".into(), Value::Str("stage_end".into())),
+                    ("k".into(), Value::Int(c.k as i64)),
+                    ("name".into(), Value::Str(c.name)),
+                    ("ok".into(), Value::Bool(ok)),
+                    ("summary".into(), Value::Str(summary.into())),
+                    (
+                        "elapsed".into(),
+                        Value::Float((el * 1000.0).round() / 1000.0),
+                    ),
+                ],
+            ),
             _ => {
                 let n = self.state.lock().map(|g| g.1).unwrap_or(0);
                 self.line(&format!(
@@ -209,7 +223,7 @@ impl Progress {
         let Ok(mut g) = self.state.lock() else { return };
         let n_all = g.1;
         let Some(st) = g.2.as_mut() else { return };
-        let mut events: Vec<Vec<(String, Value)>> = Vec::new();
+        let mut events: Vec<(&Code, Vec<(String, Value)>)> = Vec::new();
         let mut lines = Vec::new();
         if let Some(step) = u.step
             && step != st.step
@@ -217,12 +231,15 @@ impl Progress {
             st.step = step.into();
             (st.done, st.total, st.unit, st.note) = (None, None, String::new(), String::new());
             st.hist.clear();
-            events.push(vec![
-                ("ev".into(), Value::Str("step".into())),
-                ("k".into(), Value::Int(st.k as i64)),
-                ("name".into(), Value::Str(st.name.clone())),
-                ("step".into(), Value::Str(step.into())),
-            ]);
+            events.push((
+                &codes::STEP,
+                vec![
+                    ("ev".into(), Value::Str("step".into())),
+                    ("k".into(), Value::Int(st.k as i64)),
+                    ("name".into(), Value::Str(st.name.clone())),
+                    ("step".into(), Value::Str(step.into())),
+                ],
+            ));
             lines.push(format!(
                 "[{}] [{}/{n_all}] {} · {step} …",
                 clock(),
@@ -268,27 +285,30 @@ impl Progress {
                 _ => Value::Null,
             };
             let el = st.t0.elapsed().as_secs_f64();
-            events.push(vec![
-                ("ev".into(), Value::Str("progress".into())),
-                ("k".into(), Value::Int(st.k as i64)),
-                ("name".into(), Value::Str(st.name.clone())),
-                ("step".into(), Value::Str(st.step.clone())),
-                ("done".into(), opt(st.done)),
-                ("total".into(), opt(st.total)),
-                ("unit".into(), Value::Str(st.unit.clone())),
-                ("est".into(), Value::Bool(false)),
-                ("note".into(), Value::Str(st.note.clone())),
-                ("frac".into(), frac),
-                ("eta".into(), eta),
-                (
-                    "elapsed".into(),
-                    Value::Float((el * 1000.0).round() / 1000.0),
-                ),
-            ]);
+            events.push((
+                &codes::PROGRESS,
+                vec![
+                    ("ev".into(), Value::Str("progress".into())),
+                    ("k".into(), Value::Int(st.k as i64)),
+                    ("name".into(), Value::Str(st.name.clone())),
+                    ("step".into(), Value::Str(st.step.clone())),
+                    ("done".into(), opt(st.done)),
+                    ("total".into(), opt(st.total)),
+                    ("unit".into(), Value::Str(st.unit.clone())),
+                    ("est".into(), Value::Bool(false)),
+                    ("note".into(), Value::Str(st.note.clone())),
+                    ("frac".into(), frac),
+                    ("eta".into(), eta),
+                    (
+                        "elapsed".into(),
+                        Value::Float((el * 1000.0).round() / 1000.0),
+                    ),
+                ],
+            ));
         }
         drop(g);
         match self.mode {
-            Mode::Json => events.into_iter().for_each(|e| self.json(e)),
+            Mode::Json => events.into_iter().for_each(|(c, e)| self.json(c, e)),
             Mode::Lines => lines.iter().for_each(|l| self.line(l)),
             Mode::Off => {}
         }
@@ -296,12 +316,91 @@ impl Progress {
 
     /// `say(msg)`.
     pub fn say(&self, msg: &str) {
+        self.say_with(msg, Vec::new());
+    }
+
+    /// `say(msg)` with additional fields on the JSON event (after `msg`, before `t`).
+    pub fn say_with(&self, msg: &str, extra: Vec<(String, Value)>) {
         match self.mode {
-            Mode::Json => self.json(vec![
-                ("ev".into(), Value::Str("say".into())),
-                ("msg".into(), Value::Str(msg.into())),
-            ]),
+            Mode::Json => {
+                let mut f = vec![
+                    ("ev".into(), Value::Str("say".into())),
+                    ("msg".into(), Value::Str(msg.into())),
+                ];
+                f.extend(extra);
+                self.json(codes::say_code(msg), f);
+            }
             _ => self.line(&format!("[{}] {msg}", clock())),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+
+    #[derive(Clone, Default)]
+    struct Buf(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for Buf {
+        fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(b);
+            Ok(b.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// Schema: every line is one JSON object with `ev`, `code`, `severity`, `t` last, and the pair is a row of the table.
+    #[test]
+    fn every_event_has_a_table_code_and_old_fields_stay() {
+        let buf = Buf::default();
+        let p = Progress::new(Mode::Json, Box::new(buf.clone()));
+        p.plan(2);
+        p.stage("extract", "first");
+        p.set(Update {
+            step: Some("second"),
+            done: Some(1),
+            total: Some(4),
+            unit: Some("files"),
+            note: None,
+        });
+        p.say("plain");
+        p.say("[RED] broken");
+        p.say("[YELLOW] careful");
+        p.end("done", true);
+        p.stage("pack", "");
+        p.end("boom", false);
+        let text = String::from_utf8(buf.0.lock().unwrap().clone()).unwrap();
+        let mut seen = Vec::new();
+        for line in text.lines() {
+            let v = nxb_pyjson::parse(line).unwrap();
+            let Value::Object(fields) = &v else {
+                panic!("{line}")
+            };
+            let ev = v.get("ev").and_then(Value::as_str).unwrap();
+            let code = v.get("code").and_then(Value::as_str).unwrap();
+            let sev = v.get("severity").and_then(Value::as_str).unwrap();
+            let row = nxb_obs::codes::lookup(code).unwrap();
+            assert_eq!((row.ev, row.severity.name()), (ev, sev), "{line}");
+            assert_eq!(fields.last().unwrap().0, "t");
+            seen.push((ev.to_string(), code.to_string()));
+        }
+        let want = |ev: &str, code: &str| {
+            assert!(
+                seen.contains(&(ev.into(), code.into())),
+                "{ev} {code} in {seen:?}"
+            )
+        };
+        want("stage", "NXB1001");
+        want("step", "NXB1004");
+        want("progress", "NXB1005");
+        want("say", "NXB1006");
+        want("say", "NXB1007");
+        want("say", "NXB1008");
+        want("stage_end", "NXB1002");
+        want("stage_end", "NXB1003");
     }
 }

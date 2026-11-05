@@ -83,8 +83,34 @@ const DEXT: [u8; 30] = [
 
 /// Inflates a raw deflate stream.`None` if it is not valid deflate or grows past `limit`.
 pub fn inflate(d: &[u8], limit: usize) -> Option<Vec<u8>> {
-    let mut b = Bits { d, pos: 0 };
+    inflate_len(d, limit).map(|x| x.0)
+}
+
+/// [`inflate`] that also returns the bytes of `d` the stream took (up to its last byte).
+pub fn inflate_len(d: &[u8], limit: usize) -> Option<(Vec<u8>, usize)> {
     let mut out = Vec::new();
+    let used = inflate_core(d, limit, usize::MAX, &mut out)?;
+    Some((out, used))
+}
+
+/// The first `n` bytes a zlib or deflate stream yields (`decompressobj().decompress(d, n)`): input that ends early gives
+/// what was decoded so far. `None` for a bad zlib header. `zlib` skips the 2-byte zlib header first.
+pub fn inflate_head(d: &[u8], n: usize, zlib: bool) -> Option<Vec<u8>> {
+    if zlib
+        && (d.len() < 2 || (u32::from(d[0]) << 8 | u32::from(d[1])) % 31 != 0 || d[0] & 0xf != 8)
+    {
+        return None;
+    }
+    let d = if zlib { d.get(2..)? } else { d };
+    let mut out = Vec::new();
+    // input that ends early or a bad code keeps the bytes decoded before it: the caller compares the head
+    let _ = inflate_core(d, usize::MAX, n, &mut out);
+    out.truncate(n);
+    Some(out)
+}
+
+fn inflate_core(d: &[u8], limit: usize, stop: usize, out: &mut Vec<u8>) -> Option<usize> {
+    let mut b = Bits { d, pos: 0 };
     loop {
         let last = b.bit()?;
         match b.bits(2)? {
@@ -96,7 +122,13 @@ pub fn inflate(d: &[u8], limit: usize) -> Option<Vec<u8>> {
                 if len != !nlen {
                     return None;
                 }
-                out.extend_from_slice(d.get(p + 4..p + 4 + len as usize)?);
+                // a truncated stored block still yields its available bytes (streaming decoders do)
+                let avail = d.get(p + 4..).unwrap_or(&[]);
+                let take = avail.len().min(len as usize);
+                out.extend_from_slice(&avail[..take]);
+                if take < len as usize {
+                    return None;
+                }
                 b.pos = (p + 4 + len as usize) * 8;
             }
             t @ (1 | 2) => {
@@ -156,6 +188,9 @@ pub fn inflate(d: &[u8], limit: usize) -> Option<Vec<u8>> {
                     if out.len() > limit {
                         return None;
                     }
+                    if out.len() >= stop {
+                        return Some(0);
+                    }
                 }
             }
             _ => return None,
@@ -164,7 +199,7 @@ pub fn inflate(d: &[u8], limit: usize) -> Option<Vec<u8>> {
             return None;
         }
         if last == 1 {
-            return Some(out);
+            return Some(b.pos.div_ceil(8));
         }
     }
 }

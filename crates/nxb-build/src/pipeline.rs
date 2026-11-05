@@ -6,6 +6,7 @@
 use crate::Args;
 use crate::events::{Progress, Update};
 use crate::graph::Build;
+use nxb_pyjson::Value;
 use nxb_stages::build::{BuildConfig, OnDone};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -45,6 +46,14 @@ pub fn shader_config(a: &Args, b: &Build) -> Result<BuildConfig, String> {
     let chain = nxb_shader::chain::version(&b.engine)?;
     let inputs = nxb_shader::chain::inputs(&b.profile.0)?;
     let sh = b.work.join("shader");
+    let manifest = match &a.manifest {
+        Some(f) => nxb_sched::UseManifest::read(f)?.keys().to_vec(),
+        None => Vec::new(),
+    };
+    let xlate = a
+        .xlate
+        .clone()
+        .unwrap_or_else(|| tools.join("dmsh_xlate_bin/dmsh_xlate"));
     Ok(BuildConfig {
         pkg: sh.join("pkg"),
         out: sh.join("cache"),
@@ -52,10 +61,7 @@ pub fn shader_config(a: &Args, b: &Build) -> Result<BuildConfig, String> {
         chain,
         game: b.title.clone(),
         inputs,
-        xlate: a
-            .xlate
-            .clone()
-            .unwrap_or_else(|| tools.join("dmsh_xlate_bin/dmsh_xlate")),
+        xlate: xlate.clone(),
         dotnet_root: dotnet_root(a)?,
         spirv_cross: tools.join("spirv_cross_bin/spirv-cross"),
         store: sh.join("store"),
@@ -75,8 +81,11 @@ pub fn shader_config(a: &Args, b: &Build) -> Result<BuildConfig, String> {
         on_done: None,
         on_start: None,
         order: Vec::new(),
+        manifest,
+        partial: a.partial,
         ios_out: a.also_ios.then(|| sh.join("ios")),
-        xlate_host: None,
+        xlate_host: nxb_stages::xlatehost::resolve(a.xlate_host.as_deref(), &xlate),
+        xlate_rust: nxb_stages::xlatehost::resolve_rust(None),
     })
 }
 
@@ -195,16 +204,35 @@ pub fn shaders_and_archive(a: &Args, b: &Build, p: &Arc<Progress>) -> Result<Out
             }
             let r = r?;
             let ok = r.results.iter().filter(|x| x.1 == "ok").count();
-            let shaders = format!(
+            let mut shaders = format!(
                 "{ok} of {} shaders, {}; {} translator processes",
                 r.results.len(),
                 r.own_note,
                 r.xlate_runs
             );
-            p.say(&format!(
-                "shaders done in {:.1} s ({shaders})",
-                r.wall.as_secs_f64()
-            ));
+            let partial = nxb_sched::Partial::read(&lib);
+            if let (true, Some(st)) = (a.partial, &partial) {
+                shaders = format!("{shaders}; {}", st.note());
+            }
+            p.say_with(
+                &format!("shaders done in {:.1} s ({shaders})", r.wall.as_secs_f64()),
+                vec![
+                    ("xlate_starts".into(), Value::Int(r.xlate_runs as i64)),
+                    (
+                        "xlate_restarts".into(),
+                        Value::Int(i64::from(r.xlate_restarts)),
+                    ),
+                    (
+                        "xlate_fallbacks".into(),
+                        Value::Object(
+                            r.xlate_fallbacks
+                                .iter()
+                                .map(|(k, n)| (k.clone(), Value::Int(*n as i64)))
+                                .collect(),
+                        ),
+                    ),
+                ],
+            );
             let archive = match job {
                 Some(j) => {
                     p.set(Update {
@@ -214,8 +242,11 @@ pub fn shaders_and_archive(a: &Args, b: &Build, p: &Arc<Progress>) -> Result<Out
                     let ((rep, bases), c) = j.join().map_err(|_| "archive thread panicked")??;
                     let arch = arch.clone().unwrap_or_default();
                     write_archive_stamps(b, &lib, &c, &arch, &text, zero, bases)?;
+                    let tail = partial
+                        .filter(|_| a.partial)
+                        .map_or(String::new(), |st| format!("; {}", st.note()));
                     Some(format!(
-                        "{bases} bases, {} MB, {} batches ({} reused), streamed beside the shader step",
+                        "{bases} bases, {} MB, {} batches ({} reused), streamed beside the shader step{tail}",
                         rep.size >> 20,
                         rep.batches.len(),
                         rep.batches.iter().filter(|x| x.reused).count()
@@ -337,8 +368,10 @@ pub(crate) fn stage_pso(b: &Build, arch: &str) -> Result<String, String> {
         ),
     )
     .map_err(|e| e.to_string())?;
+    let tail =
+        nxb_sched::Partial::read(&b.shaders).map_or(String::new(), |st| format!("; {}", st.note()));
     Ok(format!(
-        "{} bases, {} MB, {} batches",
+        "{} bases, {} MB, {} batches{tail}",
         p.bases.len(),
         r.size >> 20,
         r.batches.len()

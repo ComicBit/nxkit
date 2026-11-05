@@ -3,7 +3,8 @@
 //! A shader whose MSL has an allowed verdict goes through `nxb_tool::airfront` (in-process front, `air-opt`, `metallib`).
 //! every other shader, every reject and every own failure goes to Apple's `metal -c` + `metallib`. The cache keys carry
 //! [`OwnFront::tag`] when the mode is on, so the two modes never share store entries.
-//! The raw tier (`crate::own_raw`) runs first, with its own cache-key field ([`OwnFront::key_field`]).
+//! The raw tier (`crate::own_raw`) runs first and takes every shader the front end accepts, with its own cache-key
+//! field ([`OwnFront::key_field`]).
 
 use nxb_tool::{Io, MetalTools, Resolver, StepCost};
 use std::path::{Path, PathBuf};
@@ -63,7 +64,7 @@ pub fn resolve(
     if std::env::var(KILL_SWITCH).is_ok_and(|v| v == "0") {
         return (None, format!("own front end off ({KILL_SWITCH}=0)"));
     }
-    let raw = crate::own_raw::list_file().1;
+    let raw = crate::own_raw::mode().1;
     if !cfg.verdicts.is_dir() {
         let note = format!(
             "own front end on, verdicts {}; {raw}",
@@ -164,6 +165,8 @@ pub struct OwnFront {
     pub fallback: AtomicU64,
     /// Summed CPU of the back-half processes of own libraries.
     pub cpu_ns: AtomicU64,
+    /// Libraries Apple's `metal -c` + `metallib` made (no own tier took them or the own tier fell back).
+    pub apple: AtomicU64,
 }
 
 impl OwnFront {
@@ -197,6 +200,7 @@ impl OwnFront {
             own: AtomicU64::new(0),
             fallback: AtomicU64::new(0),
             cpu_ns: AtomicU64::new(0),
+            apple: AtomicU64::new(0),
         })
     }
 
@@ -234,6 +238,19 @@ impl OwnFront {
         }
     }
 
+    /// Libraries made by the own front end and fallbacks to Apple.
+    pub fn counts(&self) -> (u64, u64) {
+        (
+            self.own.load(Ordering::Relaxed),
+            self.fallback.load(Ordering::Relaxed),
+        )
+    }
+
+    /// The run note extended with the counters of the tiers.
+    pub fn note(&self, base: &str) -> String {
+        format!("{base}; {}", self.describe())
+    }
+
     /// Number of allowed shaders in the verdict file, and the verdict counts.
     pub fn describe(&self) -> String {
         #[cfg(feature = "air-front")]
@@ -245,13 +262,17 @@ impl OwnFront {
                         r.libs.load(Ordering::Relaxed),
                         r.fallback.load(Ordering::Relaxed),
                     );
-                    format!("{} listed, {l} libraries, {f} fallbacks", r.len())
+                    let scope = r
+                        .listed()
+                        .map_or_else(|| "every shader".to_string(), |n| format!("{n} listed"));
+                    format!("{scope}, {l} libraries, {f} fallbacks")
                 },
             );
             format!(
-                "{} allowed of {:?}; raw tier {raw}",
+                "{} allowed of {:?}; raw tier {raw}; Apple made {} libraries",
                 self.verdicts.len(),
-                self.verdicts.counts
+                self.verdicts.counts,
+                self.apple.load(Ordering::Relaxed)
             )
         }
         #[cfg(not(feature = "air-front"))]
@@ -312,6 +333,9 @@ pub fn compile_link(
 ) -> Result<(Vec<u8>, StepCost, StepCost), String> {
     if let Some((lib, c)) = own.and_then(|o| o.try_compile(src)) {
         return Ok((lib, c, StepCost::default()));
+    }
+    if let Some(o) = own {
+        o.apple.fetch_add(1, Ordering::Relaxed);
     }
     let (air, c) = tools
         .compile(flags, pch, src, io)

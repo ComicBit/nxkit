@@ -26,19 +26,27 @@
 //!   the journal. A journal whose lock is free belongs to a dead process: the next open re-hashes its blobs, verifies its
 //!   entries (quarantine on damage), removes its temp files and deletes it.
 //!
+//! The title cache and its export format are in `cache` and `exchange` (`nxb cache`).
+//!
 //! Planned: the Python-compatible tree adapter (`legacy`), cross-process per-digest publish locks, prune, format 2
 //! segment files.
 
+mod cache;
 mod dirty;
 mod error;
+mod exchange;
 mod fsutil;
 mod manifest;
 mod store;
 
 #[cfg(test)]
+mod cache_tests;
+#[cfg(test)]
 mod tests;
 
+pub use cache::{CacheEntry, CacheKey, Filter, KEY_FILE, PruneReport};
 pub use error::StoreError;
+pub use exchange::{ExportReport, ImportReport};
 pub use manifest::{Manifest, ManifestFile, validate_name};
 pub use nxb_sys::lock::FileLock;
 pub use store::{Durability, EntryWriter, Store, Verified, lock_output_dir};

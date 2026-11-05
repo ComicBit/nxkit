@@ -117,3 +117,93 @@ fn stream_flushes_in_pieces_and_matches_the_command() {
     assert!(got == data);
     assert!(pieces > 1, "the output went out in {pieces} piece");
 }
+
+/// The one-shot decoder stops at its limit: RLE blocks that expand past it are an error, not an allocation.
+#[test]
+fn one_shot_obeys_the_limit() {
+    let rle: Vec<(bool, Vec<u8>, usize)> = (0..64).map(|i| (true, vec![7], 1 << 17 | i)).collect();
+    let frame = raw_frame(&rle);
+    let n = decompress(&frame).unwrap().len();
+    assert_eq!(decompress_max(&frame, n).unwrap().len(), n);
+    assert!(matches!(
+        decompress_max(&frame, n - 1),
+        Err(SplitError::Format(_))
+    ));
+    // the default limit gives `Unsupported` (the reference step decodes such files)
+    let r = frames(&frame, 1 << 20, &Dicts::new(), |n| {
+        SplitError::Unsupported(format!("over {n}"))
+    });
+    assert!(matches!(r, Err(SplitError::Unsupported(_))));
+}
+
+/// Frames that name a dictionary decode with it, byte for byte (the `zstd` command trains and applies it).
+#[test]
+fn dictionary_frames_match_the_zstd_command() {
+    use std::process::Command;
+    let dir = std::env::temp_dir().join(format!("nxb-zstd-dict-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let sample = |k: u32| -> Vec<u8> {
+        let mut x = k.wrapping_mul(2654435761).wrapping_add(7);
+        let mut v = Vec::new();
+        for i in 0..600u32 {
+            x = x.wrapping_mul(1103515245).wrapping_add(12345);
+            let w = [
+                "shader", "vertex", "pixel", "BNSH", "grsc", "uniform", "layout",
+            ][(x >> 16) as usize % 7];
+            v.extend_from_slice(w.as_bytes());
+            v.push(b'0' + (i % 10) as u8);
+            if x.is_multiple_of(11) {
+                v.extend_from_slice(&x.to_le_bytes());
+            }
+        }
+        v
+    };
+    for k in 0..300 {
+        std::fs::write(dir.join(format!("s{k:03}.bin")), sample(k)).unwrap();
+    }
+    let dict = dir.join("dict");
+    let train = Command::new("zstd")
+        .current_dir(&dir)
+        .args(["--train", "-q", "--maxdict=16384", "-o", "dict"])
+        .args((0..300).map(|k| format!("s{k:03}.bin")))
+        .output();
+    let Ok(t) = train else {
+        let _ = std::fs::remove_dir_all(&dir);
+        return;
+    };
+    assert!(t.status.success(), "{}", String::from_utf8_lossy(&t.stderr));
+    let raw = std::fs::read(&dict).unwrap();
+    let mut dicts = Dicts::new();
+    let id = dicts.add(&raw).unwrap();
+    for (n, level) in [(1000u32, "-1"), (1001, "-3"), (1002, "-19")] {
+        let data = sample(n);
+        std::fs::write(dir.join("in"), &data).unwrap();
+        let o = Command::new("zstd")
+            .current_dir(&dir)
+            .args([level, "-q", "-f", "-D", "dict", "-c", "in"])
+            .output()
+            .unwrap();
+        assert!(o.status.success());
+        assert_eq!(dict_id(&o.stdout), id, "frame names the dictionary");
+        let got = decompress_dict(&o.stdout, &dicts);
+        assert!(
+            got.as_ref().is_ok_and(|g| *g == data),
+            "{level}: {:?}",
+            got.err()
+        );
+        assert!(matches!(
+            decompress(&o.stdout),
+            Err(SplitError::Unsupported(_))
+        ));
+        let mut other = Dicts::new();
+        let mut copy = raw.clone();
+        copy[4..8].copy_from_slice(&(id ^ 1).to_le_bytes());
+        other.add(&copy).unwrap();
+        assert!(matches!(
+            decompress_dict(&o.stdout, &other),
+            Err(SplitError::Red(_))
+        ));
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

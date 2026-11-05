@@ -18,7 +18,9 @@ pub trait Storage: Send + Sync {
     fn read_at(&self, offset: u64, buf: &mut [u8]) -> Result<()>;
 
     /// Reads `len` bytes into a new buffer.
+    /// The range is checked before the buffer is allocated (a size field read from a package can be huge).
     fn read_vec(&self, offset: u64, len: usize) -> Result<Vec<u8>> {
+        check_range("read", self.size(), offset, len)?;
         let mut v = vec![0u8; len];
         self.read_at(offset, &mut v)?;
         Ok(v)
