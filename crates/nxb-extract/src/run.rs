@@ -242,6 +242,7 @@ pub fn extract(req: &Request) -> Result<Summary> {
             plan,
             src,
             keys,
+            discard: false,
         });
     }
     let t1 = Instant::now();

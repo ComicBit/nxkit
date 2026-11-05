@@ -53,6 +53,11 @@ flowchart LR
 - **Exit codes:** 2 incorrect command, 3 damaged, 4 sparse without update, 5 no meta, 6 keys too old.
 
 At this time, the stage supports NSP packages (NCA, IVFC, BKTR, RomFS image, ExeFS, NACP, zstd, LZ4).
+It also reads Switch 2 packages (`.nup`). A `.nup` package needs no keys. Use `nxb extract --nup <game.nup>` or `nxb-extract` with the same arguments.
+The stage writes `extract/v<version>/` (ExeFS, RomFS image, control data and icon) and `aoc/<index>.img` for each DLC.
+It checks each file against its size and its SHA-256, and it stops on a damaged or incomplete package.
+Without `--version`, it takes the newest update. When the package has no base game, it uses the update as the whole game.
+`--discard-images` makes the digests and does not write the images. `--no-images` writes only the code modules and the control data.
 XCI, NSZ, zstd dictionaries, the `--html` output and games with more than one program are not ported at this time.
 
 ## Split

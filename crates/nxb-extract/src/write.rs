@@ -31,6 +31,8 @@ pub struct ImageJob {
     pub src: Arc<dyn Storage>,
     /// Merge key per plan entry (smaller first, equal keys keep version order).
     pub keys: Vec<u64>,
+    /// Digests only: the image is not written (no file is created), its bytes are still read, checked and hashed.
+    pub discard: bool,
 }
 
 /// What came out of one image.
@@ -116,7 +118,14 @@ enum Done {
     },
 }
 
-fn open_part(dst: &Path, size: u64) -> Result<(PathBuf, File)> {
+fn open_part(dst: &Path, size: u64, discard: bool) -> Result<(PathBuf, File)> {
+    if discard {
+        let f = OpenOptions::new()
+            .write(true)
+            .open("/dev/null")
+            .map_err(|e| ExtractError::io("open /dev/null", e))?;
+        return Ok((PathBuf::new(), f));
+    }
     let mut part = dst.as_os_str().to_owned();
     part.push(".part");
     let part = PathBuf::from(part);
@@ -152,7 +161,7 @@ pub fn write_images(
         let index = im.plan.index_bytes()?;
         let header = im.plan.header(index.len() as u64);
         let total = im.plan.index_offset + index.len() as u64;
-        let (part, file) = open_part(&im.dst, total)?;
+        let (part, file) = open_part(&im.dst, total, im.discard)?;
         outs.push((index, header, total, part, Arc::new(file)));
     }
     // jobs: (image, entry, size), merged by key, version order on ties
@@ -360,6 +369,9 @@ pub fn write_images(
         return Err(ExtractError::Damaged(damaged));
     }
     for (o, im) in outs.iter().zip(&images) {
+        if im.discard {
+            continue;
+        }
         std::fs::rename(&o.3, &im.dst)
             .map_err(|e| ExtractError::io(format!("rename {}", o.3.display()), e))?;
     }

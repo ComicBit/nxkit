@@ -4,11 +4,11 @@ version = 4
 
 [[package]]
 name = "air-bc"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "air-emit"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "msl-parse",
  "msl-sema",
@@ -16,7 +16,7 @@ dependencies = [
 
 [[package]]
 name = "air-front"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "air-bc",
  "air-emit",
@@ -26,11 +26,11 @@ dependencies = [
 
 [[package]]
 name = "air-lib"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "airc"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "air-bc",
  "air-emit",
@@ -42,25 +42,25 @@ dependencies = [
 
 [[package]]
 name = "msl-lex"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "msl-parse"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "msl-lex",
 ]
 
 [[package]]
 name = "msl-sema"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "msl-parse",
 ]
 
 [[package]]
 name = "mslcheck"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "msl-lex",
  "msl-parse",
@@ -68,14 +68,14 @@ dependencies = [
 
 [[package]]
 name = "nxb-a64"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "nxb-model",
 ]
 
 [[package]]
 name = "nxb-air"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "nxb-model",
  "nxb-shader",
@@ -83,7 +83,7 @@ dependencies = [
 
 [[package]]
 name = "nxb-archive"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "nxb-model",
  "nxb-pyjson",
@@ -95,7 +95,7 @@ dependencies = [
 
 [[package]]
 name = "nxb-build"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "nxb-archive",
  "nxb-extract",
@@ -110,17 +110,18 @@ dependencies = [
 
 [[package]]
 name = "nxb-bundle"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "nxb-model",
 ]
 
 [[package]]
 name = "nxb-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "nxb-build",
  "nxb-error",
+ "nxb-extract",
  "nxb-model",
  "nxb-obs",
  "nxb-stages",
@@ -130,21 +131,21 @@ dependencies = [
 
 [[package]]
 name = "nxb-codec"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "nxb-model",
 ]
 
 [[package]]
 name = "nxb-crypto"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "nxb-model",
 ]
 
 [[package]]
 name = "nxb-error"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "nxb-model",
  "nxb-testkit",
@@ -152,7 +153,7 @@ dependencies = [
 
 [[package]]
 name = "nxb-extract"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "nxb-model",
  "nxb-pyjson",
@@ -163,7 +164,7 @@ dependencies = [
 
 [[package]]
 name = "nxb-hos"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "nxb-error",
  "nxb-model",
@@ -171,7 +172,7 @@ dependencies = [
 
 [[package]]
 name = "nxb-io"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "nxb-error",
  "nxb-model",
@@ -180,7 +181,7 @@ dependencies = [
 
 [[package]]
 name = "nxb-model"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "nxb-sys",
  "nxb-testkit",
@@ -188,7 +189,7 @@ dependencies = [
 
 [[package]]
 name = "nxb-obs"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "nxb-error",
  "nxb-model",
@@ -197,7 +198,7 @@ dependencies = [
 
 [[package]]
 name = "nxb-pack"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "nxb-model",
  "nxb-pyjson",
@@ -206,21 +207,21 @@ dependencies = [
 
 [[package]]
 name = "nxb-plist"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "nxb-model",
 ]
 
 [[package]]
 name = "nxb-pso"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "nxb-model",
 ]
 
 [[package]]
 name = "nxb-pyjson"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "nxb-model",
  "nxb-testkit",
@@ -228,7 +229,7 @@ dependencies = [
 
 [[package]]
 name = "nxb-rewrite"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "nxb-error",
  "nxb-model",
@@ -236,14 +237,14 @@ dependencies = [
 
 [[package]]
 name = "nxb-romfs"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "nxb-model",
 ]
 
 [[package]]
 name = "nxb-sched"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "nxb-error",
  "nxb-model",
@@ -253,7 +254,7 @@ dependencies = [
 
 [[package]]
 name = "nxb-shader"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "nxb-error",
  "nxb-model",
@@ -263,7 +264,7 @@ dependencies = [
 
 [[package]]
 name = "nxb-split"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "nxb-error",
  "nxb-model",
@@ -271,7 +272,7 @@ dependencies = [
 
 [[package]]
 name = "nxb-stages"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "nxb-air",
  "nxb-error",
@@ -288,7 +289,7 @@ dependencies = [
 
 [[package]]
 name = "nxb-store"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "nxb-error",
  "nxb-model",
@@ -298,15 +299,15 @@ dependencies = [
 
 [[package]]
 name = "nxb-sys"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "nxb-testkit"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "nxb-tool"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "air-front",
  "nxb-error",
@@ -317,11 +318,11 @@ dependencies = [
 
 [[package]]
 name = "nxb-zip"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "nxb-model",
 ]
 
 [[package]]
 name = "xtask"
-version = "0.1.0"
+version = "0.1.1"
