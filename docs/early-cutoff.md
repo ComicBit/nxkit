@@ -39,10 +39,10 @@ The effect of a chain change:
 
 1. The output folder stays `b-<V>/`, because the host loads only that folder. But no store key contains V.
    A new V makes a new folder from cache hits.
-2. A chain change does not delete data. `shaderbuild` does not remove store entries. Old entries stay in the store until a prune by last use.
+2. A chain change does not delete data. `nxb shaders` does not remove store entries. Old entries stay in the store until a prune by last use.
 3. The version of a stage must include all data that changes its output, and no other data.
    Tool binaries go into the version by their content. The Rust passes run in each build, thus they have no version.
-4. The reuse key of the build contains only the id of the `shaderbuild` binary. `shaderbuild` owns the keys of each output.
+4. The reuse key of the build contains only the id of the `nxb` binary. The shader step owns the keys of each output.
 5. If a pass becomes slow, it gets a key from its pass version and the hash of its input MSL, in the same scheme.
 
 ## Measurements

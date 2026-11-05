@@ -4,7 +4,7 @@
 //! library for the same source (`lib_size_ref` is not stored, so the reference `ref.air` size is reported instead).
 
 use std::io::Write;
-use std::process::{Command, ExitCode, Stdio};
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::Instant;
@@ -12,10 +12,10 @@ use std::time::Instant;
 use crate::Opts;
 
 /// Runs the raw path over all inputs.
-pub fn run(opts: &Opts) -> ExitCode {
+pub fn run(opts: &Opts) -> i32 {
     let Some(work) = &opts.work else {
         eprintln!("airc rawcheck: --work DIR is required");
-        return ExitCode::from(2);
+        return 2;
     };
     let _ = std::fs::create_dir_all(work);
     let validate = if opts.keep {
@@ -113,5 +113,5 @@ pub fn run(opts: &Opts) -> ExitCode {
             s.0 as f64 / wall
         );
     }
-    ExitCode::SUCCESS
+    0
 }

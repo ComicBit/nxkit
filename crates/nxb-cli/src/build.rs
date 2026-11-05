@@ -20,7 +20,7 @@ pub(crate) fn main(args: &[String], out: &mut dyn Write, err: &mut dyn Write) ->
     if pos.len() < 2 {
         let _ = writeln!(
             err,
-            "usage: shaderbuild build <pkg> <out> --profile D --chain V --game ID --inputs DIGEST --xlate P --dotnet-root D --spirv-cross P --store D --work D [--jobs N] [--batch N] [--batch-first N] [--scratch D] [--ios D] [--xlate-host HOST_AND_ARGS] [--xlate-rust on|off] [--own-front off|VERDICTS [--own-allow V,..]] [key...]"
+            "usage: nxb shaders build <pkg> <out> --profile D --chain V --game ID --inputs DIGEST --xlate P --dotnet-root D --spirv-cross P --store D --work D [--jobs N] [--batch N] [--batch-first N] [--scratch D] [--ios D] [--xlate-host HOST_AND_ARGS] [--xlate-rust on|off] [--own-front off|VERDICTS [--own-allow V,..]] [key...]"
         );
         return 2;
     }

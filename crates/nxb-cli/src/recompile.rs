@@ -10,7 +10,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-const USAGE: &str = "usage: shaderbuild recompile <b-dir> --store <dir> --work <dir> [--jobs N] [--every N] [--limit N] [--io files|pipes] [--no-pch] [--no-side] [--no-variants] [--relaxed] [--own-front <verdicts.jsonl> [--own-allow v1,v2]]";
+const USAGE: &str = "usage: nxb shaders recompile <b-dir> --store <dir> --work <dir> [--jobs N] [--every N] [--limit N] [--io files|pipes] [--no-pch] [--no-side] [--no-variants] [--relaxed] [--own-front <verdicts.jsonl> [--own-allow v1,v2]]";
 
 fn parse(args: &[String]) -> Result<RecompileConfig, String> {
     let mut b_dir = None;
@@ -78,7 +78,7 @@ pub(crate) fn main(args: &[String], out: &mut dyn Write, err: &mut dyn Write) ->
     let cfg = match parse(args) {
         Ok(c) => c,
         Err(e) => {
-            let _ = writeln!(err, "shaderbuild recompile: {e}\n{USAGE}");
+            let _ = writeln!(err, "nxb shaders recompile: {e}\n{USAGE}");
             return 2;
         }
     };

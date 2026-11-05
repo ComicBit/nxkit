@@ -13,14 +13,14 @@ and shared APIs. The designs set the behavior.
 
 | # | decision | cause |
 |---|---|---|
-| W1 | One prefix `nxb-` for all crates. The binaries `nxb` and `shaderbuild` come from one crate. | One name space for one workspace. |
+| W1 | One prefix `nxb-` for all crates. The program `nxb` comes from one crate. | One name space for one workspace. |
 | W2 | `nxb-model` (identifiers, digests) and `nxb-error` (classes, reason strings) are two crates in L0 and in V. | The other stages use identifiers and errors without the shader ABI constants. |
 | W3 | Own SHA-256 in `nxb-model`. Tests compare it with FIPS vectors and Python `hashlib`. | No network, no vendored code, one implementation for all systems. |
 | W4 | The `Translator` trait is in `nxb-tool` (L2). | The trait returns `ToolError`. Process and server bridges are its implementations. |
 | W5 | Events are in their own crate `nxb-obs`. | The scheduler, the tool layer and all stages write events. |
 | W6 | Store format 1 is the own content-addressed store. A compatible tree reader is an adapter. Format 2 has segment files. | This prevents two meanings of "v1". |
 | W7 | Four layers L0 to L3 with an explicit list of sideways edges in L1. | One rule set and one checker. |
-| W8 | `nxb-stages` holds all stage modules. `nxb-cli` holds the two binaries. | Fewer crates. |
+| W8 | `nxb-stages` holds all stage modules. `nxb-cli` holds the program `nxb`. | Fewer crates. |
 | W9 | The NSO parser is part of `nxb-rewrite`. The format modules start in `nxb-split`. | Fewer crates. The names stay reserved. |
 | W10 | The ad-hoc signer started as a standalone crate. It is part of `nxb-pack` (L3) at this time. | Parallel work with its own file set. |
 | W11 | Single-flight uses continuations (`claim` with `on_ready`), plus `get_or_run`, which waits. | A worker that waits is an idle core. |
@@ -32,9 +32,10 @@ and shared APIs. The designs set the behavior.
 | W17 | `nxb-model` uses `nxb-sys` for the ARMv8 SHA-256 block function, with a scalar fallback. | Measured: 1,841 MB/s against 225 MB/s on 1 GiB. The intrinsics are `unsafe`, and only `nxb-sys` has `unsafe` code. The digests are the same, thus V does not change. |
 | W18 | Shader front ends are a `FrontEnd` trait in `nxb-tool`: `AppleFrontEnd`, `OwnFrontEnd`, `WithFallback`. The verdict data is data of the shader domain. The default uses the allow list (refer to D18). | The front-end id keeps the cache entries apart. |
 | W19 | The stage crates with I/O (`nxb-extract`, `nxb-pack`, `nxb-archive`) and the orchestrator `nxb-build` are L3 crates with listed sideways edges. | Each stage crate has one owner. |
-| W20 | The front-end crates are a separate layer F with their own names. | They are standalone and use only the standard library. Only `nxb-tool` can use `air-front`. |
+| W20 | The front-end crates are a separate layer F with their own names. | They are standalone and use only the standard library. Only `nxb-tool` can use `air-front`. Since W23, `nxb-cli` can also use `airc`. |
 | W21 | Early cutoff: each stage output has a key from the stage version and the content hash of its inputs. No key contains V. A V change does not delete data. The MSL passes run again in each build. | A change of one line in the chain must not compile all shaders of all games again. Measured: a V change alone took 47 s with 0 compiles (refer to [early-cutoff.md](early-cutoff.md)). |
 | W22 | The shader step translates each key with the Rust translator first, then with the translator host, then with the process bridge. Each fallback is counted by reason. | The Rust translator does not cover geometry, tessellation, transform feedback, vertex shaders as compute and some rare cases. The output is byte-identical for the keys that were compared, thus the cache identity does not change. |
+| W23 | There is one program, `nxb`. Each stage is a command. The separate program names and the dispatch by `argv[0]` do not exist. The front end compiler is the command `nxb airc`. `nxb-cli` can use `air-front` and `airc` (layer F entry points). | One file to sign, ship and update. A caller names the command, not a file. |
 
 ## Part 2: design decisions
 
@@ -43,7 +44,7 @@ and shared APIs. The designs set the behavior.
 | # | decision | cause |
 |---|---|---|
 | D1 | V from the sources that have an effect on the output, and `OUTPUT_VERSION`. | A runtime fix must not make libraries invalid. A domain change must change V. |
-| D2 | Binary provenance in `shaderbuild.lock`. BIN_ID in the reuse key of the build. | This separates the code that made the bytes from the binary that ran. |
+| D2 | Binary provenance in a lock file. BIN_ID in the reuse key of the build. This is the design. The lock file check is not in the code at this time. | This separates the code that made the bytes from the binary that ran. |
 | D3 | The own front end is not byte-identical. Image correctness validates it. | Unoptimized IR gave the same library in only 2 of 300 samples (measured). |
 | D4 | Three gates: `gpudiff` with class tolerances, coverage, scene comparison. | Each gate finds a different error type. |
 | D5 | Fallback to the Apple front end for each shader. `NXB_OWN_FRONT=0` sets the Apple front end for all shaders. | An incorrect shader costs one fallback, not a release. |

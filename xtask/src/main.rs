@@ -4,7 +4,7 @@
 //!   are listed sideways edges (docs/workspace-layout.md 2 and 2.1), dev crates are never normal dependencies, a crate in
 //!   the chain version V depends only on crates in V.
 //!   The front-end crates (`msl-*`, `air-*`, `airc`, `mslcheck`) are layer `F` (ADR W20): they depend only on each other and
-//!   on no `nxb-*` crate, and only `air-front` may be used from outside, by `L2` or `L3` crates.
+//!   on no `nxb-*` crate, and only the entry points `air-front` and `airc` may be used from outside, by `L2` or `L3` crates.
 //! - `limits`: source files at most 600 lines, stage modules of `nxb-stages` at most 400.
 //!
 //! Usage: `cargo run -p xtask -- [layers] [limits]` (both when no argument is given). Std only, the TOML reading is a
@@ -51,8 +51,8 @@ const SIDEWAYS: &[(&str, &str)] = &[
 /// the same digests as the scalar path, tested on the same vectors).
 const V_EXEMPT: &[(&str, &str)] = &[("nxb-model", "nxb-sys")];
 
-/// The one front-end crate that `nxb-*` crates may depend on (ADR W20).
-const FRONT_ENTRY: &str = "air-front";
+/// The front-end crates that `nxb-*` crates may depend on (ADR W20): the in-process front end and the command line.
+const FRONT_ENTRIES: &[&str] = &["air-front", "airc"];
 
 const FILE_LIMIT: usize = 600;
 const STAGE_MODULE_LIMIT: usize = 400;
@@ -146,11 +146,11 @@ fn check_layers(all: &[Krate]) -> Vec<String> {
                 continue;
             };
             if k.layer == "F" || dk.layer == "F" {
-                // ADR W20: F depends only on F. Outside crates may use only the entry point, from L2 or L3.
+                // ADR W20: F depends only on F. Outside crates may use only the entry points, from L2 or L3.
                 let ok = if k.layer == "F" {
                     dk.layer == "F"
                 } else {
-                    d == FRONT_ENTRY && (k.layer == "L2" || k.layer == "L3")
+                    FRONT_ENTRIES.contains(&d.as_str()) && (k.layer == "L2" || k.layer == "L3")
                 };
                 if !ok {
                     errs.push(format!(

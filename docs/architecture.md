@@ -7,8 +7,7 @@ For the decisions behind this structure, refer to [decisions.md](decisions.md).
 
 - The repository is one Cargo workspace. All crates are in `crates/`. The developer tools are in `xtask/`.
 - Each crate has the name `nxb-<concern>`. The front-end crates of layer F keep their names (`msl-*`, `air-*`, `airc`, `mslcheck`).
-- `nxb-cli` makes two binaries from the same code: `nxb` (the full build, with the commands `build`, `extract`, `rewrite`, `rewrite-rules`, `nro` and `cache`) and `shaderbuild` (the shader step).
-- `nxb-build` makes the binary `nxb-ios` (the iOS stages) in addition to the library of the orchestrator.
+- `nxb-cli` makes the one program, `nxb`. Each stage is a command of `nxb`: `build`, `extract`, `split`, `rewrite`, `rewrite-rules`, `nro`, `shaders`, `app`, `ipa`, `sign`, `pso`, `archive`, `ios`, `airc` and `cache`. The stage crates are libraries, and `nxb-cli` calls them. There is no other program and no dispatch by the program name.
 - The workspace uses the standard library only. At this time, it has no external crates.
 
 ## Layers
@@ -38,7 +37,7 @@ The rules:
 5. Only `nxb-sys` contains `unsafe` code. All other crates have `#![forbid(unsafe_code)]`.
 6. L3 connects the stages. One stage module has a maximum of 400 lines.
 7. The development crates (`nxb-testkit`, `xtask`) are dev-dependencies only.
-8. Layer F uses no `nxb-*` crate. Only `nxb-tool` can use a crate of layer F, and only `air-front` behind the cargo feature `air-front`.
+8. Layer F uses no `nxb-*` crate. Only `nxb-tool` can use `air-front`, and only `nxb-cli` can use `airc`. Both are behind the cargo feature `air-front`.
 
 ### Sideways edges
 
@@ -88,8 +87,8 @@ The rules:
 | nxb-sched | L2 | no | impl | work-stealing executor with token and memory budgets, single-flight |
 | nxb-io | L2 | no | impl | parallel reader, ordered writer, tree clone, digest index |
 | nxb-stages | L3 | no | impl | one module for each stage, the shader step |
-| nxb-cli | L3 | no | impl | the binaries `nxb` and `shaderbuild` |
-| nxb-extract | L3 | no | impl | extract and fused split for NSP, XCI, NSZ, NUP and dump folders. The binaries are `nxb-extract` and `nxb-split` |
+| nxb-cli | L3 | no | impl | the program `nxb` with all commands |
+| nxb-extract | L3 | no | impl | extract and fused split for NSP, XCI, NSZ, NUP and dump folders. The commands are `nxb extract` and `nxb split` |
 | nxb-pack | L3 | no | impl | the Mac app stage, the ad-hoc signer, the IPA writer |
 | nxb-archive | L3 | no | impl | the pipeline archive: plan, batches, merge |
 | nxb-build | L3 | no | impl | the orchestrator `nxb build`, the rewrite step, the host stages and the iOS stages |

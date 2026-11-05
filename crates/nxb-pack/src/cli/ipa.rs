@@ -1,12 +1,12 @@
 //! `nxb-ipa <out.ipa> [--store .a:.b] [--skip <path>]... [--skip-suffix <s>]... <archive path>=<source>...`: `pack_ipa.py`'s
-//! zip (see `nxb_pack::ipa`, files are stored until a zlib-exact deflate is available).
+//! zip (see `crate::ipa`, files are stored until a zlib-exact deflate is available).
 
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::process::ExitCode;
 
-fn main() -> ExitCode {
-    let a: Vec<String> = std::env::args().skip(1).collect();
+/// `nxb ipa` / `nxb-ipa`: returns the exit code.
+pub fn main(args: &[String]) -> i32 {
+    let a = args;
     let mut out = None;
     let (mut store, mut skip, mut skip_suffix, mut maps) =
         (Vec::new(), HashSet::new(), Vec::new(), Vec::new());
@@ -38,7 +38,7 @@ fn main() -> ExitCode {
                     _ if out.is_none() => out = Some(PathBuf::from(m)),
                     _ => {
                         eprintln!("[RED] pack_ipa: not <archive path>=<file or folder>: {m}");
-                        return ExitCode::from(2);
+                        return 2;
                     }
                 }
                 i += 1;
@@ -49,27 +49,27 @@ fn main() -> ExitCode {
         eprintln!(
             "usage: nxb-ipa <out.ipa> [--store .a:.b] [--skip p] [--skip-suffix s] <archive path>=<source>..."
         );
-        return ExitCode::from(2);
+        return 2;
     };
-    let o = nxb_pack::ipa::PackOptions {
+    let o = crate::ipa::PackOptions {
         store,
         skip,
         skip_suffix,
         reuse: std::env::var_os("NXB_IPA_NO_REUSE").is_none(),
         compress: if std::env::var_os("NXB_IPA_STORE_ONLY").is_some() {
-            nxb_pack::ipa::STORE_ONLY
+            crate::ipa::STORE_ONLY
         } else {
-            nxb_pack::ipa::ZLIB
+            crate::ipa::ZLIB
         },
     };
-    match nxb_pack::ipa::pack(&out, &maps, &o) {
+    match crate::ipa::pack(&out, &maps, &o) {
         Ok(n) => {
             println!("packed: {n} entries");
-            ExitCode::SUCCESS
+            0
         }
         Err(e) => {
             eprintln!("[RED] pack_ipa: {e}");
-            ExitCode::from(1)
+            1
         }
     }
 }

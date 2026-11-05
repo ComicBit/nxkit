@@ -10,7 +10,7 @@ Each number has a label: measured, derived or estimate. Read the conditions firs
 - "Cold" means an empty work folder, store and output. The system file cache was not cleared.
 - Each stage ran one time. Extract and split ran 3 times cold and 2 times warm. There is no median of 3.
 - `/usr/bin/time -l` measured each command. Average cores = CPU time / wall time.
-- `nxb build` does not call `shaderbuild`. The end-to-end run thus contains extract, split, archive and app, without the shader step.
+- `nxb build` does not call `nxb shaders`. The end-to-end run thus contains extract, split, archive and app, without the shader step.
 
 ## Reference build scripts (measured)
 

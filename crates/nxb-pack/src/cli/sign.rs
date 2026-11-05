@@ -1,13 +1,12 @@
 //! Command line front end of `nxb-codesign`.
 
 use std::path::{Path, PathBuf};
-use std::process::ExitCode;
 
-use nxb_pack::appstage;
-use nxb_pack::bundle::{self, BundleOptions};
-use nxb_pack::digest::{self, NoDigests, TsvDigests};
-use nxb_pack::macho_sign::{Identifier, SignParams};
-use nxb_pack::{Error, Result, cdhashes_of, sign_macho};
+use crate::appstage;
+use crate::bundle::{self, BundleOptions};
+use crate::digest::{self, NoDigests, TsvDigests};
+use crate::macho_sign::{Identifier, SignParams};
+use crate::{Error, Result, cdhashes_of, sign_macho};
 
 const USAGE: &str = "\
 usage:
@@ -28,16 +27,16 @@ usage:
 
 Ad-hoc only, output byte-compatible with `codesign --force --sign -`.";
 
-fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    match run(&args) {
-        Ok(()) => ExitCode::SUCCESS,
+/// `nxb sign` / `nxb-pack`: returns the exit code (0 done, 1 failed, 3 unsupported).
+pub fn main(args: &[String]) -> i32 {
+    match run(args) {
+        Ok(()) => 0,
         Err(e) => {
             eprintln!("nxb-codesign: {e}");
-            ExitCode::from(match e {
+            match e {
                 Error::Unsupported(_) => 3,
                 _ => 1,
-            })
+            }
         }
     }
 }
@@ -206,7 +205,7 @@ fn run(args: &[String]) -> Result<()> {
         "cdhash" => {
             let o = parse(rest)?;
             for (t, h) in cdhashes_of(&read(&o.path)?)? {
-                println!("{t:?} {}", nxb_pack::hash::hex(&h));
+                println!("{t:?} {}", crate::hash::hex(&h));
             }
             Ok(())
         }
