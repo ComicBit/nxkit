@@ -70,6 +70,24 @@ impl Storage for FileStorage {
     }
 }
 
+impl FileStorage {
+    /// Wraps an open file of `size` bytes (a temporary file that is already unlinked).
+    pub fn from_file(file: File, size: u64, name: &str) -> FileStorage {
+        FileStorage {
+            file,
+            size,
+            name: name.to_string(),
+        }
+    }
+
+    /// Writes `buf` at `offset` (the file must be open for writing).
+    pub fn write_at(&self, offset: u64, buf: &[u8]) -> Result<()> {
+        self.file
+            .write_all_at(buf, offset)
+            .map_err(|e| ExtractError::io(format!("write {} at {offset:#x}", self.name), e))
+    }
+}
+
 /// A window `[offset, offset + size)` of another storage.
 pub struct SubStorage {
     inner: Arc<dyn Storage>,

@@ -6,10 +6,12 @@
 use crate::SplitError;
 
 mod huf;
+mod stream;
 #[cfg(test)]
 mod tests;
 
 use huf::Huf;
+pub use stream::{Input, Sink, decompress_limited, decompress_stream};
 
 pub(crate) fn err(m: &str) -> SplitError {
     SplitError::Format(format!("zstd: {m}"))
