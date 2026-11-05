@@ -197,7 +197,7 @@ mod tests {
         let out = String::from_utf8(sink.into_inner()).unwrap();
         assert_eq!(
             out,
-            "{\"ev\":\"phase\",\"name\":\"a\"}\n{\"ev\":\"phase\",\"name\":\"b\"}\n"
+            "{\"ev\":\"phase\",\"name\":\"a\",\"code\":\"NXB2001\",\"severity\":\"info\"}\n{\"ev\":\"phase\",\"name\":\"b\",\"code\":\"NXB2001\",\"severity\":\"info\"}\n"
         );
     }
 

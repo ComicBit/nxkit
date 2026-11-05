@@ -23,6 +23,11 @@ pub fn clone_or_copy(src: &Path, dst: &Path) -> io::Result<CloneKind> {
     Ok(CloneKind::Copied)
 }
 
+/// Clone one file without copying: `Ok(false)` when the file system cannot (another volume, not APFS).
+pub fn clone_only(src: &Path, dst: &Path) -> io::Result<bool> {
+    imp::clone(src, dst)
+}
+
 fn copy_tree(src: &Path, dst: &Path) -> io::Result<()> {
     let meta = fs::symlink_metadata(src)?;
     if meta.is_dir() {

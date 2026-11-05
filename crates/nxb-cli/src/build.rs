@@ -1,5 +1,5 @@
 //! `shaderbuild build <pkg> <out> --profile D --chain V --game ID --inputs DIGEST --xlate P --dotnet-root D
-//! --spirv-cross P --store D --work D [--jobs N] [--batch N] [--batch-first N] [--scratch D] [--ios D] [--xlate-host ARGS] [--own-front off|VERDICTS [--own-allow V,..]] [key...]`
+//! --spirv-cross P --store D --work D [--jobs N] [--batch N] [--batch-first N] [--scratch D] [--ios D] [--xlate-host HOST_AND_ARGS] [--xlate-rust on|off] [--own-front off|VERDICTS [--own-allow V,..]] [key...]`
 
 use nxb_stages::build::{BuildConfig, build};
 use std::io::Write;
@@ -20,7 +20,7 @@ pub(crate) fn main(args: &[String], out: &mut dyn Write, err: &mut dyn Write) ->
     if pos.len() < 2 {
         let _ = writeln!(
             err,
-            "usage: shaderbuild build <pkg> <out> --profile D --chain V --game ID --inputs DIGEST --xlate P --dotnet-root D --spirv-cross P --store D --work D [--jobs N] [--batch N] [--batch-first N] [--scratch D] [--ios D] [--xlate-host ARGS] [--own-front off|VERDICTS [--own-allow V,..]] [key...]"
+            "usage: shaderbuild build <pkg> <out> --profile D --chain V --game ID --inputs DIGEST --xlate P --dotnet-root D --spirv-cross P --store D --work D [--jobs N] [--batch N] [--batch-first N] [--scratch D] [--ios D] [--xlate-host HOST_AND_ARGS] [--xlate-rust on|off] [--own-front off|VERDICTS [--own-allow V,..]] [key...]"
         );
         return 2;
     }
@@ -47,11 +47,15 @@ pub(crate) fn main(args: &[String], out: &mut dyn Write, err: &mut dyn Write) ->
         on_done: None,
         on_start: None,
         order: Vec::new(),
+        manifest: Vec::new(),
+        partial: false,
         ios_out: opt.get("ios").map(PathBuf::from),
-        xlate_host: opt
-            .get("xlate-host")
-            .map(|v| v.split_whitespace().map(str::to_string).collect()),
+        xlate_host: nxb_stages::xlatehost::resolve(
+            opt.get("xlate-host").map(String::as_str),
+            &PathBuf::from(get("xlate")),
+        ),
         // on by default (own-identical, the shipped verdicts).`--own-front off` or NXB_OWN_FRONT=0 turns it off
+        xlate_rust: nxb_stages::xlatehost::resolve_rust(opt.get("xlate-rust").map(String::as_str)),
         own_front: match opt.get("own-front").map(String::as_str) {
             Some("off") => None,
             v => Some(nxb_stages::own_front::OwnFrontConfig {
@@ -81,9 +85,15 @@ pub(crate) fn main(args: &[String], out: &mut dyn Write, err: &mut dyn Write) ->
             );
             let _ = writeln!(
                 out,
-                "translator processes: {}, translations from the store: {}",
-                r.xlate_runs, r.xlate_hits
+                "translator processes: {}, translations from the store: {}, host restarts: {}",
+                r.xlate_runs, r.xlate_hits, r.xlate_restarts
             );
+            for (why, n) in &r.xlate_fallbacks {
+                let _ = writeln!(
+                    out,
+                    "translator fallback to the process bridge: {n} keys ({why})"
+                );
+            }
             let _ = writeln!(out, "{}", r.own_note);
             if let Some((own, fb)) = r.own {
                 let _ = writeln!(

@@ -74,12 +74,12 @@ fn fail(detail: impl Into<String>) -> XlateFailure {
 }
 
 /// Keys become file names and are matched in `[RED] (\w+):` lines.
-fn valid_key(k: &str) -> bool {
+pub(crate) fn valid_key(k: &str) -> bool {
     !k.is_empty() && k.len() <= 128 && k.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
 }
 
 /// `[RED] <key>: <message>` lines, first 160 characters of the message, as Python keeps them.
-fn red_lines(stderr: &str) -> BTreeMap<String, String> {
+pub(crate) fn red_lines(stderr: &str) -> BTreeMap<String, String> {
     let mut out = BTreeMap::new();
     for line in stderr.lines() {
         let Some(rest) = line.strip_prefix("[RED] ") else {

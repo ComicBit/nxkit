@@ -1,0 +1,24 @@
+# nxb rewrite rules (generated from the engine's patch files). Private data: instruction words of game code.
+
+scope = "010069C01AB82000"
+
+[[build]]
+row = ["build", "v196608", "1.0.3", "main=0a4f14a5c12f470a4d3168a8f2ae6005", "subsdk0=368f01d5cb42f06cd125dc739d036719", "sdk=8618895246b420329b77746b960a66ab"]
+
+[[rule]]
+binding = "build"
+kind = "cut"
+build = "0a4f14a5c12f470a4d3168a8f2ae6005"
+offset = 32699964
+old = "6125d997"
+new = "1f2003d5"
+why = "GCreateMalloc: bl FMallocBinned3 constructor -> nop; host malloc zone installed at OBS_UE_MALLOC"
+
+[[rule]]
+binding = "build"
+kind = "obs"
+build = "0a4f14a5c12f470a4d3168a8f2ae6005"
+offset = 32699972
+number = 21
+original = "aa1303e0"
+why = "GCreateMalloc: x19 is the allocator object; install the host vtable before use; orig mov x0, x19"

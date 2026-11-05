@@ -12,87 +12,14 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use nxb_split::SplitError;
 use nxb_split::records::{FileResult, Outputs, build, uniq};
-use nxb_split::shaders::{BahsVar, Found, Profile, memfind, scan_blob, var_pairs};
+use nxb_split::shaders::{BahsVar, Profile, scan_blob, var_pairs};
 
 use nxb_model::{Digest, sha256};
 
 use crate::error::{ExtractError, Result};
+use crate::split_out::write_outputs;
 
-/// A file of an image: (relative path, offset, size).
-pub type ImageFile = (String, u64, u64);
-
-/// Lists the files of a `DMROMFS1` image with their paths relative to the RomFS root.
-pub fn image_files(path: &Path) -> Result<(File, Vec<ImageFile>)> {
-    let f =
-        File::open(path).map_err(|e| ExtractError::io(format!("open {}", path.display()), e))?;
-    let mut h = [0u8; 32];
-    f.read_exact_at(&mut h, 0)
-        .map_err(|e| ExtractError::io("read image header", e))?;
-    if &h[..8] != b"DMROMFS1" {
-        return Err(ExtractError::format(format!(
-            "{}: not a DMROMFS1 image",
-            path.display()
-        )));
-    }
-    let rd = |o: usize| {
-        u64::from_le_bytes([
-            h[o],
-            h[o + 1],
-            h[o + 2],
-            h[o + 3],
-            h[o + 4],
-            h[o + 5],
-            h[o + 6],
-            h[o + 7],
-        ])
-    };
-    let (index, size, count) = (rd(8), rd(16), rd(24) as usize);
-    if size > (1 << 30) || count.checked_mul(24).is_none_or(|n| n as u64 > size) {
-        return Err(ExtractError::format("image index size"));
-    }
-    let mut idx = vec![0u8; size as usize];
-    f.read_exact_at(&mut idx, index)
-        .map_err(|e| ExtractError::io("read image index", e))?;
-    let names = count * 24;
-    let ent = |i: usize| {
-        let e = &idx[i * 24..i * 24 + 24];
-        let a = u64::from_le_bytes([e[0], e[1], e[2], e[3], e[4], e[5], e[6], e[7]]);
-        let b = u64::from_le_bytes([e[8], e[9], e[10], e[11], e[12], e[13], e[14], e[15]]);
-        let no = u32::from_le_bytes([e[16], e[17], e[18], e[19]]) as usize;
-        let nl = u16::from_le_bytes([e[20], e[21]]) as usize;
-        (a, b, no, nl, e[22] == 0)
-    };
-    let mut out = Vec::new();
-    // (entry, path)
-    let mut stack = vec![(0usize, String::new())];
-    while let Some((i, p)) = stack.pop() {
-        let (a, b, _, _, dir) = ent(i);
-        if !dir {
-            continue;
-        }
-        for c in a as usize..(a + b) as usize {
-            if c >= count {
-                return Err(ExtractError::format("image entry outside the index"));
-            }
-            let (ca, cb, no, nl, cdir) = ent(c);
-            let name = idx
-                .get(names + no..names + no + nl)
-                .ok_or_else(|| ExtractError::format("image name outside its table"))?;
-            let name = String::from_utf8_lossy(name);
-            let cp = if p.is_empty() {
-                name.into_owned()
-            } else {
-                format!("{p}/{name}")
-            };
-            if cdir {
-                stack.push((c, cp));
-            } else {
-                out.push((cp, ca, cb));
-            }
-        }
-    }
-    Ok((f, out))
-}
+pub use crate::listing::{ImageFile, image_files};
 
 /// Where the split writes.
 #[derive(Clone, Debug)]
@@ -122,82 +49,7 @@ pub struct SplitRequest {
     pub threads: usize,
 }
 
-/// Whether any of `pats` occurs in `d` (one pass, candidates by first byte).
-fn any_of(d: &[u8], pats: &[&[u8]]) -> bool {
-    let mut first = [false; 256];
-    for p in pats {
-        if let Some(&b) = p.first() {
-            first[b as usize] = true;
-        }
-    }
-    for (i, &b) in d.iter().enumerate() {
-        if first[b as usize] && pats.iter().any(|p| d[i..].starts_with(p)) {
-            return true;
-        }
-    }
-    false
-}
-
-fn scan_file(
-    p: &Profile,
-    data: &[u8],
-    label: &str,
-) -> std::result::Result<Option<FileResult>, SplitError> {
-    let d: std::borrow::Cow<'_, [u8]> = if data.get(..4) == Some(&[0x28, 0xb5, 0x2f, 0xfd][..]) {
-        nxb_split::zstd::decompress(data)?.into()
-    } else {
-        data.into()
-    };
-    let zst = [0x28, 0xb5, 0x2f, 0xfd];
-    let lz4f = [0x04, 0x22, 0x4d, 0x18];
-    let sized =
-        data.get(..4) != Some(&zst[..]) && data.get(4..8).is_some_and(|m| m == zst || m == lz4f);
-    if sized || d.get(..8) == Some(b"UnityFS\0") {
-        return Err(SplitError::Unsupported(format!(
-            "{label}: a container this port does not read yet"
-        )));
-    }
-    let d: std::borrow::Cow<'_, [u8]> = if d.get(..4) == Some(b"Yaz0") {
-        nxb_split::yaz0::decode(&d, label)?.into()
-    } else {
-        d
-    };
-    let d = &*d;
-    let head = d.get(..4).unwrap_or(&[]);
-    // the prefilter's markers in one pass over the bytes (it was one search per marker)
-    const MARKERS: [&[u8]; 7] = [
-        b"BNSH\0\0\0\0",
-        b"BAHS",
-        &[0x91, 0x68, 0x86, 0x19],
-        b"MGFX",
-        b"HNSHV002",
-        b"Ninty_NX\0\0\0\0\0\0\0\0",
-        b"NVNsh\0",
-    ];
-    let any_marker = any_of(d, &MARKERS);
-    let glslc = || memfind(d, &[0x91, 0x68, 0x86, 0x19]).is_some();
-    let wanted = any_marker
-        || head == b"MSHD"
-        || head == b"NARC"
-        || (head == b"SARC" && memfind(d, b"Yaz0").is_some())
-        || d.get(..8) == Some(b"MuxFDMR\x02");
-    if !wanted {
-        return Ok(None);
-    }
-    let mut found: Vec<Found> = Vec::new();
-    let mut var = BahsVar::new();
-    scan_blob(d, label, &mut found, &mut var, 0)?;
-    if found.is_empty() && head != b"MSHD" && glslc() {
-        return Err(SplitError::Unsupported(format!("{label}: GLSLC outputs")));
-    }
-    let pairs = var_pairs(p, &found, &var);
-    Ok(Some(FileResult {
-        keys: uniq(p, found, false)?,
-        pairs,
-    }))
-}
-
-fn write(path: &Path, bytes: &[u8]) -> Result<()> {
+pub(crate) fn write(path: &Path, bytes: &[u8]) -> Result<()> {
     if let Some(d) = path.parent() {
         std::fs::create_dir_all(d)
             .map_err(|e| ExtractError::io(format!("create {}", d.display()), e))?;
@@ -206,7 +58,7 @@ fn write(path: &Path, bytes: &[u8]) -> Result<()> {
         .map_err(|e| ExtractError::io(format!("write {}", path.display()), e))
 }
 
-fn split_err(e: SplitError) -> ExtractError {
+pub(crate) fn split_err(e: SplitError) -> ExtractError {
     match e {
         SplitError::Unsupported(m) => ExtractError::Unsupported(m),
         other => ExtractError::format(other.to_string()),
@@ -229,14 +81,37 @@ type Template = Arc<OnceLock<std::result::Result<Option<FileResult>, ()>>>;
 /// at merge time), so an update's unchanged files, and copies of one file, cost one scan. Exact: a later copy of
 /// content adds no key and no pair the first copy did not.
 pub struct Templates {
-    prof: Profile,
+    pub(crate) prof: Profile,
     game_tsv: String,
     manual: Option<String>,
-    by_digest: Mutex<HashMap<Digest, Template>>,
+    pub(crate) by_digest: Mutex<HashMap<Digest, Template>>,
     errors: Mutex<HashMap<String, String>>,
-    unsupported: Mutex<Option<String>>,
+    pub(crate) unsupported: Mutex<Option<String>>,
+    pub(crate) notes: Mutex<Vec<String>>,
     scanned: AtomicUsize,
+    pub(crate) dicts: std::sync::RwLock<nxb_split::zstd::Dicts>,
+    /// Files the planners of the archive jobs read: label, digest, bytes when the images are not kept.
+    pub(crate) deferred: Mutex<Vec<Deferred>>,
+    pub(crate) keep: bool,
+    /// Unity's common strings from the first version's main (`unityfs.common_strings`), `None` when it has none.
+    pub(crate) common: Option<std::sync::Arc<std::collections::HashMap<u32, String>>>,
+    /// Unity files whose type trees are in other bundles: label, digest, bytes when the images are not kept.
+    pub(crate) unity_defer: Mutex<Vec<Deferred>>,
+    /// The second pass over them, by digest.
+    pub(crate) pass2: Mutex<HashMap<Digest, Outcome>>,
+    pub(crate) held: AtomicUsize,
+    pub(crate) by_label: Mutex<HashMap<String, Outcome>>,
+    pub(crate) jobs: Mutex<(Vec<Outcome>, HashSet<String>)>,
 }
+
+/// A held-back file: label, digest, bytes when the images are not kept.
+pub(crate) type Deferred = (String, Digest, Option<std::sync::Arc<Vec<u8>>>);
+
+/// A job's or a label's result: shaders, or the text of the reason it is unreadable (empty: reported elsewhere).
+pub(crate) type Outcome = std::result::Result<Option<FileResult>, String>;
+
+/// Bytes of held-back archives `--discard-images` may keep in memory.
+pub(crate) const HOLD_LIMIT: usize = 8 << 30;
 
 fn relabel(r: &FileResult, label: &str) -> FileResult {
     FileResult {
@@ -250,6 +125,7 @@ fn relabel(r: &FileResult, label: &str) -> FileResult {
             })
             .collect(),
         pairs: r.pairs.clone(),
+        ..FileResult::default()
     }
 }
 
@@ -267,19 +143,78 @@ impl Templates {
             by_digest: Mutex::new(HashMap::new()),
             errors: Mutex::new(HashMap::new()),
             unsupported: Mutex::new(None),
+            notes: Mutex::new(Vec::new()),
             scanned: AtomicUsize::new(0),
+            dicts: std::sync::RwLock::new(nxb_split::zstd::Dicts::new()),
+            deferred: Mutex::new(Vec::new()),
+            keep: false,
+            common: None,
+            unity_defer: Mutex::new(Vec::new()),
+            pass2: Mutex::new(HashMap::new()),
+            held: AtomicUsize::new(0),
+            by_label: Mutex::new(HashMap::new()),
+            jobs: Mutex::new((Vec::new(), HashSet::new())),
         })
+    }
+
+    /// Adds the zstd dictionaries of a RomFS's `Pack/ZsDic.pack.zs` (the file's bytes): a plain zstd file holding a
+    /// SARC of dictionary files. Call before the scan starts, for every version and add-on RomFS (a later one
+    /// replaces an earlier one with the same ID, as the Python's merged dictionary table does).
+    pub fn add_dict_pack(&self, pack: &[u8]) -> Result<()> {
+        let sarc = nxb_split::zstd::decompress(pack).map_err(split_err)?;
+        let members =
+            nxb_split::shaders::sarc_members(&sarc, "/Pack/ZsDic.pack.zs").map_err(split_err)?;
+        let mut g = self
+            .dicts
+            .write()
+            .map_err(|_| ExtractError::format("dictionary table poisoned"))?;
+        for (_, m) in members {
+            if m.get(..4) == Some(&[0x37, 0xa4, 0x30, 0xec]) {
+                g.add(m).map_err(split_err)?;
+            }
+        }
+        Ok(())
     }
 
     /// Scans one file (any thread). `label` is `/` + its path as the Python names it.
     pub fn scan(&self, label: &str, data: &[u8], digest: Digest) {
+        if self.defer(label, data, digest) {
+            return;
+        }
+        self.scan_with(label, &nxb_split::src::Mem(data), digest);
+    }
+
+    pub(crate) fn scan_with(&self, label: &str, src: &dyn nxb_split::src::Src, digest: Digest) {
         let slot = match self.by_digest.lock() {
             Ok(mut g) => g.entry(digest).or_default().clone(),
             Err(_) => return,
         };
+        let Ok(dicts) = self.dicts.read() else { return };
         let r = slot.get_or_init(|| {
             self.scanned.fetch_add(1, Ordering::Relaxed);
-            match scan_file(&self.prof, data, "") {
+            let mut notes = Vec::new();
+            let env = nxb_split::scanfile::Env {
+                dicts: &dicts,
+                common: self.common.as_deref(),
+                trees: None,
+            };
+            let r = nxb_split::scanfile::scan_file(&self.prof, src, "", label, &env, &mut notes);
+            if let Ok(mut g) = self.notes.lock() {
+                g.extend(notes.iter().map(|n| n.replace("{label}", label)));
+            }
+            match r {
+                Ok(Some(r)) if r.defer => {
+                    // a Unity file without type trees: scanned again once every bundle's trees are known
+                    let held = if self.keep {
+                        src.bytes().map(|b| std::sync::Arc::new(b.to_vec()))
+                    } else {
+                        None
+                    };
+                    if let Ok(mut g) = self.unity_defer.lock() {
+                        g.push((label.to_string(), digest, held));
+                    }
+                    Ok(Some(r))
+                }
                 Ok(r) => Ok(r),
                 Err(SplitError::Unsupported(m)) => {
                     if let Ok(mut g) = self.unsupported.lock() {
@@ -292,7 +227,14 @@ impl Templates {
         });
         if r.is_err() {
             // the message names this path: scan again with the real label
-            if let Err(e) = scan_file(&self.prof, data, label) {
+            let env = nxb_split::scanfile::Env {
+                dicts: &dicts,
+                common: self.common.as_deref(),
+                trees: None,
+            };
+            if let Err(e) =
+                nxb_split::scanfile::scan_file(&self.prof, src, label, label, &env, &mut Vec::new())
+            {
                 let why = e.to_string();
                 let rel = label.trim_start_matches('/');
                 let why = if why.trim_start_matches('/').starts_with(rel) {
@@ -322,6 +264,12 @@ impl Templates {
             return Err(ExtractError::Unsupported(m));
         }
         let prof = &self.prof;
+        if let Ok(mut n) = self.notes.lock() {
+            n.sort();
+            for line in n.iter() {
+                println!("{line}");
+            }
+        }
         let mut results = Vec::new();
         for v in versions {
             let img = nxb_split::nso::image(&v.main).map_err(split_err)?;
@@ -333,16 +281,34 @@ impl Templates {
             let mut found = Vec::new();
             let mut var = BahsVar::new();
             scan_blob(&img, &label, &mut found, &mut var, 0).map_err(split_err)?;
+            let more = nxb_split::misc::main_extras(&img, &label, &found).map_err(split_err)?;
+            found.extend(more);
             let pairs = var_pairs(prof, &found, &var);
             results.push(FileResult {
                 keys: uniq(prof, found, true).map_err(split_err)?,
                 pairs,
+                ..FileResult::default()
             });
         }
         let by = self.by_digest.into_inner().unwrap_or_default();
         let errors = self.errors.into_inner().unwrap_or_default();
         let mut seen: HashSet<Digest> = HashSet::new();
         let mut bad = Vec::new();
+        let (mut again, mut again_seen): (Vec<(String, Digest)>, HashSet<Digest>) =
+            (Vec::new(), HashSet::new());
+        // the archive jobs come after main and before the files
+        let (job_res, taken) = self.jobs.into_inner().unwrap_or_default();
+        let mut by_label = self.by_label.into_inner().unwrap_or_default();
+        for r in job_res {
+            match r {
+                Ok(Some(r)) => results.push(r),
+                Ok(None) => {}
+                Err(why) if !why.is_empty() => {
+                    bad.push(format!("[RED] {why} (its shaders are left out)"))
+                }
+                Err(_) => {}
+            }
+        }
         for v in versions {
             let mut files: Vec<&(String, Digest)> = v.files.iter().collect();
             files.sort_by(|a, b| a.0.cmp(&b.0));
@@ -352,6 +318,26 @@ impl Templates {
                 } else {
                     format!("/{}/{rel}", v.tag)
                 };
+                if taken.contains(&label) {
+                    continue;
+                }
+                if let Some(r) = by_label.remove(&label) {
+                    match r {
+                        Ok(Some(r)) => results.push(r),
+                        Ok(None) => {}
+                        Err(why) if !why.is_empty() => {
+                            let r = rel.as_str();
+                            let why = if why.trim_start_matches('/').starts_with(r) {
+                                why
+                            } else {
+                                format!("{r}: {why}")
+                            };
+                            bad.push(format!("[RED] {why} (its shaders are left out)"));
+                        }
+                        Err(_) => {}
+                    }
+                    continue;
+                }
                 if let Some(why) = errors.get(&label) {
                     bad.push(format!("[RED] {why} (its shaders are left out)"));
                     continue;
@@ -361,10 +347,29 @@ impl Templates {
                     .and_then(|t| t.get())
                     .ok_or_else(|| ExtractError::format(format!("{label}: not scanned")))?;
                 if let Ok(Some(r)) = t
+                    && r.defer
+                {
+                    if again_seen.insert(*d) {
+                        again.push((label.clone(), *d));
+                    }
+                    continue;
+                }
+                if let Ok(Some(r)) = t
                     && seen.insert(*d)
                 {
                     results.push(relabel(r, &label));
                 }
+            }
+        }
+        // the Unity files that borrowed type trees come last, as in the reference's second pass
+        let mut pass2 = self.pass2.into_inner().unwrap_or_default();
+        for (label, d) in again {
+            match pass2.remove(&d) {
+                Some(Ok(Some(r))) => results.push(relabel(&r, &label)),
+                Some(Err(why)) if !why.is_empty() => {
+                    bad.push(format!("[RED] {why} (its shaders are left out)"))
+                }
+                _ => {}
             }
         }
         let out = build(prof, &results).map_err(split_err)?;
@@ -375,7 +380,8 @@ impl Templates {
 
 /// Runs the split on extracted version directories, returns the outputs and the `[RED]` lines of unreadable files.
 pub fn split(req: &SplitRequest) -> Result<(Outputs, Vec<String>)> {
-    let t = Templates::new(&req.game_tsv)?;
+    crate::split_out::env_guards(&req.versions)?;
+    let mut t = Templates::new(&req.game_tsv)?;
     let mut versions = Vec::new();
     let mut jobs: Vec<(usize, String, u64, u64)> = Vec::new();
     let mut images = Vec::new();
@@ -390,6 +396,9 @@ pub fn split(req: &SplitRequest) -> Result<(Outputs, Vec<String>)> {
         let mainp = v.join("ExeFS/main");
         let main = std::fs::read(&mainp)
             .map_err(|e| ExtractError::io(format!("read {}", mainp.display()), e))?;
+        if i == 0 {
+            t.set_common(&main);
+        }
         let (f, files) = image_files(&v.join("RomFS.img"))?;
         for (p, off, size) in &files {
             let label = if tag.is_empty() {
@@ -398,6 +407,12 @@ pub fn split(req: &SplitRequest) -> Result<(Outputs, Vec<String>)> {
                 format!("/{tag}/{p}")
             };
             jobs.push((images.len(), label, *off, *size));
+        }
+        if let Some((_, off, size)) = files.iter().find(|x| x.0 == "Pack/ZsDic.pack.zs") {
+            let mut pack = vec![0u8; usize::try_from(*size).unwrap_or(0)];
+            f.read_exact_at(&mut pack, *off)
+                .map_err(|e| ExtractError::io("read Pack/ZsDic.pack.zs", e))?;
+            t.add_dict_pack(&pack)?;
         }
         images.push(f);
         versions.push((tag, main, files));
@@ -421,6 +436,31 @@ pub fn split(req: &SplitRequest) -> Result<(Outputs, Vec<String>)> {
                         break;
                     };
                     let (im, label, off, size) = &jobs[j];
+                    // a file of an archive family is read by ranges later: its digest, no scan
+                    let mut head = vec![0u8; (*size as usize).min(16)];
+                    if let Err(e) = images[*im].read_exact_at(&mut head, *off) {
+                        if let Ok(mut g) = fatal.lock() {
+                            *g = Some(ExtractError::io(format!("read {label}"), e));
+                        }
+                        break;
+                    }
+                    if nxb_split::jobs::deferred(label.trim_start_matches('/'), &head) {
+                        match crate::post::stream_digest(&images[*im], *off, *size) {
+                            Ok(d) => {
+                                t.defer(label, &head, d);
+                                if let Ok(mut g) = digests[j].lock() {
+                                    *g = Some(d);
+                                }
+                            }
+                            Err(e) => {
+                                if let Ok(mut g) = fatal.lock() {
+                                    *g = Some(e);
+                                }
+                                break;
+                            }
+                        }
+                        continue;
+                    }
                     let mut data = vec![0u8; *size as usize];
                     if let Err(e) = images[*im].read_exact_at(&mut data, *off) {
                         if let Ok(mut g) = fatal.lock() {
@@ -442,15 +482,37 @@ pub fn split(req: &SplitRequest) -> Result<(Outputs, Vec<String>)> {
     }
     let mut ds = digests.into_iter().map(|m| m.into_inner().ok().flatten());
     let mut vin = Vec::new();
-    for (tag, main, files) in versions {
+    let mut post = Vec::new();
+    let arcs: Vec<std::sync::Arc<File>> = images.into_iter().map(std::sync::Arc::new).collect();
+    for (vi, (tag, main, files)) in versions.into_iter().enumerate() {
         let mut fl = Vec::new();
-        for (p, _, _) in files {
-            fl.push((
-                p,
-                ds.next()
-                    .flatten()
-                    .ok_or_else(|| ExtractError::format("a split job did not finish"))?,
-            ));
+        let mut sorted = Vec::new();
+        for (p, off, size) in files {
+            let d = ds
+                .next()
+                .flatten()
+                .ok_or_else(|| ExtractError::format("a split job did not finish"))?;
+            sorted.push((p.clone(), off, size, d));
+            fl.push((p, d));
+        }
+        sorted.sort_by(|a, b| a.0.cmp(&b.0));
+        for (p, off, size, d) in sorted {
+            let label = if tag.is_empty() {
+                format!("/{p}")
+            } else {
+                format!("/{tag}/{p}")
+            };
+            let src: std::sync::Arc<dyn nxb_split::src::Src> =
+                std::sync::Arc::new(crate::post::ImgSrc {
+                    file: arcs[vi].clone(),
+                    off,
+                    size,
+                });
+            post.push(crate::post::PostFile {
+                label,
+                src,
+                digest: d,
+            });
         }
         vin.push(VersionIn {
             tag,
@@ -458,106 +520,11 @@ pub fn split(req: &SplitRequest) -> Result<(Outputs, Vec<String>)> {
             files: fl,
         });
     }
+    t.post(post, req.threads)?;
     eprintln!(
         "nxb-split: {} distinct files scanned of {}",
         t.scanned(),
         jobs.len()
     );
     t.merge(&vin, &req.outputs)
-}
-
-fn write_outputs(
-    req: &SplitOutputs,
-    game_tsv: &str,
-    manual: Option<&str>,
-    out: &Outputs,
-    bad: usize,
-) -> Result<()> {
-    let mut facts = out.facts.clone();
-    if let Some(m) = manual {
-        crate::facts::merge_manual(&mut facts, m).map_err(ExtractError::Format)?;
-    }
-    std::fs::create_dir_all(&req.pkg)
-        .map_err(|e| ExtractError::io(format!("create {}", req.pkg.display()), e))?;
-    if let Ok(rd) = std::fs::read_dir(&req.pkg) {
-        for e in rd.flatten() {
-            if e.file_name().to_string_lossy().ends_with(".bin") {
-                let _ = std::fs::remove_file(e.path());
-            }
-        }
-    }
-    for (name, bytes) in &out.packages {
-        write(&req.pkg.join(name), bytes)?;
-    }
-    let note = game_tsv
-        .lines()
-        .find_map(|l| l.strip_prefix("shader_note\t"))
-        .unwrap_or("None");
-    let kinds = if out
-        .rows
-        .iter()
-        .any(|r| r.4.contains("#BNSH@") || r.4.contains("#BAHS@"))
-    {
-        "BNSH / BAHS"
-    } else {
-        ""
-    };
-    let mut m = format!(
-        "# kind: evidence  {note} ({kinds} in RomFS + main) \u{2192} control section + code area keys (dm/gfx/tools/shader_split.py)\n# column 5 records where each key first appears; no PC shader pairing supplied\npackage\tindex\tstage\tdm_ctl_sha16\tsource\n"
-    );
-    for r in &out.rows {
-        m.push_str(&format!("{}\t{}\t{}\t{}\t{}\n", r.0, r.1, r.2, r.3, r.4));
-    }
-    write(&req.map, m.as_bytes())?;
-    let mut f = String::from(
-        "# Answer table for translation queries (generated by dm/gfx/tools/shader_split.py, do not edit): key <TAB> fact JSON. No PC shader pairing supplied: only the thread group / shared memory of compute shaders (taken from the control section); other queries get the translator defaults\n",
-    );
-    for (k, v) in &facts {
-        f.push_str(&format!("{k}\t{v}\n"));
-    }
-    write(&req.facts, f.as_bytes())?;
-    let mut p = String::from(
-        "# kind: evidence  vertex / pixel shader pairs within BNSH variations (generated by dm/gfx/tools/shader_split.py, do not edit): vertex key <TAB> pixel key\n",
-    );
-    for (a, b) in &out.pairs {
-        p.push_str(&format!("{a}\t{b}\n"));
-    }
-    write(&req.pairs, p.as_bytes())?;
-    let mut q = String::from(
-        "# kind: evidence  supplemental vertex / pixel shader pairs (BAHS program variations and legacy Unity pass-input covers) for vertex output padding and the pipeline prebuild (generated by dm/gfx/tools/shader_split.py, do not edit): vertex key <TAB> pixel key\n",
-    );
-    for (a, b) in &out.pso_pairs {
-        q.push_str(&format!("{a}\t{b}\n"));
-    }
-    write(&req.pso_pairs, q.as_bytes())?;
-    if bad > 0 {
-        println!("[RED] {bad} file(s) could not be read, their shaders are left out");
-    }
-    let (stat, src) = &out.stats;
-    let stages: Vec<String> = stat
-        .iter()
-        .map(|(s, n)| format!("{} {n}", stage_long(s)))
-        .collect();
-    let sources: Vec<String> = src.iter().map(|(g, n)| format!("{g} {n}")).collect();
-    println!(
-        "shaders: {} ({}); sources {}; compute shader answers {} rows; variation pairs {}",
-        out.rows.len(),
-        stages.join(", "),
-        sources.join(", "),
-        facts.len(),
-        out.pairs.len()
-    );
-    Ok(())
-}
-
-fn stage_long(s: &str) -> &'static str {
-    match s {
-        "vs" => "vertex",
-        "ps" => "pixel",
-        "cs" => "compute",
-        "gs" => "geometry",
-        "hs" => "hull",
-        "ds" => "domain",
-        _ => "?",
-    }
 }

@@ -23,12 +23,20 @@ pub(crate) struct Finish<'a> {
     pub scheme: &'a str,
     /// RomFS, marker, shader folder, its name in the app, AOC, Xcode's derived data, pipeline archive.
     pub paths: [&'a str; 7],
+    /// The programs of a game of several (empty: one program) and the chain version.
+    pub programs: &'a [super::ipaprog::Prog],
+    pub chain: &'a str,
+    /// Route C.
+    pub fw: Option<super::ipafw::FwIn<'a>>,
 }
 
 /// The rest of the generation, in the script's order.
 pub(crate) fn finish(f: &Finish<'_>, say: &mut dyn FnMut(&str)) -> Result<(), String> {
     let (r, i) = (f.r, f.i);
     fonts_icon(r, i, f.gen_dir, f.cfg, f.rd, say)?;
+    if let Some(fw) = &f.fw {
+        super::ipafw::gen_framework(i, f.prepare, f.gen_dir, fw, say)?;
+    }
     if f.prepare && i.entitlements.as_deref() != Some("") {
         let ent = f.gen_dir.join("DmIOS.entitlements");
         entitlements(i, &ent)?;
@@ -51,8 +59,9 @@ pub(crate) fn finish(f: &Finish<'_>, say: &mut dyn FnMut(&str)) -> Result<(), St
     if f.prepare && i.copy_romfs.as_deref() == Some("NO") {
         append(f.cfg, "DM_COPY_ROMFS = NO\n")?;
     }
-    project(r, i, f.ios, f.msldir, say)?;
-    resource_paths(i, f.ios, f.paths, f.version, f.pkg)?;
+    let spec = (!f.prepare && f.fw.is_some()).then_some("project-framework.yml");
+    project(r, i, f.ios, f.msldir, spec, say)?;
+    resource_paths(i, f.ios, f.paths, f.version, f.pkg, (f.programs, f.chain))?;
     if f.prepare {
         say(&format!(
             "Xcode project: {}/DmIOS.xcodeproj",
@@ -97,14 +106,13 @@ pub fn modules(g: &Game, patched: &str) -> Result<Vec<String>, String> {
 
 /// The checks of the program's inputs (`check_program`), returning the modules and the graphics API.
 pub(crate) fn check_program(
-    r: &Runner,
-    i: &Inputs,
+    _r: &Runner,
+    (gfxapi, game): (Option<&str>, &str),
     g: &Game,
     [patched, romfs, msl]: [&str; 3],
     marker: &str,
     v: &str,
 ) -> Result<(Vec<String>, String), String> {
-    let dm = i.engine.join("dm");
     if !Path::new(&format!("{patched}/main.fixups.tsv")).is_file() {
         return Err(die(format!(
             "no rewritten main in {patched} (run dm/tools/patch_nso.py first)"
@@ -121,16 +129,8 @@ pub(crate) fn check_program(
             )));
         }
     }
-    r.run(
-        "python3",
-        [
-            dm.join("tools/romfs.py").to_string_lossy().as_ref(),
-            romfs,
-            marker,
-        ],
-        None,
-    )
-    .map_err(|_| die(format!("no RomFS at {romfs} (missing {marker})")))?;
+    super::romfs::check(Path::new(romfs), marker)
+        .map_err(|_| die(format!("no RomFS at {romfs} (missing {marker})")))?;
     let b_libs = std::fs::read_dir(format!("{msl}/b-{v}"))
         .map(|d| {
             d.flatten()
@@ -139,7 +139,7 @@ pub(crate) fn check_program(
         .unwrap_or(false);
     let vk = Path::new(&format!("{msl}/vk/vk_shaders.metallib")).is_file();
     let gl = Path::new(&format!("{msl}/gl/gl_shaders.metallib")).is_file();
-    let gfx = match i.gfxapi.as_deref().filter(|x| !x.is_empty()) {
+    let gfx = match gfxapi.filter(|x| !x.is_empty()) {
         Some(x) => x.to_string(),
         None if b_libs => "nvn".into(),
         None if vk => "vulkan".into(),
@@ -172,7 +172,7 @@ pub(crate) fn check_program(
                 .as_deref()
                 .is_some_and(|s| s.split('\n').any(|x| x == l))
         };
-        if !(has(&format!("game\t{}", i.game)) && has(&format!("inputs\t{inp}"))) {
+        if !(has(&format!("game\t{game}")) && has(&format!("inputs\t{inp}"))) {
             let st = match &stamp {
                 Some(s) => s
                     .split_inclusive('\n')
@@ -261,17 +261,21 @@ pub(crate) fn fonts_icon(
         &gen_dir.join("dm/font/standard.ttf"),
         "copy standard font (STD_FONT=a TTF)",
     )?;
-    r.run(
-        &or(&i.font_py, "python3"),
-        [
-            dm.join("tools/make_ext_font.py").as_os_str(),
-            gen_dir.join("dm/font/nintendo_ext.ttf").as_os_str(),
-        ],
-        gen_dir.parent(),
-    )
-    .map_err(|_| {
-        die("make_ext_font.py (pip install fonttools, or FONT_PY=python with fontTools)")
-    })?;
+    let font_out = gen_dir.join("dm/font/nintendo_ext.ttf");
+    if super::extfont::make(&font_out, None).is_err() {
+        // the letter font is not the expected one: the engine's script decides
+        r.run(
+            &or(&i.font_py, "python3"),
+            [
+                dm.join("tools/make_ext_font.py").as_os_str(),
+                gen_dir.join("dm/font/nintendo_ext.ttf").as_os_str(),
+            ],
+            gen_dir.parent(),
+        )
+        .map_err(|_| {
+            die("make_ext_font.py (pip install fonttools, or FONT_PY=python with fontTools)")
+        })?;
+    }
     let icon = or(&i.icon, format!("{rd}/icon.jpg"));
     mkdir_p(&gen_dir.join("Assets.xcassets"))?;
     std::fs::write(gen_dir.join("Assets.xcassets/Contents.json"), ASSETS)
@@ -325,9 +329,10 @@ pub(crate) fn project(
     i: &Inputs,
     ios: &Path,
     msldir: &str,
+    spec: Option<&str>,
     say: &mut dyn FnMut(&str),
 ) -> Result<(), String> {
-    script::xcodegen(r, ios, None)?;
+    script::xcodegen(r, ios, spec)?;
     let plist = ios.join("Gen/Info.plist");
     if let Some(c) = script::commit(r, &i.engine.join("dm")) {
         script::plist_add(r, &plist, "DMCommit", "string", &c)?;
@@ -350,8 +355,26 @@ pub(crate) fn resource_paths(
     p: [&str; 7],
     version: &str,
     pkg: &str,
+    (progs, chain): (&[super::ipaprog::Prog], &str),
 ) -> Result<(), String> {
     let [romfs, marker, shaders, msldir, aoc, derived, pso] = p;
+    // a game of several programs: each program's files, which the Xcode build phase copies under p<index>
+    let programs = if progs.is_empty() {
+        None
+    } else {
+        let mut t =
+            String::from("# program\tRomFS\tmarker\tiOS shaders\tshader folder (build_ipa.sh)\n");
+        for p in progs {
+            let d = p.msldir(chain);
+            t.push_str(&format!(
+                "{}\t{}\t{}\t{}/{d}\t{d}\n",
+                p.n, p.romfs, p.marker, p.msl
+            ));
+        }
+        std::fs::write(ios.join("Gen/resources_programs.tsv"), t)
+            .map_err(|_| die("resources_programs.tsv"))?;
+        Some("Gen/resources_programs.tsv".to_string())
+    };
     resources::write(&resources::Inputs {
         ios: ios.to_string_lossy().into_owned(),
         romfs: romfs.into(),
@@ -366,7 +389,7 @@ pub(crate) fn resource_paths(
             .to_string_lossy()
             .into_owned(),
         pso: pso.into(),
-        programs: None,
+        programs,
         title: i.game.clone(),
         version: version.into(),
         build: pkg.into(),

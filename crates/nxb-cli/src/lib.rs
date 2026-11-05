@@ -7,6 +7,7 @@
 use std::io::Write;
 
 mod build;
+mod cache;
 mod recompile;
 
 /// Which binary is running.
@@ -31,8 +32,22 @@ impl Binary {
     pub fn commands(self) -> &'static [&'static str] {
         match self {
             Binary::Nxb => &[
-                "build", "extract", "rewrite", "split", "app", "ipa", "pso", "sign", "parity",
-                "bench", "explain", "version", "help",
+                "build",
+                "cache",
+                "extract",
+                "rewrite",
+                "rewrite-rules",
+                "nro",
+                "split",
+                "app",
+                "ipa",
+                "pso",
+                "sign",
+                "parity",
+                "bench",
+                "explain",
+                "version",
+                "help",
             ],
             Binary::Shaderbuild => &[
                 "build",
@@ -77,8 +92,16 @@ pub fn run(bin: Binary, args: &[String], out: &mut dyn Write, err: &mut dyn Writ
         "build" if bin == Binary::Shaderbuild => return build::main(&args[1..], out, err),
         // the whole build (ADR W19: nxb-build is the orchestrator crate)
         "build" if bin == Binary::Nxb => return nxb_build::main(&args[1..]),
+        // a title's shader and pipeline cache as a store export
+        "cache" if bin == Binary::Nxb => return cache::main(&args[1..], out, err),
         // the extract stage: NSP and NUP packages (ADR W19)
         "extract" if bin == Binary::Nxb => return nxb_extract::cli::main(&args[1..]),
+        // the rewrite step (`patch_nso.py`'s command line, exit code 4 = unsupported, run the script)
+        "rewrite" if bin == Binary::Nxb => return nxb_build::rewrite::main(&args[1..]),
+        // the NRO collection (`nro_collect.py`'s command line, exit code 4 = unsupported)
+        "nro" if bin == Binary::Nxb => return nxb_build::rewrite::nro_main(&args[1..]),
+        // the registered patches as private rule files
+        "rewrite-rules" if bin == Binary::Nxb => return nxb_build::rewrite::rules_main(&args[1..]),
         c if bin.commands().contains(&c) => {
             writeln!(err, "{}: {c}: not implemented yet", bin.name()).map(|_| 2)
         }

@@ -11,8 +11,9 @@
 //! step with the extract (it reads the split's packages when they are all written) and the staging of the app's
 //! non-shader files with the shader step. `--dry-run` prints the graph and the keys.
 //!
-//! Not ported yet, taken from the work folder (the Python build's outputs) and named in the plan: the rewrite
-//! (`patch_nso.py`), the button-icon font (`make_ext_font.py`), the survey and profile steps. The
+//! The rewrite (`patch_nso.py`) is made by [`rewrite`] when the work folder has no `patched_<package>` and the engine
+//! is the one the port was checked against (otherwise the work folder's output is taken, as before). Not ported yet,
+//! taken from the work folder (the Python build's outputs) and named in the plan: the survey and profile steps. The
 //! shader step is an existing library folder (`--shaders`, or the work folder's `shader/cache/b-<chain>`), running the
 //! lead's `shaderbuild build` as a process from here is not wired yet.
 
@@ -20,8 +21,10 @@ pub mod events;
 pub mod graph;
 pub mod host;
 pub mod ios;
+mod iosbuild;
 pub mod order;
 pub mod pipeline;
+pub mod rewrite;
 
 use std::path::PathBuf;
 
@@ -42,7 +45,7 @@ pub struct Args {
     pub app_name: Option<String>,
     /// `--bundle-id`.
     pub bundle_id: Option<String>,
-    /// `--platform` (only `mac-app` here).
+    /// `--platform` (`mac-app` or `ios`).
     pub platform: String,
     /// `--mac-sign` (only ad hoc `-`).
     pub mac_sign: String,
@@ -67,6 +70,9 @@ pub struct Args {
     pub threads: usize,
     /// `--xlate`: the shader translator (default the engine's `dmsh_xlate_bin/dmsh_xlate`).
     pub xlate: Option<PathBuf>,
+    /// `--xlate-host`: the translator host program and arguments, or `off` (default: found next to `--xlate`, or
+    /// env `NXB_XLATE_HOST`).
+    pub xlate_host: Option<String>,
     /// `--dotnet-root` (default `DOTNET_ROOT`, else `dotnet --list-runtimes`).
     pub dotnet_root: Option<PathBuf>,
     /// `--own-front on|off|<verdicts>`: the own front end (default on: the shipped own-identical verdicts.
@@ -75,6 +81,10 @@ pub struct Args {
     /// `--also-ios`: the iOS shader libraries too, from the same translation (`<work>/shader/ios/b-<V>`, the NSP
     /// script's layout), in the same shader step.
     pub also_ios: bool,
+    /// `--shader-manifest <file>`: the keys the title used, one per line. Their shaders are built first.
+    pub manifest: Option<PathBuf>,
+    /// `--partial`: build only the manifest's shaders and flag the output as partial (needs `--shader-manifest`).
+    pub partial: bool,
 }
 
 /// `--companion-app` under its old name: compatibility alias for the reference build scripts.
@@ -102,8 +112,10 @@ const VALUE: &[&str] = &[
     COMPAT_ALIAS,
     "--threads",
     "--xlate",
+    "--xlate-host",
     "--dotnet-root",
     "--own-front",
+    "--shader-manifest",
 ];
 /// Options of the NSP script this port refuses by name (not implemented yet).
 const NOT_YET: &[&str] = &[
@@ -156,6 +168,11 @@ pub fn parse(argv: &[String]) -> Result<Args, (i32, String)> {
             i += 1;
             continue;
         }
+        if k == "--partial" {
+            a.partial = true;
+            i += 1;
+            continue;
+        }
         if k == "--dry-run" {
             a.dry_run = true;
             i += 1;
@@ -187,8 +204,10 @@ pub fn parse(argv: &[String]) -> Result<Args, (i32, String)> {
                 "--engine" => a.engine = Some(v.into()),
                 "--shaders" => a.shaders = Some(v.into()),
                 "--xlate" => a.xlate = Some(v.into()),
+                "--xlate-host" => a.xlate_host = Some(v),
                 "--dotnet-root" => a.dotnet_root = Some(v.into()),
                 "--own-front" => a.own_front = v,
+                "--shader-manifest" => a.manifest = Some(v.into()),
                 _ if k == "--companion-app" || k == COMPAT_ALIAS => a.companion = Some(v.into()),
                 _ => a.threads = v.parse().map_err(|_| (2, format!("--threads: {v}")))?,
             }
@@ -201,11 +220,11 @@ pub fn parse(argv: &[String]) -> Result<Args, (i32, String)> {
         }
         i += 1;
     }
-    if a.platform != "mac-app" {
+    if a.platform != "mac-app" && a.platform != "ios" {
         return Err((
             1,
             format!(
-                "--platform {}: only mac-app is implemented in nxb build yet",
+                "--platform {}: only mac-app and ios are implemented in nxb build",
                 a.platform
             ),
         ));
@@ -215,6 +234,9 @@ pub fn parse(argv: &[String]) -> Result<Args, (i32, String)> {
             1,
             "--mac-sign: only ad-hoc signing (-) is implemented".into(),
         ));
+    }
+    if a.partial && a.manifest.is_none() {
+        return Err((2, "--partial needs --shader-manifest <file>".into()));
     }
     if a.nsp_dir.as_os_str().is_empty() {
         return Err((2, "the NSP folder is required".into()));
@@ -242,7 +264,8 @@ pub fn main(argv: &[String]) -> i32 {
         Err(e) => {
             prog.end("", false);
             prog.say(&format!("[RED] {e}"));
-            1
+            // Unsupported by contract: the caller runs the reference script (docs/integration-requests.md)
+            if e.starts_with("unsupported") { 4 } else { 1 }
         }
     }
 }
@@ -282,6 +305,16 @@ mod tests {
                 .map(|e| e.0),
             Some(2)
         );
-        assert_eq!(parse(&v(&["dir"])).err().map(|e| e.0), Some(1));
+        assert_eq!(
+            parse(&v(&["dir", "--platform", "mac"])).err().map(|e| e.0),
+            Some(1)
+        );
+        // manifest-first and partial
+        let a = parse(&v(&["dir", "--shader-manifest", "m.txt", "--partial"])).unwrap();
+        assert!(a.partial && a.manifest.as_deref() == Some(std::path::Path::new("m.txt")));
+        assert_eq!(parse(&v(&["dir", "--partial"])).err().map(|e| e.0), Some(2));
+        assert!(parse(&v(&["dir"])).is_ok_and(|a| !a.partial && a.manifest.is_none()));
+        // the script's default platform is ios
+        assert!(parse(&v(&["dir"])).is_ok_and(|a| a.platform == "ios"));
     }
 }

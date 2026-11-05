@@ -1,0 +1,370 @@
+# nxb rewrite rules (generated from the engine's patch files). Private data: instruction words of game code.
+
+scope = "01007EF00011E000"
+
+[[build]]
+row = ["build", "v1114112", "1.9.0", "main=cd57b23fa4bbad65803d9788c01821ee", "subsdk0=f39f4c431234c72eb520cfdd1001bbcf", "sdk=574284b40c06cf1821a44857939083be"]
+
+[[rule]]
+binding = "build"
+kind = "cut"
+build = "cd57b23fa4bbad65803d9788c01821ee"
+offset = 17983244
+old = "6041201e"
+new = "4041201e"
+why = "lower bound of the candidate interval: fmov s0,s11 (2.0) → fmov s0,s10 (1.0)"
+
+[[rule]]
+binding = "build"
+kind = "cut"
+build = "cd57b23fa4bbad65803d9788c01821ee"
+offset = 17983248
+old = "7f0b0071"
+new = "7f070071"
+why = "lower bound of the candidate interval: cmp w27,#2 → cmp w27,#1"
+
+[[rule]]
+binding = "build"
+kind = "cut"
+build = "cd57b23fa4bbad65803d9788c01821ee"
+offset = 17983068
+old = "78008052"
+new = "58008052"
+why = "step-down target recorded when stepping up, max(candidate, w24) − 1: mov w24,#3 → mov w24,#2"
+
+[[rule]]
+binding = "build"
+kind = "cut"
+build = "cd57b23fa4bbad65803d9788c01821ee"
+offset = 17983304
+old = "1f0d0071"
+new = "1f090071"
+why = "step-down target recorded when stepping up: cmp w8,#3 → cmp w8,#2"
+
+[[rule]]
+binding = "build"
+kind = "cut"
+build = "cd57b23fa4bbad65803d9788c01821ee"
+offset = 17983380
+old = "3f0d0071"
+new = "3f090071"
+why = "stepping down stops at < 3 → at < 2: cmp w9,#3 → cmp w9,#2"
+
+[[rule]]
+binding = "build"
+kind = "cut"
+build = "cd57b23fa4bbad65803d9788c01821ee"
+offset = 17983772
+old = "c00000b4"
+new = "03000014"
+why = "interval controller always takes the GPU time path (CPU span timing): cbz x0,#0x1126934 → b #0x1126928"
+
+[[rule]]
+binding = "build"
+kind = "cut"
+build = "cd57b23fa4bbad65803d9788c01821ee"
+offset = 17983860
+old = "c00000b4"
+new = "03000014"
+why = "interval controller always takes the GPU time path (takes max(CPU span, GPU time)): cbz x0,#0x112698c → b #0x1126980"
+
+[[rule]]
+binding = "build"
+kind = "frame-step"
+build = "cd57b23fa4bbad65803d9788c01821ee"
+why = "frame step stub of the build"
+
+[[rule.step]]
+op = "label"
+n = 0
+
+[[rule.step]]
+op = "site"
+at = 17983928
+original = "fd7bbea9"
+
+[[rule.step]]
+op = "site"
+at = 22139856
+original = "fd7bbea9"
+
+[[rule.step]]
+op = "adrp"
+reg = 16
+pc = "L0+0"
+target = "S+0"
+
+[[rule.step]]
+op = "word"
+word = 3107979793
+
+[[rule.step]]
+op = "word"
+word = 872415633
+
+[[rule.step]]
+op = "adrp"
+reg = 17
+pc = "L0+12"
+target = "32061584"
+
+[[rule.step]]
+op = "word"
+word = 4182002225
+
+[[rule.step]]
+op = "word"
+word = 3019899185
+
+[[rule.step]]
+op = "word"
+word = 960538161
+
+[[rule.step]]
+op = "word"
+word = 889192689
+
+[[rule.step]]
+op = "word"
+word = 3107987985
+
+[[rule.step]]
+op = "word"
+word = 872415409
+
+[[rule.step]]
+op = "word"
+word = 705758177
+
+[[rule.step]]
+op = "word"
+word = 4181727761
+
+[[rule.step]]
+op = "word"
+word = 2334212657
+
+[[rule.step]]
+op = "word"
+word = 4177533457
+
+[[rule.step]]
+op = "word"
+word = 2847833085
+
+[[rule.step]]
+op = "b"
+from = "L0+60"
+to = "17983932"
+mask = 0
+
+[[rule.step]]
+op = "put"
+at = 17983928
+why = "setWaitVsyncInterval: the host's step unless the VFR override is set (state page target fps; 0 = the game's interval)"
+items = ["b:17983928:L0+0:0"]
+
+[[rule.step]]
+op = "adrp"
+reg = 16
+pc = "L0+64"
+target = "S+0"
+
+[[rule.step]]
+op = "word"
+word = 3107979793
+
+[[rule.step]]
+op = "word"
+word = 872415409
+
+[[rule.step]]
+op = "word"
+word = 960537617
+
+[[rule.step]]
+op = "word"
+word = 872415313
+
+[[rule.step]]
+op = "word"
+word = 3107990545
+
+[[rule.step]]
+op = "word"
+word = 3103794705
+
+[[rule.step]]
+op = "word"
+word = 2847833085
+
+[[rule.step]]
+op = "b"
+from = "L0+96"
+to = "22139860"
+mask = 0
+
+[[rule.step]]
+op = "put"
+at = 22139856
+why = "VFR::updateInterval: its own override published for the host (state page target fps; 0 = original)"
+items = ["b:22139856:L0+64:0"]
+
+[[rule.step]]
+op = "site"
+at = 15404928
+original = "08f144f9"
+
+[[rule.step]]
+op = "site"
+at = 15404936
+original = "080140bd"
+
+[[rule.step]]
+op = "word"
+word = 3175088392
+
+[[rule.step]]
+op = "adrp"
+reg = 8
+pc = "L0+104"
+target = "32061584"
+
+[[rule.step]]
+op = "word"
+word = 4182001928
+
+[[rule.step]]
+op = "word"
+word = 3019899048
+
+[[rule.step]]
+op = "word"
+word = 3175103744
+
+[[rule.step]]
+op = "word"
+word = 505421832
+
+[[rule.step]]
+op = "word"
+word = 1409286221
+
+[[rule.step]]
+op = "word"
+word = 505430024
+
+[[rule.step]]
+op = "b"
+from = "L0+132"
+to = "15404940"
+mask = 0
+
+[[rule.step]]
+op = "put"
+at = 15404936
+why = "held-button counts step by the VFR ratio (menu repeat in game time at any frame step)"
+items = ["b:15404936:L0+100:0"]
+
+[[rule.step]]
+op = "site"
+at = 19294336
+original = "88ae40f9"
+
+[[rule.step]]
+op = "site"
+at = 19294316
+original = "39000014"
+
+[[rule.step]]
+op = "adrp"
+reg = 8
+pc = "L0+136"
+target = "S+0"
+
+[[rule.step]]
+op = "word"
+word = 3175092480
+
+[[rule.step]]
+op = "word"
+word = 505421832
+
+[[rule.step]]
+op = "word"
+word = 1409286317
+
+[[rule.step]]
+op = "word"
+word = 506335233
+
+[[rule.step]]
+op = "word"
+word = 505487360
+
+[[rule.step]]
+op = "word"
+word = 1409286208
+
+[[rule.step]]
+op = "word"
+word = 505430024
+
+[[rule.step]]
+op = "word"
+word = 4181765768
+
+[[rule.step]]
+op = "b"
+from = "L0+172"
+to = "19294340"
+mask = 0
+
+[[rule.step]]
+op = "put"
+at = 19294336
+why = "3D view scale = the host render scale (1.0 = the game's dynamic resolution)"
+items = ["b:19294336:L0+136:0"]
+
+[[rule.step]]
+op = "adrp"
+reg = 8
+pc = "L0+176"
+target = "S+0"
+
+[[rule.step]]
+op = "word"
+word = 3107983624
+
+[[rule.step]]
+op = "word"
+word = 872415368
+
+[[rule.step]]
+op = "word"
+word = 1376327944
+
+[[rule.step]]
+op = "word"
+word = 872415304
+
+[[rule.step]]
+op = "b"
+from = "L0+196"
+to = "19294336"
+mask = 0
+
+[[rule.step]]
+op = "b"
+from = "L0+200"
+to = "19294544"
+mask = 0
+
+[[rule.step]]
+op = "put"
+at = 19294316
+why = "scale apply block taken every frame when the host render scale is not 1.0"
+items = ["b:19294316:L0+176:0"]
+
+[[rule.step]]
+op = "scale"

@@ -55,6 +55,7 @@ fn main() -> ExitCode {
         store,
         skip,
         skip_suffix,
+        reuse: std::env::var_os("NXB_IPA_NO_REUSE").is_none(),
         compress: if std::env::var_os("NXB_IPA_STORE_ONLY").is_some() {
             nxb_pack::ipa::STORE_ONLY
         } else {

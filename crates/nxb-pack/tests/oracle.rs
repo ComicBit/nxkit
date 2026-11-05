@@ -588,3 +588,51 @@ fn appstage_matches_codesign() {
     assert!(stage_and_sign(&plan, &n, &StageOptions::default()).is_err()); // never overwrites
     fs::remove_dir_all(&d).unwrap();
 }
+
+/// The iOS flow signs the app by its executable's path (`codesign --force --sign - --entitlements E App.app/Exe`),
+/// which seals the whole app: the same files as [`sign_bundle`] of the app.
+#[test]
+fn signing_an_ios_executable_by_path_matches_sign_bundle() {
+    let Some(ios) = sdk("iphoneos") else {
+        eprintln!("skipping: no iOS SDK");
+        return;
+    };
+    if !tools() {
+        return;
+    }
+    let d = tmpdir("iosexe");
+    let exe = build(
+        &d,
+        "exe",
+        &["-target", "arm64-apple-ios17.0", "-isysroot", &ios],
+    );
+    let src = d.join("src/S.app");
+    write(&src.join("Info.plist"), &info_plist("S", "org.test.s"));
+    write(&src.join("PkgInfo"), "APPL????");
+    write(&src.join("dm/t.tsv"), "t");
+    write(&src.join("en.lproj/L.strings"), "l");
+    fs::copy(&exe, src.join("S")).unwrap();
+    let ent = d.join("ent.plist");
+    write(
+        &ent,
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><plist version=\"1.0\"><dict><key>com.apple.developer.kernel.increased-memory-limit</key><true/></dict></plist>",
+    );
+    let (o, n) = (d.join("o/S.app"), d.join("n/S.app"));
+    for p in [&o, &n] {
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        clone_tree(&src, p);
+    }
+    run(Command::new("codesign")
+        .args(["--force", "--sign", "-", "--entitlements"])
+        .arg(&ent)
+        .arg(o.join("S")));
+    let opts = BundleOptions {
+        entitlements: Some(fs::read(&ent).unwrap()),
+        ..BundleOptions::default()
+    };
+    sign_bundle(&n, &opts).unwrap();
+    if exact() {
+        same_files(&o, &n, &["_CodeSignature/CodeResources", "S"]);
+    }
+    fs::remove_dir_all(&d).unwrap();
+}

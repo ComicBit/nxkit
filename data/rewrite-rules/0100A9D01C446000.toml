@@ -1,0 +1,24 @@
+# nxb rewrite rules (generated from the engine's patch files). Private data: instruction words of game code.
+
+scope = "0100A9D01C446000"
+
+[[build]]
+row = ["build", "v131072", "1.2.0", "main=f7ec03e4cb9de3bd8319d4e899d2e9cc", "subsdk0=92ef43cb1f9917ab206ac5c9e36240bc", "sdk=145dde94fb574acc9e09780a11995bd3"]
+
+[[rule]]
+binding = "build"
+kind = "cut"
+build = "f7ec03e4cb9de3bd8319d4e899d2e9cc"
+offset = 52910300
+old = "8e6f4097"
+new = "1f2003d5"
+why = "GCreateMalloc: bl 0x291714 (FMallocBinned3 constructor, 37 GB of address space) → nop; the host allocator's vtable is put in at the gate after it (hle_uemalloc.c)"
+
+[[rule]]
+binding = "build"
+kind = "obs"
+build = "f7ec03e4cb9de3bd8319d4e899d2e9cc"
+offset = 52910308
+number = 21
+original = "aa1303e0"
+why = "GCreateMalloc: the allocator object is in x19, before it is used: the host puts its vtable in; orig mov x0, x19"

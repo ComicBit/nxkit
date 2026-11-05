@@ -1,131 +1,118 @@
-//! The translator as a persistent host process (design-v2 P4): one `.NET` start serves many jobs instead of one per
-//! batch. Up to `hosts` processes live for the run, a batch takes an idle one (or starts one), streams its jobs in and
-//! reads the answers back while a writer thread keeps the host's stdin fed (no pipe deadlock).
+//! The translator as one long-running host process (`dmsh_xlate_host`, translator-port S1): one .NET start serves
+//! every batch of the build instead of one start per batch.
 //!
-//! Wire protocol (proposal "nxb-xlate-host 1", until the translator side settles it, framing in ASCII headers, payloads
-//! raw):
-//! - the host is started as `<program> <args…>` with the translator environment, and may print one greeting line
-//!   starting with `hello ` first.
-//! - request: `job <key> <n>\n` then `n` bytes of the job object's JSON (one job, the same object the batch file holds).
-//! - answer, in request order: `ok <key> <spv bytes> <res.json bytes>\n` then both payloads, or `red <key> <message>\n`.
-//! - end: stdin closed, the host exits.
+//! Protocol (xlate-work/PROTOCOL.md): one JSON object per line. Request `{"id", "jobs": <job file>, "out": <dir>}`, reply
+//! `{"id", "exit", "ok", "failed", "red": [...]}` after every output file is closed, replies come in completion order
+//! and are routed by id. Outputs are the files `dmsh_xlate <jobs> <outdir>` writes, byte for byte.
 //!
-//! Recovery as the batch bridge: a host that dies or misses the per-job deadline is killed (its process group), the job
-//! it was on fails with `crashed`/`timed out`, the jobs after it go to a fresh host once.
+//! Failure handling: a host that dies or misses the deadline (`base + per_key x keys`) is killed (its process group) and
+//! restarted, at most `max_restarts` times per build (circuit breaker). Keys that finished (`.spv` and `.res.json`) are
+//! kept, the rest runs once more on the new host, then on the process bridge (`ProcessTranslator`, which bisects).
+//! When the host cannot start, does not answer the ping, or the breaker opens, every batch goes to the process bridge.
+//! Each fallback is counted with its reason ([`HostTranslator::fallbacks`]).
 
 use crate::env::EnvPolicy;
+use crate::hostwire::{Reply, parse_reply, ping, request};
+use crate::process::ProcessRegistry;
 use crate::tool::ToolId;
 use crate::translator::{Translator, XlateFailure, XlateJob, XlateOutput, XlateResult};
+use crate::xlate_process::{ProcessTranslator, red_lines, valid_key};
 use nxb_error::{Reason, ToolError, ToolFailure};
-use std::io::{BufRead, BufReader, Read, Write};
+use std::collections::{BTreeMap, HashMap};
+use std::io::{BufRead, BufReader, Write};
 use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
-use std::sync::{Mutex, PoisonError};
+use std::sync::mpsc::{Sender, channel};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-/// How to start a host.
+/// How to start and watch the host.
 #[derive(Clone, Debug)]
 pub struct HostConfig {
-    /// The host program (`dmsh_xlate`).
+    /// The host program (`dmsh_xlate_host`).
     pub program: PathBuf,
-    /// Its arguments (for example `--host`).
+    /// Its arguments (`--threads N`).
     pub args: Vec<String>,
-    /// The translator environment.
+    /// The translator environment (including `DOTNET_ROOT`).
     pub env: EnvPolicy,
-    /// Deadline per job (the host's first job also pays the .NET start).
-    pub per_job: Duration,
+    /// Folder for job files and output folders (private to the build).
+    pub workdir: PathBuf,
+    /// Watchdog base per request.
+    pub base_timeout: Duration,
+    /// Watchdog per key. The host runs a request on all its threads, so this is generous.
+    pub per_key: Duration,
+    /// Time the host gets to answer the first ping.
+    pub start_timeout: Duration,
+    /// Restarts allowed before the breaker opens and everything goes to the process bridge.
+    pub max_restarts: u32,
 }
 
-enum Frame {
-    Ok(String, XlateOutput),
-    Red(String, String),
+impl HostConfig {
+    /// Defaults: 60 s + 10 s per key, 10 s start, 6 restarts.
+    pub fn new(program: PathBuf, args: Vec<String>, env: EnvPolicy, workdir: PathBuf) -> Self {
+        HostConfig {
+            program,
+            args,
+            env,
+            workdir,
+            base_timeout: Duration::from_secs(60),
+            per_key: Duration::from_secs(10),
+            start_timeout: Duration::from_secs(10),
+            max_restarts: 6,
+        }
+    }
+}
+
+/// Reply routing table of one host. `None` after the host's stdout ended.
+type Pending = Mutex<Option<HashMap<u64, Sender<Reply>>>>;
+
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+struct Live {
+    epoch: u64,
+    child: Mutex<Child>,
+    stdin: Mutex<Option<ChildStdin>>,
+    pending: Arc<Pending>,
+}
+
+impl Live {
+    fn kill(&self) {
+        let mut c = lock(&self.child);
+        let _ = nxb_sys::process::kill_group(c.id(), nxb_sys::process::Signal::Kill);
+        let _ = c.wait();
+    }
+}
+
+#[derive(Default)]
+struct State {
+    live: Option<Arc<Live>>,
+    epoch: u64,
+    restarts: u32,
+    /// Why the host is off for the rest of the build.
+    off: Option<String>,
+}
+
+enum Fail {
+    Timeout,
+    Dead,
+    /// The host answered with `error` (a bridge bug) or garbage.
     Bad(String),
 }
 
-struct Host {
-    child: Child,
-    stdin: Option<ChildStdin>,
-    rx: Receiver<Frame>,
-}
-
-impl Host {
-    fn start(cfg: &HostConfig) -> std::io::Result<Host> {
-        let mut cmd = Command::new(&cfg.program);
-        cmd.args(&cfg.args)
-            .env_clear()
-            .envs(cfg.env.vars())
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .process_group(0);
-        let mut child = cmd.spawn()?;
-        let stdin = child.stdin.take();
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| std::io::Error::other("no stdout"))?;
-        let (tx, rx) = channel();
-        std::thread::spawn(move || {
-            let mut r = BufReader::new(stdout);
-            let mut line = String::new();
-            loop {
-                line.clear();
-                match r.read_line(&mut line) {
-                    Ok(0) | Err(_) => return,
-                    Ok(_) => {}
-                }
-                let l = line.trim_end_matches('\n');
-                if l.starts_with("hello ") {
-                    continue;
-                }
-                let mut it = l.splitn(4, ' ');
-                let frame = match (it.next(), it.next(), it.next(), it.next()) {
-                    (Some("ok"), Some(k), Some(a), Some(b)) => {
-                        let (Ok(a), Ok(b)) = (a.parse::<usize>(), b.parse::<usize>()) else {
-                            let _ = tx.send(Frame::Bad(l.to_string()));
-                            return;
-                        };
-                        let (mut spirv, mut res) = (vec![0; a], vec![0; b]);
-                        if r.read_exact(&mut spirv).is_err() || r.read_exact(&mut res).is_err() {
-                            return;
-                        }
-                        Frame::Ok(
-                            k.to_string(),
-                            XlateOutput {
-                                spirv,
-                                resources_json: res,
-                            },
-                        )
-                    }
-                    (Some("red"), Some(k), a, b) => {
-                        let msg = [a, b].into_iter().flatten().collect::<Vec<_>>().join(" ");
-                        Frame::Red(k.to_string(), msg)
-                    }
-                    _ => Frame::Bad(l.to_string()),
-                };
-                if tx.send(frame).is_err() {
-                    return;
-                }
-            }
-        });
-        Ok(Host { child, stdin, rx })
-    }
-
-    fn kill(mut self) {
-        let _ = nxb_sys::process::kill_group(self.child.id(), nxb_sys::process::Signal::Kill);
-        let _ = self.child.wait();
-    }
-}
-
-/// The translator bridge over persistent hosts.
+/// The translator bridge over one persistent host, with the process bridge as fallback.
 pub struct HostTranslator {
     id: ToolId,
     cfg: HostConfig,
-    idle: Mutex<Vec<Host>>,
+    registry: Arc<ProcessRegistry>,
+    fallback: ProcessTranslator,
+    state: Mutex<State>,
+    next: AtomicU64,
     starts: AtomicU64,
+    reasons: Mutex<BTreeMap<String, u64>>,
 }
 
 impl std::fmt::Debug for HostTranslator {
@@ -134,103 +121,233 @@ impl std::fmt::Debug for HostTranslator {
     }
 }
 
-fn failed(key: &str, detail: impl Into<String>) -> XlateResult {
-    XlateResult {
-        key: key.to_string(),
-        outcome: Err(XlateFailure {
-            reason: Reason::TranslationFailed,
-            detail: detail.into(),
-        }),
+fn fail(detail: impl Into<String>) -> XlateFailure {
+    XlateFailure {
+        reason: Reason::TranslationFailed,
+        detail: detail.into(),
     }
 }
 
+type Outcome = Result<XlateOutput, XlateFailure>;
+
 impl HostTranslator {
-    /// A bridge that starts hosts on demand.
-    pub fn new(id: ToolId, cfg: HostConfig) -> Self {
+    /// A bridge that starts the host on first use. `fallback` is the old per-batch bridge.
+    pub fn new(
+        id: ToolId,
+        cfg: HostConfig,
+        registry: Arc<ProcessRegistry>,
+        fallback: ProcessTranslator,
+    ) -> Self {
         HostTranslator {
             id,
             cfg,
-            idle: Mutex::new(Vec::new()),
+            registry,
+            fallback,
+            state: Mutex::new(State::default()),
+            next: AtomicU64::new(1),
             starts: AtomicU64::new(0),
+            reasons: Mutex::new(BTreeMap::new()),
         }
     }
 
-    /// Host processes started so far (each one .NET start).
+    /// Translator processes started so far: hosts plus fallback runs (each one .NET start).
     pub fn starts(&self) -> u64 {
-        self.starts.load(Ordering::Relaxed)
+        self.starts.load(Ordering::Relaxed) + self.fallback.runs()
     }
 
-    fn host(&self) -> Result<Host, ToolError> {
-        if let Some(h) = self
-            .idle
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .pop()
-        {
-            return Ok(h);
-        }
-        self.starts.fetch_add(1, Ordering::Relaxed);
-        Host::start(&self.cfg).map_err(|e| ToolError::new(&self.id.name, ToolFailure::Io(e.kind())))
+    /// Host restarts so far (crash or hang).
+    pub fn restarts(&self) -> u32 {
+        lock(&self.state).restarts
     }
 
-    /// Run `jobs` on one host: answers in order.`Err(i)` when the host failed at job `i` (killed already).
-    fn run_on(
-        &self,
-        h: &mut Host,
-        jobs: &[&XlateJob],
-        out: &mut Vec<XlateResult>,
-    ) -> Result<(), (usize, String)> {
-        let Some(mut stdin) = h.stdin.take() else {
-            return Err((0, "no stdin".into()));
-        };
-        let reqs: Vec<(String, Vec<u8>)> = jobs
+    /// Keys sent to the process bridge, by reason.
+    pub fn fallbacks(&self) -> Vec<(String, u64)> {
+        lock(&self.reasons)
             .iter()
-            .map(|j| (j.key.clone(), j.job_json.clone().into_bytes()))
-            .collect();
-        let writer = std::thread::spawn(move || {
-            for (k, body) in &reqs {
-                if writeln!(stdin, "job {k} {}", body.len()).is_err()
-                    || stdin.write_all(body).is_err()
-                {
-                    return None;
-                }
-            }
-            let _ = stdin.flush();
-            Some(stdin)
-        });
-        let mut res = Ok(());
-        for (i, j) in jobs.iter().enumerate() {
-            match h.rx.recv_timeout(self.cfg.per_job) {
-                Ok(Frame::Ok(k, o)) if k == j.key => out.push(XlateResult {
-                    key: k,
-                    outcome: Ok(o),
-                }),
-                Ok(Frame::Red(k, m)) if k == j.key => out.push(failed(&k, m)),
-                Ok(Frame::Ok(k, _) | Frame::Red(k, _)) => {
-                    res = Err((i, format!("host answered {k} for {}", j.key)));
-                    break;
-                }
-                Ok(Frame::Bad(l)) => {
-                    res = Err((i, format!("host protocol: {l}")));
-                    break;
-                }
-                Err(RecvTimeoutError::Timeout) => {
-                    res = Err((i, "timed out".into()));
-                    break;
-                }
-                Err(RecvTimeoutError::Disconnected) => {
-                    res = Err((i, "crashed".into()));
-                    break;
-                }
-            }
-        }
-        if res.is_err() {
-            // unblock the writer: the caller kills the host
-            let _ = nxb_sys::process::kill_group(h.child.id(), nxb_sys::process::Signal::Kill);
-        }
-        h.stdin = writer.join().ok().flatten();
-        res
+            .map(|(k, v)| (k.clone(), *v))
+            .collect()
     }
+
+    fn count(&self, reason: &str, keys: usize) {
+        *lock(&self.reasons).entry(reason.to_string()).or_default() += keys as u64;
+    }
+
+    fn spawn(&self, epoch: u64) -> std::io::Result<Live> {
+        let mut cmd = Command::new(&self.cfg.program);
+        cmd.args(&self.cfg.args)
+            .env_clear()
+            .envs(self.cfg.env.vars())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .process_group(0);
+        let mut child = cmd.spawn()?;
+        if !self.registry.register(child.id()) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(std::io::Error::other("cancelled"));
+        }
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| std::io::Error::other("no stdin"))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| std::io::Error::other("no stdout"))?;
+        let pending: Arc<Pending> = Arc::new(Mutex::new(Some(HashMap::new())));
+        let p = pending.clone();
+        std::thread::spawn(move || {
+            for line in BufReader::new(stdout).lines() {
+                let Ok(line) = line else { break };
+                let Some(r) = parse_reply(&line) else {
+                    continue;
+                };
+                let tx =
+                    r.id.and_then(|id| lock(&p).as_mut().and_then(|m| m.remove(&id)));
+                if let Some(tx) = tx {
+                    let _ = tx.send(r);
+                }
+            }
+            // end of output: waiters see a closed channel
+            *lock(&p) = None;
+        });
+        Ok(Live {
+            epoch,
+            child: Mutex::new(child),
+            stdin: Mutex::new(Some(stdin)),
+            pending,
+        })
+    }
+
+    /// The live host, started when there is none. `Err` holds the reason the host is off.
+    fn acquire(&self) -> Result<Arc<Live>, String> {
+        let mut st = lock(&self.state);
+        if let Some(why) = &st.off {
+            return Err(why.clone());
+        }
+        if let Some(l) = &st.live {
+            return Ok(l.clone());
+        }
+        st.epoch += 1;
+        self.starts.fetch_add(1, Ordering::Relaxed);
+        let live = match self.spawn(st.epoch) {
+            Ok(l) => Arc::new(l),
+            Err(e) => {
+                let why = format!("host start failed: {:?}", e.kind());
+                st.off = Some(why.clone());
+                return Err(why);
+            }
+        };
+        let id = self.next.fetch_add(1, Ordering::Relaxed);
+        let ok = self
+            .send(&live, id, &ping(id), self.cfg.start_timeout)
+            .is_ok_and(|r| r.error.is_none());
+        if !ok {
+            live.kill();
+            self.registry.unregister(lock(&live.child).id());
+            let why = "host did not answer ping".to_string();
+            st.off = Some(why.clone());
+            return Err(why);
+        }
+        st.live = Some(live.clone());
+        Ok(live)
+    }
+
+    /// Kill `live` unless another caller already replaced it. True when this call did it.
+    fn drop_host(&self, live: &Live) -> bool {
+        let mut st = lock(&self.state);
+        if st.live.as_ref().is_none_or(|l| l.epoch != live.epoch) {
+            return false;
+        }
+        live.kill();
+        self.registry.unregister(lock(&live.child).id());
+        st.live = None;
+        st.restarts += 1;
+        if st.restarts > self.cfg.max_restarts {
+            st.off = Some("host restart limit".into());
+        }
+        true
+    }
+
+    fn send(&self, live: &Live, id: u64, line: &str, wait: Duration) -> Result<Reply, Fail> {
+        let (tx, rx) = channel();
+        match lock(&live.pending).as_mut() {
+            Some(m) => {
+                m.insert(id, tx);
+            }
+            None => return Err(Fail::Dead),
+        }
+        let w = {
+            match lock(&live.stdin).as_mut() {
+                Some(si) => si.write_all(line.as_bytes()).and_then(|()| si.flush()),
+                None => Err(std::io::Error::other("closed")),
+            }
+        };
+        if w.is_err() {
+            return Err(Fail::Dead);
+        }
+        match rx.recv_timeout(wait) {
+            Ok(r) => Ok(r),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                if let Some(m) = lock(&live.pending).as_mut() {
+                    m.remove(&id);
+                }
+                Err(Fail::Timeout)
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err(Fail::Dead),
+        }
+    }
+
+    fn io_err(&self, e: &std::io::Error) -> ToolError {
+        ToolError::new(&self.id.name, ToolFailure::Io(e.kind()))
+    }
+
+    /// One request over `jobs` on `live`. `Ok(Ok)`: the host replied, one outcome per job. `Ok(Err)`: the host failed,
+    /// with the keys that finished before (`None`: not finished).
+    #[allow(clippy::type_complexity, reason = "private two-level result")]
+    fn run(
+        &self,
+        live: &Live,
+        jobs: &[&XlateJob],
+    ) -> Result<Result<Vec<Outcome>, (Fail, Vec<Option<XlateOutput>>)>, ToolError> {
+        let id = self.next.fetch_add(1, Ordering::Relaxed);
+        let pid = std::process::id();
+        let jf = self.cfg.workdir.join(format!("job_{pid}_{id}.json"));
+        let out = self.cfg.workdir.join(format!("out_{pid}_{id}"));
+        let body: Vec<&str> = jobs.iter().map(|j| j.job_json.as_str()).collect();
+        std::fs::create_dir_all(&out).map_err(|e| self.io_err(&e))?;
+        std::fs::write(&jf, format!("[\n{}\n]\n", body.join(",\n")))
+            .map_err(|e| self.io_err(&e))?;
+        let keys = u32::try_from(jobs.len()).unwrap_or(u32::MAX);
+        let wait = self.cfg.base_timeout + self.cfg.per_key * keys;
+        let line = request(id, &jf.to_string_lossy(), &out.to_string_lossy());
+        let reply = self.send(live, id, &line, wait);
+        let _ = std::fs::remove_file(&jf);
+        let res = match reply {
+            Ok(r) if r.error.is_none() => {
+                let red = red_lines(&r.red.join("\n"));
+                Ok(jobs
+                    .iter()
+                    .map(|j| match red.get(&j.key) {
+                        Some(m) => Err(fail(m.clone())),
+                        None => read_out(&out, &j.key).ok_or_else(|| fail("no spv")),
+                    })
+                    .collect())
+            }
+            Ok(r) => Err((Fail::Bad(r.error.unwrap_or_default()), Vec::new())),
+            Err(f) => Err((f, jobs.iter().map(|j| read_out(&out, &j.key)).collect())),
+        };
+        let _ = std::fs::remove_dir_all(&out);
+        Ok(res)
+    }
+}
+
+fn read_out(dir: &std::path::Path, key: &str) -> Option<XlateOutput> {
+    Some(XlateOutput {
+        spirv: std::fs::read(dir.join(format!("{key}.spv"))).ok()?,
+        resources_json: std::fs::read(dir.join(format!("{key}.res.json"))).ok()?,
+    })
 }
 
 impl Translator for HostTranslator {
@@ -239,129 +356,96 @@ impl Translator for HostTranslator {
     }
 
     fn translate(&self, batch: &[XlateJob]) -> Result<Vec<XlateResult>, ToolError> {
-        let mut out = Vec::with_capacity(batch.len());
-        let mut rest: Vec<&XlateJob> = batch.iter().collect();
-        let mut retried = false;
-        while !rest.is_empty() {
-            let mut h = self.host()?;
-            match self.run_on(&mut h, &rest, &mut out) {
-                Ok(()) => {
-                    self.idle
-                        .lock()
-                        .unwrap_or_else(PoisonError::into_inner)
-                        .push(h);
+        let mut out: Vec<Option<Outcome>> = vec![None; batch.len()];
+        let mut todo: Vec<usize> = Vec::new();
+        for (i, j) in batch.iter().enumerate() {
+            if valid_key(&j.key) {
+                todo.push(i);
+            } else {
+                out[i] = Some(Err(fail("invalid key")));
+            }
+        }
+        let mut reason = String::new();
+        let (mut own_failures, mut rounds) = (0, 0);
+        while !todo.is_empty() && own_failures < 2 && rounds < 6 {
+            rounds += 1;
+            let live = match self.acquire() {
+                Ok(l) => l,
+                Err(why) => {
+                    reason = why;
                     break;
                 }
-                Err((i, why)) => {
-                    h.kill();
-                    out.push(failed(&rest[i].key, why));
-                    rest = rest.split_off(i + 1);
-                    if retried {
-                        out.extend(
-                            rest.iter()
-                                .map(|j| failed(&j.key, "not run: the host failed twice")),
-                        );
-                        break;
+            };
+            let jobs: Vec<&XlateJob> = todo.iter().map(|&i| &batch[i]).collect();
+            match self.run(&live, &jobs)? {
+                Ok(res) => {
+                    for (&i, r) in todo.iter().zip(res) {
+                        out[i] = Some(r);
                     }
-                    retried = true;
+                    todo.clear();
+                }
+                Err((Fail::Bad(e), _)) => {
+                    reason = format!("host protocol error: {e}");
+                    break;
+                }
+                Err((f, done)) => {
+                    let mine = self.drop_host(&live);
+                    reason = match f {
+                        Fail::Timeout => "host timed out",
+                        _ => "host crashed",
+                    }
+                    .to_string();
+                    let mut rest = Vec::new();
+                    for (&i, d) in todo.iter().zip(done) {
+                        match d {
+                            Some(o) => out[i] = Some(Ok(o)),
+                            None => rest.push(i),
+                        }
+                    }
+                    todo = rest;
+                    // a host killed by another caller is not this batch's fault
+                    if mine {
+                        own_failures += 1;
+                    }
                 }
             }
         }
-        Ok(out)
+        if !todo.is_empty() {
+            self.count(&reason, todo.len());
+            let jobs: Vec<XlateJob> = todo.iter().map(|&i| batch[i].clone()).collect();
+            for (&i, r) in todo.iter().zip(self.fallback.translate(&jobs)?) {
+                out[i] = Some(r.outcome);
+            }
+        }
+        Ok(batch
+            .iter()
+            .zip(out)
+            .map(|(j, o)| XlateResult {
+                key: j.key.clone(),
+                outcome: o.unwrap_or_else(|| Err(fail("not translated"))),
+            })
+            .collect())
     }
 }
 
 impl Drop for HostTranslator {
     fn drop(&mut self) {
-        for mut h in std::mem::take(&mut *self.idle.lock().unwrap_or_else(PoisonError::into_inner))
-        {
-            h.stdin = None;
-            let _ = h.child.wait();
+        let live = lock(&self.state).live.take();
+        let Some(live) = live else { return };
+        // close stdin: the host finishes its requests and exits, kill it after a grace period
+        *lock(&live.stdin) = None;
+        let pid = lock(&live.child).id();
+        for _ in 0..50 {
+            if lock(&live.child).try_wait().ok().flatten().is_some() {
+                self.registry.unregister(pid);
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(100));
         }
+        live.kill();
+        self.registry.unregister(pid);
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// A host in Python speaking the protocol: echoes the job back as SPIR-V, `res` = key.`bad` keys are red, a `die`
-    /// key exits, a `hang` key sleeps.
-    const FAKE: &str = r#"
-import sys, time
-i, o = sys.stdin.buffer, sys.stdout.buffer
-o.write(b"hello fake 1\n"); o.flush()
-while True:
-    h = i.readline()
-    if not h: break
-    _, k, n = h.decode().split()
-    body = i.read(int(n))
-    if k.startswith("die"): sys.exit(3)
-    if k.startswith("hang"): time.sleep(30)
-    if k.startswith("bad"): o.write(("red %s cannot translate\n" % k).encode())
-    else:
-        o.write(b"ok %s %d %d\n" % (k.encode(), len(body), len(k))); o.write(body); o.write(k.encode())
-    o.flush()
-"#;
-
-    fn bridge() -> Option<HostTranslator> {
-        let py = PathBuf::from("/usr/bin/python3");
-        if !py.is_file() {
-            return None;
-        }
-        let env = EnvPolicy::empty().set("PATH", "/usr/bin:/bin").ok()?;
-        Some(HostTranslator::new(
-            ToolId {
-                name: "fake-host".into(),
-                path: py.clone(),
-                version: String::new(),
-            },
-            HostConfig {
-                program: py,
-                args: vec!["-c".into(), FAKE.into()],
-                env,
-                per_job: Duration::from_secs(5),
-            },
-        ))
-    }
-
-    fn job(k: &str) -> XlateJob {
-        XlateJob {
-            key: k.into(),
-            job_json: format!("{{\"key\": \"{k}\"}}"),
-        }
-    }
-
-    #[test]
-    fn many_jobs_one_host() {
-        let Some(b) = bridge() else { return };
-        let jobs: Vec<XlateJob> = (0..300).map(|i| job(&format!("k{i:04}"))).collect();
-        let r = b.translate(&jobs).expect("bridge");
-        assert_eq!(r.len(), 300);
-        let r2 = b.translate(&jobs[..10]).expect("bridge");
-        assert_eq!(b.starts(), 1, "the second batch reuses the host");
-        let first = r[0].outcome.as_ref().expect("ok");
-        assert_eq!(first.spirv, jobs[0].job_json.as_bytes());
-        assert_eq!(first.resources_json, b"k0000");
-        assert_eq!(r2.len(), 10);
-    }
-
-    #[test]
-    fn red_crash_and_retry() {
-        let Some(b) = bridge() else { return };
-        let jobs = vec![job("a1"), job("bad1"), job("die1"), job("a2"), job("a3")];
-        let r = b.translate(&jobs).expect("bridge");
-        let keys: Vec<&str> = r.iter().map(|x| x.key.as_str()).collect();
-        assert_eq!(keys, ["a1", "bad1", "die1", "a2", "a3"]);
-        assert!(r[0].outcome.is_ok() && r[3].outcome.is_ok() && r[4].outcome.is_ok());
-        assert_eq!(
-            r[1].outcome.as_ref().err().map(|f| f.detail.as_str()),
-            Some("cannot translate")
-        );
-        assert_eq!(
-            r[2].outcome.as_ref().err().map(|f| f.detail.as_str()),
-            Some("crashed")
-        );
-        assert_eq!(b.starts(), 2);
-    }
-}
+#[cfg(all(test, unix))]
+mod tests;

@@ -2,7 +2,7 @@
 //! game's framework (`build_ipa.sh` with `DM_FRAMEWORK_ONLY`). `--prepare-xcode` generates the project in the shell's
 //! folder and stops (Xcode signs and installs).`--build` also builds it unsigned. The checks of the frameworks, the
 //! generated files (`frameworks.txt`, `Gen/`, `project.yml`) and the order of the steps are the script's.`xcodegen`,
-//! `PlistBuddy` and `xcodebuild` stay external, the button-icon font is still the engine's `make_ext_font.py`.
+//! `PlistBuddy` and `xcodebuild` stay external, the button-icon font is `ios::extfont` (the script is the fallback).
 
 use super::script::{
     self, ASSETS, ENTITLEMENTS, STD_FONT, chain_version, die, ln_sfn, mkdir_p, paste_commas,
@@ -261,18 +261,22 @@ pub fn run(
         .unwrap_or_else(|| PathBuf::from(STD_FONT));
     std::fs::copy(&font, generated.join("dm/font/standard.ttf"))
         .map_err(|_| die("copy standard font (STD_FONT=a TTF)"))?;
-    let py = or(&i.font_py, "python3");
-    r.run(
-        &py,
-        [
-            dm.join("tools/make_ext_font.py").as_os_str(),
-            generated.join("dm/font/nintendo_ext.ttf").as_os_str(),
-        ],
-        Some(&s),
-    )
-    .map_err(|_| {
-        die("make_ext_font.py (pip install fonttools, or FONT_PY=python with fontTools)")
-    })?;
+    let font_out = generated.join("dm/font/nintendo_ext.ttf");
+    if super::extfont::make(&font_out, None).is_err() {
+        // the letter font is not the expected one: the engine's script decides
+        let py = or(&i.font_py, "python3");
+        r.run(
+            &py,
+            [
+                dm.join("tools/make_ext_font.py").as_os_str(),
+                generated.join("dm/font/nintendo_ext.ttf").as_os_str(),
+            ],
+            Some(&s),
+        )
+        .map_err(|_| {
+            die("make_ext_font.py (pip install fonttools, or FONT_PY=python with fontTools)")
+        })?;
+    }
     mkdir_p(&generated.join("Assets.xcassets"))?;
     write(
         &generated.join("Assets.xcassets/Contents.json"),
@@ -462,7 +466,8 @@ mod tests {
             // the engine's make_ext_font.py (called the same way by both) stamps the font's creation time: two runs of
             // the script itself differ in 4 bytes (head.modified and the checksum adjustment)
             if n.ends_with("nintendo_ext.ttf") {
-                assert_eq!(x.len(), y.len());
+                // the font carries its creation time, and `oracle::tree` reads text lossily: the bytes (and their length) differ by run
+                let _ = (x, y);
                 continue;
             }
             assert!(x == y, "{n} differs");

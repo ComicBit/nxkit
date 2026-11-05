@@ -8,10 +8,12 @@
 //!
 //! Later in this crate: logfmt log, Chrome trace, `_b_build_metrics.json`.
 
+pub mod codes;
 mod event;
 mod json;
 mod sink;
 
+pub use codes::{Code, Severity};
 pub use event::{Event, Value};
 pub use json::escape_into;
 pub use sink::{MemorySink, NdjsonSink, NullSink, ProgressCounter, Sink};

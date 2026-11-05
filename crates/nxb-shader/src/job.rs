@@ -218,40 +218,74 @@ pub fn job_for(
         return Err(JobError(format!("{key}: no control section in the record")));
     };
     let ctl = &rec[ci..];
-    if ctl.len() >= 0x48 && u32_at(ctl, 4) == Some(0xc9) {
-        return Err(JobError(format!(
-            "{key}: NVN2 (Switch 2) records are not ported yet"
-        )));
-    }
+    let nvn2 = ctl.len() >= 0x48 && u32_at(ctl, 4) == Some(0xc9);
     let mut code = sl(rec, 0x38, ci).to_vec();
     let mut stage = package.get(..2).unwrap_or("").to_string();
     let mut notes = Vec::new();
     let mut extra: Vec<(&str, Value)> = Vec::new();
-    let c1o = u32_at(ctl, 0x700).unwrap_or(0) as usize;
-    let c1t = u32_at(ctl, 0x704).unwrap_or(0) as usize;
-    let mut c1 = sl(rec, 0x38 + c1o, 0x38 + c1t).to_vec();
-    if stage == "vs"
-        && let Some((c, k)) = vertex_ab(key, &code, ctl)?
-    {
-        code = c;
-        c1 = k;
-    }
-    if stage != "cs" {
-        code = sl(&code, 0x30, code.len()).to_vec();
-    } else if code.get(..4) == Some(&[0x79, 0x56, 0x34, 0x12]) {
-        if sl(&code, 0x30, 0x100).iter().any(|x| *x != 0) {
+    let mut c1;
+    if nvn2 {
+        // Switch 2 (dmsh_ampere.py): Ampere code, a 0x80-byte SPH for the graphics stages, then the instructions
+        // (control +0x38 long), c1 lies between control +0x40 and +0x44 of the code area.
+        if stage == "ts" || stage == "ms" {
             return Err(JobError(format!(
-                "[RED] {key}: compute code area +0x30..+0x100 is not all zero, so the instructions do not start at +0x100"
+                "{key}: NVN2 task and mesh shaders are not ported yet"
             )));
         }
-        code = sl(&code, 0x100, code.len()).to_vec();
+        let (a, e) = (
+            u32_at(ctl, 0x40).unwrap_or(0) as usize,
+            u32_at(ctl, 0x44).unwrap_or(0) as usize,
+        );
+        c1 = if a <= e && e <= code.len() {
+            code[a..e].to_vec()
+        } else {
+            Vec::new()
+        };
+        code.truncate(u32_at(ctl, 0x38).unwrap_or(0) as usize);
+        extra.push(("arch", Value::str("sm86")));
+        if stage == "cs" {
+            let b = |o: usize| Value::Int(i64::from(ctl.get(o).copied().unwrap_or(0)));
+            extra.push((
+                "nvn2_cs",
+                Value::List(vec![
+                    b(0xb1),
+                    b(0xb2),
+                    b(0xb3),
+                    Value::Int(i64::from(u16_at(ctl, 0xba).unwrap_or(0))),
+                    Value::Int(i64::from(ctl.get(0xa9).copied().unwrap_or(0)) * 4),
+                    b(0xb4),
+                    b(0xb5),
+                ]),
+            ));
+        }
+    } else {
+        let c1o = u32_at(ctl, 0x700).unwrap_or(0) as usize;
+        let c1t = u32_at(ctl, 0x704).unwrap_or(0) as usize;
+        c1 = sl(rec, 0x38 + c1o, 0x38 + c1t).to_vec();
+        if stage == "vs"
+            && let Some((c, k)) = vertex_ab(key, &code, ctl)?
+        {
+            code = c;
+            c1 = k;
+        }
+        if stage != "cs" {
+            code = sl(&code, 0x30, code.len()).to_vec();
+        } else if code.get(..4) == Some(&[0x79, 0x56, 0x34, 0x12]) {
+            if sl(&code, 0x30, 0x100).iter().any(|x| *x != 0) {
+                return Err(JobError(format!(
+                    "[RED] {key}: compute code area +0x30..+0x100 is not all zero, so the instructions do not start at +0x100"
+                )));
+            }
+            code = sl(&code, 0x100, code.len()).to_vec();
+        }
     }
-    if (stage == "vs" || stage == "gs")
+    if !nvn2
+        && (stage == "vs" || stage == "gs")
         && let Some(tf) = tf_layout(key, ctl, &mut notes)
     {
         extra.push(("tf", tf));
     }
-    if stage == "ps" && early_fragment_tests(ctl, &code) {
+    if !nvn2 && stage == "ps" && early_fragment_tests(ctl, &code) {
         extra.push(("early_fragment_tests", Value::Bool(true)));
     }
     let _ = &mut stage;

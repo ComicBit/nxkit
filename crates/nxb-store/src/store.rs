@@ -24,6 +24,7 @@ pub struct Store {
     quarantined: AtomicU64,
     recovered: u64,
     journal: Journal,
+    exclusive: bool,
     _root_lock: FileLock,
 }
 
@@ -90,6 +91,7 @@ impl Store {
             quarantined: AtomicU64::new(0),
             recovered: 0,
             journal: Journal::create(&root.join("dirty"))?,
+            exclusive: mode == LockMode::Exclusive,
             _root_lock: root_lock,
         };
         store.recover()?;
@@ -131,6 +133,11 @@ impl Store {
 
     fn sync(&self) -> bool {
         self.durability == Durability::Full
+    }
+
+    /// True when this handle holds the root exclusively (prune needs it).
+    pub fn is_exclusive(&self) -> bool {
+        self.exclusive
     }
 
     /// The root directory.

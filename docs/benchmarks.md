@@ -50,6 +50,7 @@ The sum of the stages is approximately 16:00 with the Apple front end, 15:00 wit
 and 12:30 with the own front end for `own-identical` and `own-validated` shaders. The reference build scripts take 23:42.
 This is a factor of approximately 1.5x, 1.6x or 1.9x. These sums use the first archive time (273 s). With the archive time of 207 s, each sum is approximately 1 min shorter (derived). Nobody ran this sum as one process. There is no overlap of stages in this sum.
 The overlap of stages in version 0.3.0 can make a real run shorter than the sum. Nobody timed a cold build with overlap, thus the size of the gain is an estimate.
+The changes of version 0.4.0 (raw path, Rust translator, host) are not in these sums.
 
 ## Findings
 
@@ -70,11 +71,35 @@ The overlap of stages in version 0.3.0 can make a real run shorter than the sum.
 - Estimates, not measured: the gain of the overlap on a cold build. Also 4 to 6 minutes less for a full cold build with the raw path on all shaders.
   The raw allow list covers about 14 % of the corpus, thus the second estimate does not apply to the list as it is.
 
+## Version 0.4.0
+
+All runs are on the reference machine. The machine was not quiet (the load average was 8 to 12 in the shader runs). Other jobs used the CPU.
+No run below is a full build. The numbers of the earlier sections do not include the changes of 0.4.0.
+
+| run | reference | 0.4.0 | label |
+|---|---|---|---|
+| rewrite of a 29 MB main module | 63 s (script) | 3.4 s | measured |
+| rewrite of a larger main module | 121 s (script) | 8.9 s | measured |
+| rewrite of synthetic modules with 100 to 185.6 MB of text | 183 to 672 s (script) | 1 to 3.5 s | measured, synthetic modules |
+| NRO collection, one image | 4.5 s (script) | 3.5 s | measured. The archive table dominates both times |
+| translation of 802 jobs, host against process bridge | 6.3 to 8.4 s (19 starts) | 1.0 to 1.7 s (1 start) | measured, load average 9 to 10 |
+| shader step subset (160 keys, 261 shaders), host against process bridge | 20.7 s | 20.2 s | measured. The Metal compile dominates |
+| shader step subset (160 keys), Rust translator against C# process bridge | 16 s | 17 s | measured. No gain, no .NET process |
+| shader step subset (160 keys), raw path on all shaders against Apple's compiler | 14.4 s | 6.5 s | measured, not a benchmark |
+
+Notes:
+
+- The subset runs used a cold store and one run each. They show that the new paths work and what the order of size is. They are not a benchmark.
+- The raw path gives different output than Apple's compiler for some shaders. The comparison of the times is thus not a comparison of equal work (refer to [frontend.md](frontend.md)).
+- Estimates, not measured: the gain of the raw path on a full cold build (the earlier estimate was 4 to 6 minutes), the gain of the overlap on a cold build,
+  and the change of the .NET starts in a full build from 667 to about 1.
+- Not measured: a full `nxb build` in one run with the 0.4.0 defaults, and the iOS flow end to end.
+
 ## Estimates
 
 | change | expected decrease (estimate) | basis |
 |---|---|---|
-| translator server and `spirv-cross` server | warm -55 to -75 s, cold -50 to -80 s | 667 .NET starts in one run (measured) |
+| translator server and `spirv-cross` server | warm -55 to -75 s, cold -50 to -80 s. The translator host is done in 0.4.0 and not measured on a full build. The `spirv-cross` server is not done | 667 .NET starts in one run (measured) |
 | own front end at 90 % coverage | shader step 5 min or less | 62 to 72 ms against 140 to 226 ms core time for each input |
 | store format 2 with manifests | full-hit path 5 to 10 times faster | 108,320 store files (measured) |
 | pipes as an alternative to temporary files | 1 % to 3 % on an internal SSD, 5 % to 10 % on an external disk | 31 % of thread time in open, read and close (measured) |

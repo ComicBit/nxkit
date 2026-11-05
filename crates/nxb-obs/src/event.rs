@@ -1,5 +1,6 @@
 //! The event model and its NDJSON encoding.
 
+use crate::codes::{self, Code};
 use crate::json::escape_into;
 use nxb_error::ErrorClass;
 use std::fmt::Write as _;
@@ -74,12 +75,29 @@ impl Event {
         }
     }
 
+    /// The row of the code table that goes with this event.
+    pub fn code(&self) -> &'static Code {
+        match self {
+            Event::Phase { .. } => &codes::PHASE,
+            Event::Progress { .. } => &codes::LIB_PROGRESS,
+            Event::Shader { status, .. } if matches!(status.as_str(), "ok" | "hit") => {
+                &codes::SHADER_OK
+            }
+            Event::Shader { .. } => &codes::SHADER_FAIL,
+            Event::Error { .. } => &codes::ERROR,
+            Event::Summary { .. } => &codes::SUMMARY,
+        }
+    }
+
     /// One line of compact JSON without the trailing newline.
     ///
     /// ```
     /// use nxb_obs::Event;
     /// let e = Event::Progress { step: "Mac shaders".into(), done: 3, total: 10, unit: "shaders".into() };
-    /// assert_eq!(e.to_ndjson(), r#"{"ev":"progress","step":"Mac shaders","done":3,"total":10,"unit":"shaders"}"#);
+    /// assert_eq!(
+    ///     e.to_ndjson(),
+    ///     r#"{"ev":"progress","step":"Mac shaders","done":3,"total":10,"unit":"shaders","code":"NXB2002","severity":"debug"}"#
+    /// );
     /// ```
     pub fn to_ndjson(&self) -> String {
         let mut o = String::with_capacity(96);
@@ -117,6 +135,9 @@ impl Event {
                 }
             }
         }
+        let code = self.code();
+        str_field(&mut o, "code", code.code);
+        str_field(&mut o, "severity", code.severity.name());
         o.push('}');
         o
     }
@@ -162,7 +183,7 @@ mod tests {
                 name: "shaders".into()
             }
             .to_ndjson(),
-            r#"{"ev":"phase","name":"shaders"}"#
+            r#"{"ev":"phase","name":"shaders","code":"NXB2001","severity":"info"}"#
         );
         assert_eq!(
             Event::Error {
@@ -170,7 +191,7 @@ mod tests {
                 message: "the disk is full: /x".into()
             }
             .to_ndjson(),
-            r#"{"ev":"error","class":"env","message":"the disk is full: /x"}"#
+            r#"{"ev":"error","class":"env","message":"the disk is full: /x","code":"NXB2005","severity":"error"}"#
         );
         assert_eq!(
             Event::Summary {
@@ -184,7 +205,7 @@ mod tests {
                 ]
             }
             .to_ndjson(),
-            r#"{"ev":"summary","ok":5,"rate":1.0,"nan":null,"delta":-2,"done":true,"who":"a\"b"}"#
+            r#"{"ev":"summary","ok":5,"rate":1.0,"nan":null,"delta":-2,"done":true,"who":"a\"b","code":"NXB2006","severity":"info"}"#
         );
     }
 
@@ -197,6 +218,6 @@ mod tests {
         };
         let line = e.to_ndjson();
         assert!(!line.contains('\n'));
-        assert!(line.ends_with(",\"ms\":12}"));
+        assert!(line.contains(",\"ms\":12,\"code\":\"NXB2004\",\"severity\":\"warn\"}"));
     }
 }

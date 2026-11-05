@@ -6,7 +6,7 @@
 //!
 //! The engine is `NXB_ENGINE` (the folder holding `dm/`), else the folder three levels above this binary's
 //! `dm/ios/tools` when it is installed there. Step lines are printed as the scripts print them (`[HH:MM:SS] ...`).
-//! Exit codes: 0 done, 1 failed, 2 bad arguments, 3 unsupported here (a game of several programs, a route C framework
+//! Exit codes: 0 done, 1 failed, 2 bad arguments, 4 unsupported here (a game of several programs, a route C framework
 //! build): the caller runs the script.
 
 use nxb_build::host::Runner;
@@ -139,7 +139,7 @@ fn main() -> ExitCode {
         Ok(_) => ExitCode::SUCCESS,
         Err(m) if m.starts_with("unsupported") => {
             eprintln!("[RED] nxb-ios: {m}");
-            ExitCode::from(3)
+            ExitCode::from(4)
         }
         Err(m) => {
             stamp(&m);

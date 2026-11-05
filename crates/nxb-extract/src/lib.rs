@@ -11,10 +11,10 @@
 //!
 //! Layer: L3 for now (it does file I/O and threads). Its pure parts (AES, PFS0/NCA/IVFC/BKTR/RomFS parsing, the image
 //! plan) belong in `nxb-crypto`, `nxb-hos` and `nxb-romfs` once their owner takes them.
-//! Not yet: NSZ/NCZ, sparse NCAs, `--allow-damaged`, `--aoc`,
-//! `--manifest`. Each is a named `Unsupported` error, never a silent difference.
+//! Not yet: sparse NCAs (a named `Unsupported` error, never a silent difference).
 
 pub mod aes;
+pub mod aoc;
 pub mod bktr;
 pub mod cache;
 pub mod cli;
@@ -23,17 +23,22 @@ pub mod error;
 pub mod facts;
 pub mod html;
 pub mod image;
-pub mod inflate;
+pub use nxb_split::inflate;
 pub mod ivfc;
 pub mod keys;
+pub mod listing;
+pub mod manifest;
 pub mod meta;
 pub mod nca;
 pub mod ncz;
 pub mod nup;
+pub mod post;
 pub mod prof;
 pub mod romfs;
 pub mod run;
+pub mod safe_path;
 pub mod split;
+pub mod split_out;
 pub mod storage;
 pub mod version;
 pub mod write;
