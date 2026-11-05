@@ -17,6 +17,7 @@
 pub mod aes;
 pub mod bktr;
 pub mod cache;
+pub mod cli;
 pub mod error;
 pub mod facts;
 pub mod html;
@@ -26,6 +27,7 @@ pub mod ivfc;
 pub mod keys;
 pub mod meta;
 pub mod nca;
+pub mod nup;
 pub mod prof;
 pub mod romfs;
 pub mod run;

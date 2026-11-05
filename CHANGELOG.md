@@ -2,6 +2,15 @@
 
 All notable changes are in this file. The format follows Keep a Changelog. Versions follow Semantic Versioning.
 
+## 0.1.1
+
+### Added
+
+- Reads Switch 2 packages (`.nup`) without keys. Same output layout as the reference script.
+  Use `nxb extract --nup <game.nup>` or `nxb-extract` with the same arguments.
+- Checked on one real package and on synthetic containers, including damaged ones.
+- Not checked on real data: packages with base game, update and DLC, and the control data.
+
 ## 0.1.0 (first public release)
 
 ### Added
