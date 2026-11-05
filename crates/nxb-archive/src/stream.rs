@@ -4,12 +4,16 @@
 //! shader step reports each one), on a few worker threads beside the shader step. Within a group the bases are planned
 //! (`plan::plan`), hashed by their libraries' bytes and cut by content ([`cut`]) as in [`crate::build`], so the batch
 //! keys in the store stay content keys. At the end the pieces are merged in key order.
+//!
+//! Width: while the shader step runs, a few workers ([`StreamInputs::workers`]) leave it the cores; when it ends
+//! ([`Stream::finish`]) the stream widens to [`StreamInputs::workers_after`] (one run per slot, within memory), so the
+//! groups still waiting are not compiled three at a time (the reference title, wave 9: a 232 s tail after the shader step).
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender, channel};
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Condvar, Mutex, PoisonError};
 use std::time::Instant;
 
 use nxb_model::{ContentKey, sha256};
@@ -40,8 +44,59 @@ pub struct StreamInputs {
     pub zero: bool,
     /// Pairs per group (about, a group's identity hash cuts it, at most 4x).
     pub group_target: usize,
-    /// Worker threads (concurrent `metal-tt`).
+    /// Worker threads (concurrent `metal-tt`) while the shader step runs.
     pub workers: usize,
+    /// Worker threads after [`Stream::finish`] (the shader step ended; at least `workers`).
+    pub workers_after: usize,
+}
+
+/// Opens once: the shader step ended, the extra workers may start.
+#[derive(Default)]
+struct Gate {
+    open: Mutex<bool>,
+    cv: Condvar,
+}
+
+impl Gate {
+    fn open(&self) {
+        *self.open.lock().unwrap_or_else(PoisonError::into_inner) = true;
+        self.cv.notify_all();
+    }
+
+    fn wait(&self) {
+        let mut g = self.open.lock().unwrap_or_else(PoisonError::into_inner);
+        while !*g {
+            g = self.cv.wait(g).unwrap_or_else(PoisonError::into_inner);
+        }
+    }
+}
+
+/// Runs `work` on every item of `rx` with `narrow` threads, `wide` once `gate` opened (the extra threads wait for
+/// it), until the sender is gone and the queue is empty.
+fn drain<T: Send>(
+    rx: Receiver<T>,
+    narrow: usize,
+    wide: usize,
+    gate: &Gate,
+    work: &(dyn Fn(T) + Sync),
+) {
+    let rx = Mutex::new(rx);
+    let narrow = narrow.max(1);
+    std::thread::scope(|s| {
+        for i in 0..wide.max(narrow) {
+            let rx = &rx;
+            s.spawn(move || {
+                if i >= narrow {
+                    gate.wait();
+                }
+                loop {
+                    let next = rx.lock().unwrap_or_else(PoisonError::into_inner).recv();
+                    let Ok(item) = next else { break };
+                    work(item);
+                }
+            });
+        }
+    });
 }
 
 /// A streamed archive: feed it finished shaders, then [`Stream::finish`].
@@ -50,6 +105,7 @@ pub struct Stream {
     by_key: HashMap<String, Vec<usize>>,
     tx: Mutex<Option<Sender<usize>>>,
     rx: Mutex<Option<Receiver<usize>>>,
+    wide: Gate,
 }
 
 fn pair_hash(v: &str, f: &str) -> [u8; 32] {
@@ -93,6 +149,7 @@ impl Stream {
             by_key,
             tx: Mutex::new(Some(tx)),
             rx: Mutex::new(Some(rx)),
+            wide: Gate::default(),
         }
     }
 
@@ -170,8 +227,10 @@ impl Stream {
         }
     }
 
-    /// The shader step ended: release every group still waiting (shaders not built at all).
+    /// The shader step ended: release every group still waiting (shaders not built at all) and widen to
+    /// [`StreamInputs::workers_after`] workers.
     pub fn finish(&self) {
+        self.wide.open();
         let mut groups = self.groups.lock().unwrap_or_else(PoisonError::into_inner);
         let tx = self
             .tx
@@ -198,7 +257,6 @@ impl Stream {
             .unwrap_or_else(PoisonError::into_inner)
             .take()
             .ok_or("stream already ran")?;
-        let rx = Mutex::new(rx);
         fs::create_dir_all(&c.work).map_err(|e| format!("{}: {e}", c.work.display()))?;
         let store = Store::open(&c.store).map_err(|e| e.to_string())?;
         let reg = ProcessRegistry::new();
@@ -206,29 +264,22 @@ impl Stream {
         let pieces: Mutex<Vec<(ContentKey, PathBuf, BatchReport)>> = Mutex::new(Vec::new());
         let errors: Mutex<Vec<String>> = Mutex::new(Vec::new());
         let groups = &self.groups;
-        std::thread::scope(|s| {
-            for _ in 0..inp.workers.max(1) {
-                s.spawn(|| {
-                    loop {
-                        let next = rx.lock().unwrap_or_else(PoisonError::into_inner).recv();
-                        let Ok(g) = next else { break };
-                        let pairs = groups.lock().unwrap_or_else(PoisonError::into_inner)[g]
-                            .pairs
-                            .clone();
-                        match group(c, inp, &pairs, &seen, &store, &reg) {
-                            Ok(mut p) => pieces
-                                .lock()
-                                .unwrap_or_else(PoisonError::into_inner)
-                                .append(&mut p),
-                            Err(e) => errors
-                                .lock()
-                                .unwrap_or_else(PoisonError::into_inner)
-                                .push(e),
-                        }
-                    }
-                });
+        let work = |g: usize| {
+            let pairs = groups.lock().unwrap_or_else(PoisonError::into_inner)[g]
+                .pairs
+                .clone();
+            match group(c, inp, &pairs, &seen, &store, &reg) {
+                Ok(mut p) => pieces
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .append(&mut p),
+                Err(e) => errors
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .push(e),
             }
-        });
+        };
+        drain(rx, inp.workers, inp.workers_after, &self.wide, &work);
         if let Some(e) = errors
             .into_inner()
             .unwrap_or_else(PoisonError::into_inner)
@@ -302,6 +353,7 @@ mod tests {
             zero: false,
             group_target: 8,
             workers: 1,
+            workers_after: 1,
         }
     }
 
@@ -346,6 +398,47 @@ mod tests {
             s.done(k);
         }
         assert_eq!(rx.try_iter().count(), s.groups());
+    }
+
+    #[test]
+    fn widens_when_the_shader_step_ends() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::time::Duration;
+        let (tx, rx) = channel();
+        let gate = Gate::default();
+        let (now, peak_before, peak_after, opened) = (
+            AtomicUsize::new(0),
+            AtomicUsize::new(0),
+            AtomicUsize::new(0),
+            std::sync::atomic::AtomicBool::new(false),
+        );
+        let work = |_: usize| {
+            let n = now.fetch_add(1, Ordering::SeqCst) + 1;
+            let peak = if opened.load(Ordering::SeqCst) {
+                &peak_after
+            } else {
+                &peak_before
+            };
+            peak.fetch_max(n, Ordering::SeqCst);
+            std::thread::sleep(Duration::from_millis(20));
+            now.fetch_sub(1, Ordering::SeqCst);
+        };
+        std::thread::scope(|s| {
+            s.spawn(|| drain(rx, 2, 6, &gate, &work));
+            for i in 0..8 {
+                let _ = tx.send(i);
+            }
+            std::thread::sleep(Duration::from_millis(100));
+            opened.store(true, Ordering::SeqCst);
+            for i in 0..24 {
+                let _ = tx.send(i);
+            }
+            gate.open();
+            drop(tx);
+        });
+        assert!(peak_before.load(Ordering::SeqCst) <= 2);
+        assert!(peak_after.load(Ordering::SeqCst) > 2);
+        assert!(peak_after.load(Ordering::SeqCst) <= 6);
     }
 
     #[test]

@@ -3,6 +3,7 @@
 //! A shader whose MSL has an allowed verdict goes through `nxb_tool::airfront` (in-process front, `air-opt`, `metallib`).
 //! every other shader, every reject and every own failure goes to Apple's `metal -c` + `metallib`. The cache keys carry
 //! [`OwnFront::tag`] when the mode is on, so the two modes never share store entries.
+//! The raw tier (`crate::own_raw`) runs first, with its own cache-key field ([`OwnFront::key_field`]).
 
 use nxb_tool::{Io, MetalTools, Resolver, StepCost};
 use std::path::{Path, PathBuf};
@@ -62,8 +63,12 @@ pub fn resolve(
     if std::env::var(KILL_SWITCH).is_ok_and(|v| v == "0") {
         return (None, format!("own front end off ({KILL_SWITCH}=0)"));
     }
+    let raw = crate::own_raw::list_file().1;
     if !cfg.verdicts.is_dir() {
-        let note = format!("own front end on, verdicts {}", cfg.verdicts.display());
+        let note = format!(
+            "own front end on, verdicts {}; {raw}",
+            cfg.verdicts.display()
+        );
         return (Some(cfg.clone()), note);
     }
     let Some(id) = front_id() else {
@@ -81,7 +86,7 @@ pub fn resolve(
         c.verdicts = file.clone();
         (
             Some(c),
-            format!("own front end on, verdicts {}", file.display()),
+            format!("own front end on, verdicts {}; {raw}", file.display()),
         )
     } else {
         let note = format!(
@@ -150,6 +155,8 @@ pub struct OwnFront {
     fe: nxb_tool::airfront::AirFrontEnd,
     #[cfg(feature = "air-front")]
     verdicts: nxb_tool::airfront::Verdicts,
+    #[cfg(feature = "air-front")]
+    raw: Option<crate::own_raw::RawTier>,
     tag: String,
     /// Libraries the own front end made.
     pub own: AtomicU64,
@@ -185,6 +192,7 @@ impl OwnFront {
         Ok(OwnFront {
             fe,
             verdicts,
+            raw: crate::own_raw::RawTier::open()?,
             tag,
             own: AtomicU64::new(0),
             fallback: AtomicU64::new(0),
@@ -203,12 +211,45 @@ impl OwnFront {
         &self.tag
     }
 
+    /// The cache-key field of one shader: `own-raw@<air-front id>` when the raw tier takes it, else [`Self::tag`].
+    pub fn key_field(&self, msl: &[u8]) -> &str {
+        #[cfg(feature = "air-front")]
+        if let Some(r) = &self.raw
+            && r.takes(msl)
+        {
+            return r.id();
+        }
+        let _ = msl;
+        &self.tag
+    }
+
+    /// The cache-key field of a shader that may compile any of `srcs` (a side unit, then the plain MSL): [`Self::tag`]
+    /// when the raw tier takes none of them (the key stays as without the raw tier), else every source's field.
+    pub fn key_field_of(&self, srcs: &[&[u8]]) -> String {
+        let fields: Vec<&str> = srcs.iter().map(|s| self.key_field(s)).collect();
+        if fields.iter().all(|f| *f == self.tag) {
+            self.tag.clone()
+        } else {
+            fields.join("+")
+        }
+    }
+
     /// Number of allowed shaders in the verdict file, and the verdict counts.
     pub fn describe(&self) -> String {
         #[cfg(feature = "air-front")]
         {
+            let raw = self.raw.as_ref().map_or_else(
+                || "off".to_string(),
+                |r| {
+                    let (l, f) = (
+                        r.libs.load(Ordering::Relaxed),
+                        r.fallback.load(Ordering::Relaxed),
+                    );
+                    format!("{} listed, {l} libraries, {f} fallbacks", r.len())
+                },
+            );
             format!(
-                "{} allowed of {:?}",
+                "{} allowed of {:?}; raw tier {raw}",
                 self.verdicts.len(),
                 self.verdicts.counts
             )
@@ -223,6 +264,12 @@ impl OwnFront {
     fn try_compile(&self, msl: &[u8]) -> Option<(Vec<u8>, StepCost)> {
         #[cfg(feature = "air-front")]
         {
+            if let Some((lib, c)) = self.raw.as_ref().and_then(|r| r.compile(msl)) {
+                self.own.fetch_add(1, Ordering::Relaxed);
+                let ns = u64::try_from(c.cpu.as_nanos()).unwrap_or(u64::MAX);
+                self.cpu_ns.fetch_add(ns, Ordering::Relaxed);
+                return Some((lib, c));
+            }
             if !self.verdicts.allows(msl) {
                 return None;
             }

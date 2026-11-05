@@ -12,7 +12,7 @@ Thus the acceptance rule is byte identity with the reference build scripts.
 | rewrite (patches of the code modules) | Python with Capstone, process pool |
 | split (shaders out of the game files) | Python, pool of 8 processes |
 | Mac app, pack and sign | Python, `cp -c`, `codesign` |
-| IPA | shell, Python, `xcodebuild` |
+| IPA and iOS shell | shell, Python, `xcodebuild` |
 | pipeline archive | 19 batches of 1,000 bases in series, `metal-tt`, `metal-pack` |
 
 For the timings, refer to [benchmarks.md](benchmarks.md). Not in scope: a replacement of `metal-tt`, `metal-pack`, `xcodebuild` or `clang`, a change of the host file formats
@@ -124,7 +124,36 @@ and the replacement of `DMSH_CHAIN` line by line. The tools do not get `DEVELOPE
 When you set it, the `clang --version` text of the reference script can be different.
 
 `nxb build` runs these stages. This complete path (`nxb build` end to end with the new stages) was not run on a real title.
-The test compared each stage alone.
+The test compared each stage alone. One title gave a test of the overlap of these stages in version 0.3.0 (refer to the next section).
+
+## Stage overlap in `nxb build`
+
+The module `nxb-build::order` puts the stages of `nxb build` in a graph. A stage runs in one of two ways:
+
+- **In its turn.** The extract, the shader step, the archives and the app stage run one after the other on the main thread.
+  They write their `step`, `progress` and `say` events into their own stage.
+- **Early.** The Mac host and the app parts start on their own threads when the stages that they depend on are done.
+  An early stage writes no event. It gives its summary to the main thread.
+
+The Mac host (`make` and `clang`) starts at the same time as the extract. The app parts are the companion app, the icon
+and the settings file. They start when the extract and the host are done, beside the shader step.
+The first pipeline archive starts its batches when the libraries that they use are ready.
+When the shader step stops, the archive stream gets one worker for each slot instead of 3 workers, if memory permits.
+
+The events do not change. `nxb build` writes `stage` and `stage_end` in the order of the graph, thus the NDJSON stream is the stream of a run
+in series. Only the fields `t` and `elapsed` are different. If a stage fails, it reports in its own turn. The stages before it
+still run and report. A stage with a failed dependency does not run.
+
+- Unit tests replay the shape of the build in series and with overlap. The events are equal, also when each stage fails in turn.
+- Real data (one title, extract, split and shaders reused, no GPU archive): the event streams of the old binary and the new binary are the same,
+  except the times and the output path. 58,211 of 58,211 paths exist in both outputs. All files are byte-identical,
+  except the host binary and the companion app binary (rebuild differences in `LC_UUID` and the debug map) and their two lines in `CodeResources` (measured).
+- Time (measured, one run, other jobs on the CPU): 136.2 s for the old binary and 133.0 s for the new binary.
+  There is almost no gain in this run, because the host, the app parts and the app stage are the critical path in both cases.
+- The gain on a cold build is an **estimate**. The host build (22 to 30 s) and the app parts leave the critical path.
+  The archive tail after the shader step can be shorter by a factor of up to slots divided by 3. Nobody timed a cold build with overlap.
+
+Not overlapped: the shader step with the extract, the copy of the app files during the shader step, and a second GPU architecture.
 
 ## Mac app and code signature
 
@@ -150,6 +179,42 @@ and 4 KiB for x86_64, tvOS and iOS before 16.0 (measured against `codesign`). Fo
 The oracle tests in `tests/oracle.rs` compare the output with `codesign` for many Mach-O and bundle types. All outputs pass `codesign --verify --deep --strict`.
 On the reference title (58,207 sealed files, 4.99 GB), `CodeResources` and the two executables were byte-identical to the `codesign` output (measured).
 
+
+## iOS stages
+
+The crate `nxb-build` has the module `ios`, and the binary `nxb-ios` runs it. It does the work of the reference iOS scripts
+with the same command lines and the same environment variables:
+
+- `nxb-ios ipa [<out.ipa> | --prepare-xcode]` does the work of the IPA script.
+- `nxb-ios shell --prepare-xcode` and `nxb-ios shell --build` do the work of the shell script.
+
+`NXB_ENGINE` gives the folder of the engine files that the stages read. `nxb build` does not run these stages.
+It refuses a `--platform` value other than `mac-app`.
+
+`xcodegen`, `xcodebuild`, `codesign`, `sips`, `PlistBuddy`, `plutil` and some Python tools of the engine stay external.
+They run through the `Tool` trait. The stage signs the executable with the `codesign` of the host, not with the own signer.
+
+| part | compared with the reference script on | result (measured) |
+|---|---|---|
+| manifest writer | 3 option sets | byte-identical |
+| embed files and flags | synthetic outputs and real outputs of two titles | byte-identical |
+| resource files | 2 fixtures | 3 files byte-identical |
+| build settings (`make`) | one title | the output and 258 symbolic links are equal |
+| Xcode workspace writer | 4 steps on the file layout of Xcode | byte-identical |
+| shell project (`--prepare-xcode`) | 2 synthetic frameworks | all files equal. The font file is equal in size only |
+| IPA project (`--prepare-xcode`) | one title | 10 step lines and 289 project files equal. The font file is equal in size only |
+| IPA (`<out.ipa>`) | one title, each side with its own `xcodebuild` | 75 of 75 entries equal in name, method, sizes, CRC and attributes |
+
+The font tool writes a time stamp. Thus two runs of the reference tool differ in 4 bytes. In the IPA, two entries are equal only in part.
+In the executable, only `__LINKEDIT` differs (the debug map paths of each work folder and the signature). The bytes before it are identical, and the UUID is equal.
+
+Limits of the iOS stages:
+
+- Exit code 3 for games with more than one program and for framework builds (`DM_FRAMEWORK`). The caller runs the reference script.
+- The default name of the shell app is `NxbShell`. The reference script has a different default name. Set `DM_SHELL_NAME` to get the same name.
+- Not run: `nxb-ios shell --build`, and an IPA with a pipeline archive in it.
+- The IPA is always packed in full. The reuse of the previous IPA is not ported.
+- The tests that compare with the reference script skip when the `NXB_ORACLE_*` variables are not set.
 
 ## IPA
 
@@ -181,7 +246,7 @@ For the study of the archive back end, refer to [research/backend-survey.md](res
 | split | package records, `shader_map.tsv`, answer table, `shader_pairs.tsv`, `pso_pairs.tsv` | progress lines |
 | icon, companion app, settings file | see the table in the section on host stages | |
 | Mac app | all files of the bundle, `CodeResources`, the signed Mach-O files | the reuse key file |
-| IPA | entry list, sequence, headers, modes, times, CRCs, uncompressed bytes | compressed bytes across zlib versions |
+| IPA | entry list, sequence, headers, modes, times, CRCs, uncompressed bytes | compressed bytes across zlib versions, the executable (see the iOS section), the font file |
 | pipeline archive | `prebuilt.tsv`, `rest_pairs.tsv`, `archive.tsv` | `metal-tt` output bytes |
 | events | the NDJSON stream | timestamps, time estimates |
 

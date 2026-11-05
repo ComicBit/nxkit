@@ -6,6 +6,8 @@ own-validated ones through Apple's back half. GPUTIER_WORK: work dir.
 
 usage: gputier.py run RESULTS.jsonl CHECK.jsonl [--chunk 300] [--chunks N] [--workers 6] [--families bu,bf,b,bp,bv]
        gputier.py tiers RESULTS.jsonl CHECK.jsonl OUT_DIR
+       GPUTIER_RAW=1 gputier.py tiers RESULTS.jsonl CHECK.jsonl OUT_DIR
+       GPUTIER_RAW=1 gputier.py same RESULTS.jsonl LIST [AIRC] [--out CONFIRMED.txt]
 
 run: takes the `own-validated` sources of an `airc check --opt --ref-store` result, family by family in the given
 order (largest first), skips sources already in RESULTS (keyed by the source's sha256), and per chunk of --chunk
@@ -20,6 +22,14 @@ masked because the reference differs from itself) | notbuilt (own path failed on
 
 tiers: allow-identical (verdict own-identical), gpu-verified (status identical, so 0 differing words in every output
 including vertex positions, and no masked words), rejected (everything else), with their share of the corpus.
+With GPUTIER_RAW=1: raw-verified (status identical in a raw run, any verdict but `apple`) and raw-rejected (tested,
+not identical). raw-verified.txt is the allow list of nxbuild's own-raw tier (`# comment`, one SHA-256 of the MSL per
+line).
+
+same (raw): rebuilds the library of every source in LIST (a raw-verified.txt) with AIRC (default the release airc)
+from the source the GPU run used, and byte-compares it with the library the GPU run tested (WORK/own). All equal
+means the gpudiff verdicts hold for that airc build: run it after every front-end change before shipping a list.
+--out writes the listed sources that rebuilt byte-identically (the list to ship). GPUTIER_AIRC overrides the airc.
 Everything stays local (the corpus derives from a game)."""
 import collections, json, os, subprocess, sys, time
 from concurrent.futures import ThreadPoolExecutor
@@ -31,7 +41,7 @@ import hlib  # noqa: E402
 
 LOCK = (os.environ.get('NXB_LOCK', '.nxb-bench-lock'))
 WORK = os.environ.get('GPUTIER_WORK', '')
-AIRC = (os.environ.get('NXB_AIRC', 'target/release/airc'))
+AIRC = os.environ.get('GPUTIER_AIRC', 'target/release/airc')
 x = lambda t: subprocess.run(['xcrun', '-sdk', 'macosx', '-find', t], capture_output=True, text=True).stdout.strip()
 SDK = subprocess.run(['xcrun', '-sdk', 'macosx', '--show-sdk-path'], capture_output=True, text=True).stdout.strip()
 OPT, LIB = x('air-opt'), x('metallib')
@@ -165,6 +175,8 @@ def tiers(args):
         r = json.loads(l)
         R[r['sha']] = r
     C = [json.loads(l) for l in open(check)]
+    if RAW:
+        return raw_tiers(R, C, out)
     total = len({c['source_sha256'] for c in C})
     allow = sorted({c['source_sha256'] for c in C if c['verdict'] == 'own-identical'})
     gpu = sorted({c['source_sha256'] for c in C if c['verdict'] == 'own-validated' and R.get(c['source_sha256'], {}).get('status') == 'identical'})
@@ -193,5 +205,72 @@ def tiers(args):
     print('diff max ULP (reported words):', dict(ulp), '; vertex-stage diffs:', vert)
 
 
+def raw_tiers(R, C, out):
+    total = len({c['source_sha256'] for c in C})
+    cand = {c['source_sha256'] for c in C if c['verdict'] != 'apple'}
+    ok = sorted(s for s in cand if R.get(s, {}).get('status') == 'identical')
+    bad = sorted(s for s in cand if s in R and R[s]['status'] != 'identical')
+    for name, lst in (('raw-verified', ok), ('raw-rejected', bad)):
+        with open(os.path.join(out, name + '.txt'), 'w') as f:
+            f.write('# %s: %d of %d sources (gpudiff of the raw library against Apple\'s, 12 vectors)\n' % (name, len(lst), total))
+            for s in lst:
+                f.write(s + '\n')
+    tested = [s for s in cand if s in R]
+    fam = collections.defaultdict(collections.Counter)
+    for s in tested:
+        fam[R[s]['family']][R[s]['status']] += 1
+    print('corpus %d: raw-verified %d (%.1f %%), raw-rejected %d, tested %d of %d candidates'
+          % (total, len(ok), 100 * len(ok) / total, len(bad), len(tested), len(cand)))
+    print('status of tested:', dict(collections.Counter(R[s]['status'] for s in tested)))
+    print('per family:', {k: dict(v) for k, v in sorted(fam.items())})
+
+
+def same(args):
+    out = args[args.index('--out') + 1] if '--out' in args else None
+    args = [a for i, a in enumerate(args) if a != '--out' and (i == 0 or args[i - 1] != '--out')]
+    res_path, lst = args[0], args[1]
+    airc = args[2] if len(args) > 2 else AIRC
+    want = {l.strip() for l in open(lst) if l.strip() and not l.startswith('#')}
+    corpus = {r['src']: r for r in hlib.load_corpus(os.path.join(HARNESS, 'work/corpus/corpus.jsonl'))}
+    paths = {}
+    for l in open(res_path):
+        r = json.loads(l)
+        if r['sha'] in want:
+            paths[r['sha']] = r['path']
+    tmp = os.path.join(WORK, 'same')
+    os.makedirs(tmp, exist_ok=True)
+
+    def one(sha):
+        rec = corpus.get(paths.get(sha, ''))
+        if not rec:
+            return 'missing'
+        key = rec['id'].replace(':', '_')
+        spec = os.path.join(WORK, 'prep', key + '.spec.json')
+        old = os.path.join(WORK, 'own', key + '.raw.metallib')
+        if not (os.path.exists(spec) and os.path.exists(old)):
+            return 'missing'
+        src = json.load(open(spec))['source']
+        new = os.path.join(tmp, key + '.metallib')
+        if subprocess.run([airc, 'raw', src, '-o', new], capture_output=True).returncode:
+            return 'notbuilt'
+        a, b = open(old, 'rb').read(), open(new, 'rb').read()
+        os.unlink(new)
+        return 'same' if a == b else 'differ'
+    with ThreadPoolExecutor(6) as ex:
+        res = dict(zip(sorted(want), ex.map(one, sorted(want))))
+    cnt = collections.Counter(res.values())
+    print('same: %d listed: %s' % (len(want), dict(cnt)))
+    for s, v in sorted(res.items()):
+        if v != 'same':
+            print(v, s, paths.get(s, ''))
+    if out:
+        ok = sorted(s for s, v in res.items() if v == 'same')
+        with open(out, 'w') as f:
+            f.write('# raw-verified: %d sources, gpudiff identical and rebuilt byte-identically by the current front end\n' % len(ok))
+            for s in ok:
+                f.write(s + '\n')
+    sys.exit(0 if cnt.get('same', 0) == len(want) else 1)
+
+
 if __name__ == '__main__':
-    {'run': run, 'tiers': tiers}[sys.argv[1]](sys.argv[2:])
+    {'run': run, 'tiers': tiers, 'same': same}[sys.argv[1]](sys.argv[2:])
