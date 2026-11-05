@@ -1,0 +1,28 @@
+[package]
+name = "nxb-tool"
+description = "Tool trait and process spawning with env allow-list, process groups and timeouts"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[package.metadata.nxb]
+layer = "L2"
+in_v = false
+
+[dependencies]
+nxb-model.workspace = true
+nxb-error.workspace = true
+nxb-sys.workspace = true
+# The own front end (layer F, a member of this workspace): optional, see deps.toml.
+air-front = { path = "../air-front", optional = true }
+
+[features]
+air-front = ["dep:air-front"]
+
+[dev-dependencies]
+nxb-testkit.workspace = true
+
+[lints]
+workspace = true

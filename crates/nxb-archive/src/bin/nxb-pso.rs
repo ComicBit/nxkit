@@ -1,0 +1,173 @@
+//! `nxb-pso --msl <b-<chain>> --out <dir> --work <dir> --store <dir> --pairs <tsv> [--pairs <tsv>] [--depth gl|zero]
+//! [--gpu g18p[,g17p]|none] [--platform ios|macos] [--os-min 27.0] [--script-only] [--target 1000] [--tokens N]`
+//!
+//! `pso_offline.py` in Rust: the plan (pairs to bases), the script, `prebuilt.tsv`, `rest_pairs.tsv`, `archive.tsv`, and
+//! one archive per architecture through [`nxb_archive::build`] (content-cut batches, store, merge cache).
+//! `--gpu none` writes the stamp and tables but no archive (the Mac's "no offline archive" mode).
+
+use std::path::PathBuf;
+use std::process::ExitCode;
+
+fn main() -> ExitCode {
+    match run() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            println!("[RED] pso_offline: {e}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn run() -> Result<(), String> {
+    let a: Vec<String> = std::env::args().skip(1).collect();
+    let mut pairs = Vec::new();
+    let mut o = std::collections::BTreeMap::new();
+    let mut flags = std::collections::BTreeSet::new();
+    let mut i = 0;
+    while i < a.len() {
+        let k = a[i].trim_start_matches('-').to_string();
+        if k == "script-only" {
+            flags.insert(k);
+            i += 1;
+            continue;
+        }
+        let v = a
+            .get(i + 1)
+            .cloned()
+            .ok_or_else(|| format!("{k} needs a value"))?;
+        if k == "pairs" {
+            pairs.push(PathBuf::from(v));
+        } else {
+            o.insert(k, v);
+        }
+        i += 2;
+    }
+    let get = |k: &str| {
+        o.get(k)
+            .cloned()
+            .ok_or_else(|| format!("--{k} is required"))
+    };
+    let lib_dir = PathBuf::from(get("msl")?);
+    let (out, work) = (PathBuf::from(get("out")?), PathBuf::from(get("work")?));
+    let chain = lib_dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .and_then(|n| n.strip_prefix("b-"))
+        .ok_or_else(|| format!("{} is not a b-<chain version> folder", lib_dir.display()))?
+        .to_string();
+    let gpu = o.get("gpu").cloned().unwrap_or_else(|| "g18p".into());
+    let mut archs: Vec<String> = if gpu == "none" {
+        Vec::new()
+    } else {
+        let s: std::collections::BTreeSet<String> = gpu
+            .split(',')
+            .filter(|x| !x.trim().is_empty())
+            .map(nxb_archive::plan::arch_name)
+            .collect();
+        s.into_iter().collect()
+    };
+    let zero = o.get("depth").map(String::as_str) == Some("zero");
+    let text = nxb_archive::plan::pair_text(&pairs);
+    if text.is_empty() {
+        return Err("no pair list".into());
+    }
+    let t0 = std::time::Instant::now();
+    let ps = nxb_archive::plan::read_pairs(&text);
+    let p = nxb_archive::plan::plan(&lib_dir, &chain, &ps, zero);
+    std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
+    let js = work.join("bases.mtl4-json");
+    let script = nxb_archive::plan::script_text(&lib_dir, &p.bases);
+    if std::fs::read(&js).ok().as_deref() != Some(script.as_bytes()) {
+        std::fs::write(&js, &script).map_err(|e| e.to_string())?;
+    }
+    let st = nxb_archive::plan::stamp(&chain, zero, &text);
+    let l = p.left;
+    println!(
+        "pso_offline: {} pairs: {} bases, {} left to the device (function constants), left out as the host leaves them: reflection {}, stage inputs {}, library {}, layer {}, primitive ID {}, entry {} ({:.1} s)",
+        ps.len(),
+        p.bases.len(),
+        p.rest.len(),
+        l[0],
+        l[1],
+        l[2],
+        l[3],
+        l[4],
+        l[5],
+        t0.elapsed().as_secs_f64()
+    );
+    let write = |name: &str, t: &str| std::fs::write(out.join(name), t).map_err(|e| e.to_string());
+    if flags.contains("script-only") {
+        return write("prebuilt.tsv", &st);
+    }
+    if !ps.is_empty() && p.bases.is_empty() && p.rest.is_empty() {
+        return Err("no base to build".into());
+    }
+    if p.bases.is_empty() {
+        archs.clear();
+    }
+    let platform = o.get("platform").cloned().unwrap_or_else(|| "ios".into());
+    let osmin = o
+        .get("os-min")
+        .cloned()
+        .ok_or("--os-min is required (pso_offline's default reads sw_vers / the SDK)")?;
+    let mut toolchain = String::from("not used (function constants only)");
+    for arch in &archs {
+        let mut c = nxb_archive::Config::for_tools(
+            &platform,
+            arch,
+            &osmin,
+            &js,
+            &out.join(format!("{arch}.mtl4a")),
+            &work,
+        )?;
+        c.store = PathBuf::from(get("store")?);
+        if let Some(t) = o.get("target").and_then(|t| t.parse().ok()) {
+            c.target = t;
+        }
+        if let Some(t) = o.get("tokens").and_then(|t| t.parse().ok()) {
+            c.tokens = t;
+        }
+        toolchain = c.toolchain.clone();
+        let r = nxb_archive::build(&c)?;
+        println!(
+            "pso_offline: {arch}: {} MB, {} batches ({} from the store), merged {}",
+            r.size >> 20,
+            r.batches.len(),
+            r.batches.iter().filter(|b| b.reused).count(),
+            if r.merged_from_store {
+                "from the store"
+            } else {
+                "now"
+            }
+        );
+    }
+    if let Ok(rd) = std::fs::read_dir(&out) {
+        for e in rd.flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if let Some(stem) = name.strip_suffix(".mtl4a")
+                && !archs.iter().any(|a| a == stem)
+            {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
+    write("prebuilt.tsv", &st)?;
+    match nxb_archive::plan::rest_tsv(&p.rest) {
+        Some(t) => write("rest_pairs.tsv", &t)?,
+        None => {
+            let _ = std::fs::remove_file(out.join("rest_pairs.tsv"));
+        }
+    }
+    write(
+        "archive.tsv",
+        &nxb_archive::plan::archive_tsv(
+            &archs,
+            &platform,
+            &osmin,
+            &toolchain,
+            p.bases.len(),
+            p.rest.len(),
+        ),
+    )
+}

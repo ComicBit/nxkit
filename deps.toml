@@ -1,0 +1,14 @@
+# External dependencies of the nxbuild workspace (CONTRIBUTING.md "Dependencies").
+# One table per crate: reason, licence, version, unsafe count, owner, which workspace crates may use it.
+# A new entry is its own commit. Today the workspace uses std only.
+#
+# Expected first entries (designs): ruzstd (nxb-codec, O14), fancy-regex and closure (nxb-shader only, 1:1 regex port),
+# memchr, windows-sys (nxb-sys, Windows), libfuzzer-sys (dev only).
+
+[air-front]
+reason = "the optional own shader front end (design-v2 16): MSL to AIR bitcode in process"
+source = "path crates/air-front (a workspace member, not on crates.io; brings msl-lex, air-emit, air-bc, air-lib)"
+licence = "MIT (same workspace)"
+unsafe = "0 (forbid(unsafe_code))"
+owner = "project team"
+used_by = ["nxb-tool (cargo feature air-front, on by default through nxb-cli)"]

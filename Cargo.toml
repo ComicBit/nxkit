@@ -1,0 +1,55 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "xtask"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license = "MIT"
+publish = false
+
+[workspace.lints.rust]
+missing_docs = "deny"
+unsafe_code = "forbid"
+unreachable_pub = "warn"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+dbg_macro = "deny"
+todo = "deny"
+
+[workspace.dependencies]
+nxb-model = { path = "crates/nxb-model" }
+nxb-error = { path = "crates/nxb-error" }
+nxb-sys = { path = "crates/nxb-sys" }
+nxb-pyjson = { path = "crates/nxb-pyjson" }
+nxb-shader = { path = "crates/nxb-shader" }
+nxb-air = { path = "crates/nxb-air" }
+nxb-crypto = { path = "crates/nxb-crypto" }
+nxb-codec = { path = "crates/nxb-codec" }
+nxb-a64 = { path = "crates/nxb-a64" }
+nxb-plist = { path = "crates/nxb-plist" }
+nxb-hos = { path = "crates/nxb-hos" }
+nxb-romfs = { path = "crates/nxb-romfs" }
+nxb-rewrite = { path = "crates/nxb-rewrite" }
+nxb-split = { path = "crates/nxb-split" }
+nxb-bundle = { path = "crates/nxb-bundle" }
+nxb-zip = { path = "crates/nxb-zip" }
+nxb-pso = { path = "crates/nxb-pso" }
+nxb-obs = { path = "crates/nxb-obs" }
+nxb-tool = { path = "crates/nxb-tool" }
+nxb-store = { path = "crates/nxb-store" }
+nxb-sched = { path = "crates/nxb-sched" }
+nxb-io = { path = "crates/nxb-io" }
+nxb-stages = { path = "crates/nxb-stages" }
+nxb-testkit = { path = "crates/nxb-testkit" }
+nxb-extract = { path = "crates/nxb-extract" }
+nxb-pack = { path = "crates/nxb-pack" }
+nxb-archive = { path = "crates/nxb-archive" }
+nxb-build = { path = "crates/nxb-build" }
+
+[profile.release]
+debug = "line-tables-only"

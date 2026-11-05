@@ -1,0 +1,31 @@
+[package]
+name = "nxb-stages"
+description = "Stage wiring: one module per stage, each building its part of the task graph from the domain crates and the runtime."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[package.metadata.nxb]
+layer = "L3"
+in_v = false
+
+[dependencies]
+nxb-model.workspace = true
+nxb-sys.workspace = true
+nxb-error.workspace = true
+nxb-obs.workspace = true
+nxb-tool.workspace = true
+nxb-store.workspace = true
+nxb-sched.workspace = true
+nxb-io.workspace = true
+nxb-pyjson.workspace = true
+nxb-shader.workspace = true
+nxb-air.workspace = true
+
+[features]
+air-front = ["nxb-tool/air-front"]
+
+[lints]
+workspace = true

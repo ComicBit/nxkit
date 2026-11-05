@@ -1,0 +1,21 @@
+[package]
+name = "air-front"
+description = "In-process MSL front end: MSL bytes to AIR bitcode (or text IR) plus the back-half arguments, for library callers such as the nxbuild FrontEnd trait"
+version.workspace = true
+edition = "2021"
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[package.metadata.nxb]
+layer = "F"
+in_v = false
+
+[dependencies]
+msl-lex = { path = "../msl-lex" }
+air-emit = { path = "../air-emit" }
+air-bc = { path = "../air-bc" }
+air-lib = { path = "../air-lib" }
+
+[lints.rust]
+unsafe_code = "forbid"

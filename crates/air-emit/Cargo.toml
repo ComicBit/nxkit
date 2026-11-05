@@ -1,0 +1,19 @@
+[package]
+name = "air-emit"
+description = "Emitter of typed-pointer LLVM 14 style text IR with AIR conventions from the checked MSL"
+version.workspace = true
+edition = "2021"
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[package.metadata.nxb]
+layer = "F"
+in_v = false
+
+[dependencies]
+msl-parse = { path = "../msl-parse" }
+msl-sema = { path = "../msl-sema" }
+
+[lints.rust]
+unsafe_code = "forbid"

@@ -1,0 +1,18 @@
+[package]
+name = "msl-parse"
+description = "Strict parser and type checker for the engine's machine-generated MSL (port of msl_parse.py)"
+version.workspace = true
+edition = "2021"
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[package.metadata.nxb]
+layer = "F"
+in_v = false
+
+[dependencies]
+msl-lex = { path = "../msl-lex" }
+
+[lints.rust]
+unsafe_code = "forbid"

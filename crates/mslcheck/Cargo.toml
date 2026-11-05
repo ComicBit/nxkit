@@ -1,0 +1,19 @@
+[package]
+name = "mslcheck"
+description = "Accept/reject checker for engine MSL files"
+version.workspace = true
+edition = "2021"
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[package.metadata.nxb]
+layer = "F"
+in_v = false
+
+[dependencies]
+msl-lex = { path = "../msl-lex" }
+msl-parse = { path = "../msl-parse" }
+
+[lints.rust]
+unsafe_code = "forbid"

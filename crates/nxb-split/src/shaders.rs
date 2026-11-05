@@ -1,0 +1,509 @@
+//! Shaders found in game data: the control section and code area of each, its stage and where it was found, and the
+//! readers of `shader_split.py` this port has so far (BNSH, agl BAHS with its program variations, SARC, the
+//! `scan_blob` walk). Each function names the Python function it ports.
+
+use std::collections::BTreeMap;
+
+use nxb_model::sha256;
+
+use crate::SplitError;
+
+/// Control section magic.
+pub const CTL_MAGIC: [u8; 4] = [0x34, 0x12, 0x76, 0x98];
+pub(crate) const GFX_MAGIC: [u8; 4] = [0x78, 0x56, 0x34, 0x12];
+pub(crate) const CS_MAGIC: [u8; 4] = [0x79, 0x56, 0x34, 0x12];
+/// BNSH stage order.
+pub const STAGES: [&str; 6] = ["vs", "hs", "ds", "gs", "ps", "cs"];
+const NEST: usize = 16;
+
+pub use crate::bahs::{BahsVar, bahs_shaders};
+
+pub(crate) fn u32le(d: &[u8], o: usize) -> Option<u32> {
+    d.get(o..o.checked_add(4)?)
+        .map(|s| u32::from_le_bytes([s[0], s[1], s[2], s[3]]))
+}
+
+fn u64le(d: &[u8], o: usize) -> Option<u64> {
+    let s = d.get(o..o.checked_add(8)?)?;
+    let mut a = [0u8; 8];
+    a.copy_from_slice(s);
+    Some(u64::from_le_bytes(a))
+}
+
+/// The per-game settings the split reads from the profile (`shader_groups`, `shader_key_skip`).
+#[derive(Clone, Debug, Default)]
+pub struct Profile {
+    /// `(path part, group)`, first match wins.
+    pub groups: Vec<(String, String)>,
+    /// Control bytes hashed as zeros: (offset, length).
+    pub key_skip: (usize, usize),
+}
+
+impl Profile {
+    /// Parses a `game.tsv` (only the keys the split uses).
+    pub fn from_game_tsv(text: &str) -> Profile {
+        let mut p = Profile::default();
+        for line in text.lines() {
+            if line.starts_with('#') {
+                continue;
+            }
+            let Some((k, v)) = line.split_once('\t') else {
+                continue;
+            };
+            match k {
+                "shader_groups" => {
+                    p.groups = v
+                        .split(' ')
+                        .filter_map(|g| g.split_once('='))
+                        .map(|(a, b)| (a.to_string(), b.to_string()))
+                        .collect()
+                }
+                "shader_key_skip" => {
+                    let num = |s: &str| {
+                        let s = s.trim();
+                        s.strip_prefix("0x")
+                            .map_or_else(|| s.parse().ok(), |h| usize::from_str_radix(h, 16).ok())
+                    };
+                    if let Some((a, b)) = v.split_once('+') {
+                        p.key_skip = (num(a).unwrap_or(0), num(b).unwrap_or(0));
+                    }
+                }
+                _ => {}
+            }
+        }
+        p
+    }
+
+    /// `group`: the source group of a label.
+    pub fn group(&self, label: &str) -> String {
+        if label.starts_with("main") {
+            return "main".into();
+        }
+        self.groups
+            .iter()
+            .find(|(k, _)| label.contains(k.as_str()))
+            .map_or_else(|| "other".into(), |(_, g)| g.clone())
+    }
+}
+
+/// One shader found: `(where, stage, control, code)` of the Python.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Found {
+    /// Where (label and position).
+    pub place: String,
+    /// Stage (`vs`, `ps`, `cs`, ...).
+    pub stage: &'static str,
+    /// Control section.
+    pub ctl: Vec<u8>,
+    /// Code area.
+    pub code: Vec<u8>,
+}
+
+pub(crate) fn nvn2_ctl(ctl: &[u8]) -> bool {
+    ctl.len() >= 0x48 && ctl[..4] == CTL_MAGIC && ctl[4..8] == [0xc9, 0, 0, 0]
+}
+
+fn ctl_len(ctl: &[u8]) -> usize {
+    if nvn2_ctl(ctl) {
+        return 0x48;
+    }
+    let n = u32le(ctl, 0x20).unwrap_or(0) as usize;
+    if (0x760..0x880).contains(&n) {
+        n
+    } else {
+        0x880
+    }
+}
+
+/// `key_ctl`.
+pub fn key_ctl(p: &Profile, ctl: &[u8]) -> Vec<u8> {
+    let c = &ctl[..ctl_len(ctl).min(ctl.len())];
+    if nvn2_ctl(ctl) {
+        let mut v = c[..0x30].to_vec();
+        v.extend_from_slice(&[0; 4]);
+        v.extend_from_slice(&c[0x34..]);
+        return v;
+    }
+    let (o, n) = p.key_skip;
+    if n > 0 && o + n <= c.len() {
+        let mut v = c[..o].to_vec();
+        v.extend(std::iter::repeat_n(0, n));
+        v.extend_from_slice(&c[o + n..]);
+        v
+    } else {
+        c.to_vec()
+    }
+}
+
+/// `skey`: the first 16 hex digits of SHA-256(key control ‖ code).
+pub fn skey(p: &Profile, ctl: &[u8], code: &[u8]) -> String {
+    let mut v = key_ctl(p, ctl);
+    v.extend_from_slice(code);
+    sha256(&v).to_hex()[..16].to_string()
+}
+
+/// `same_shader`.
+pub fn same_shader(p: &Profile, a: (&[u8], &[u8]), b: (&[u8], &[u8])) -> bool {
+    let ((ca, ka), (cb, kb)) = (a, b);
+    let mut n = if ca.len() >= 0x24 {
+        u32le(ca, 0x20).unwrap_or(0) as usize
+    } else {
+        ca.len()
+    };
+    n = if 0x760 <= n && n <= ca.len().min(cb.len()) {
+        n
+    } else {
+        ca.len().max(cb.len())
+    };
+    if nvn2_ctl(ca) {
+        return ka == kb && key_ctl(p, ca) == key_ctl(p, cb);
+    }
+    let (o, ln) = p.key_skip;
+    if ln > 0 && o + ln <= n {
+        let cut = |c: &[u8]| -> Vec<u8> {
+            let mut v = c[..o.min(c.len())].to_vec();
+            v.extend_from_slice(c.get(o + ln..n.min(c.len())).unwrap_or(&[]));
+            v
+        };
+        return ka == kb && cut(ca) == cut(cb);
+    }
+    ka == kb && ca[..n.min(ca.len())] == cb[..n.min(cb.len())]
+}
+
+/// `check`: the reason a control section and code area do not fit, or `None`.
+pub fn check(st: &str, ctl: &[u8], code: &[u8]) -> Option<&'static str> {
+    if ctl.len() < 0x24 || ctl[..4] != CTL_MAGIC || ctl.len() < ctl_len(ctl) {
+        return Some("bad control section");
+    }
+    if nvn2_ctl(ctl) {
+        return if u32le(ctl, 0x44) == Some(code.len() as u32) {
+            None
+        } else {
+            Some("control +0x44 does not match the code area length")
+        };
+    }
+    let head = code.get(..4);
+    let bad_cs = st == "cs"
+        && (head == Some(&CS_MAGIC[..]) || head == Some(&GFX_MAGIC[..]))
+        && head != Some(&CS_MAGIC[..]);
+    if bad_cs || (st != "cs" && head != Some(&GFX_MAGIC[..])) {
+        return Some("code area header magic does not match the stage");
+    }
+    if u32le(ctl, 0x704) != Some(code.len() as u32) {
+        return Some("control +0x704 does not match the code area length");
+    }
+    None
+}
+
+pub(crate) fn sph_stage(code: &[u8]) -> Option<&'static str> {
+    let w = u32le(code, 0x30)?;
+    if (w >> 10) & 0xf == 0 && w & 0x1f == 1 {
+        return Some("vs");
+    }
+    match (w >> 10) & 0xf {
+        1 => Some("vs"),
+        2 => Some("hs"),
+        3 => Some("ds"),
+        4 => Some("gs"),
+        5 => Some("ps"),
+        _ => None,
+    }
+}
+
+fn span<'a>(d: &'a [u8], at: usize, n: usize, place: &str) -> Result<&'a [u8], SplitError> {
+    d.get(at..at.saturating_add(n)).ok_or_else(|| {
+        SplitError::Red(format!(
+            "{place}: {n:#x} bytes at {at:#x} lie outside the {:#x} bytes there are",
+            d.len()
+        ))
+    })
+}
+
+fn field_u64(d: &[u8], at: usize, place: &str) -> Result<u64, SplitError> {
+    u64le(d, at).ok_or_else(|| {
+        SplitError::Red(format!(
+            "{place}: 0x8 bytes at {at:#x} lie outside the {:#x} bytes there are",
+            d.len()
+        ))
+    })
+}
+
+/// `bnsh_shaders`.
+pub fn bnsh_shaders(d: &[u8], base: usize, label: &str) -> Result<Vec<Found>, SplitError> {
+    let place = format!("{label} BNSH @{base:#x}");
+    if d.get(base + 0x60..base + 0x64) != Some(b"grsc") {
+        return Err(SplitError::Red(format!("{place} has no grsc block")));
+    }
+    let nvar = u32le(d, base + 0x7c).ok_or_else(|| SplitError::Red(format!("{place} grsc")))?;
+    let pvar = field_u64(d, base + 0x80, &format!("{place} grsc"))? as usize;
+    let mut out = Vec::new();
+    for v in 0..nvar as usize {
+        let prog = field_u64(
+            d,
+            base + pvar + 0x40 * v + 0x10,
+            &format!("{place} variation {v}"),
+        )? as usize;
+        if prog == 0 {
+            continue;
+        }
+        for (si, st) in STAGES.iter().enumerate() {
+            let sc = field_u64(
+                d,
+                base + prog + 8 + 8 * si,
+                &format!("{place} variation {v} program"),
+            )? as usize;
+            if sc == 0 {
+                continue;
+            }
+            let w = format!("{place} variation {v} {st}");
+            let pctl = field_u64(d, base + sc + 8, &w)? as usize;
+            let pcode = field_u64(d, base + sc + 16, &w)? as usize;
+            let ncode =
+                u32le(d, base + sc + 24).ok_or_else(|| SplitError::Red(w.clone()))? as usize;
+            let nctl = u32le(d, base + sc + 28).ok_or_else(|| SplitError::Red(w.clone()))? as usize;
+            let ctl = span(d, base + pctl, nctl, &format!("{w} control section"))?;
+            let code = span(d, base + pcode, ncode, &format!("{w} code area"))?;
+            if let Some(why) = check(st, ctl, code) {
+                return Err(SplitError::Red(format!(
+                    "{label} BNSH @{base:#x} variation {v} {st}: {why}"
+                )));
+            }
+            out.push(Found {
+                place: format!("{label}#BNSH@{base:#x}#var{v}"),
+                stage: st,
+                ctl: ctl.to_vec(),
+                code: code.to_vec(),
+            });
+        }
+    }
+    Ok(out)
+}
+
+/// `sarc_members`: (name, bytes) of each member.
+pub fn sarc_members<'a>(d: &'a [u8], label: &str) -> Result<Vec<(String, &'a [u8])>, SplitError> {
+    let hdr = |m: &str| SplitError::Red(format!("{label} {m}"));
+    let hl = d
+        .get(4..6)
+        .map(|b| u16::from_le_bytes([b[0], b[1]]) as usize)
+        .ok_or_else(|| hdr("SARC header"))?;
+    let doff = u32le(d, 12).ok_or_else(|| hdr("SARC header"))? as usize;
+    let n = d
+        .get(hl + 6..hl + 8)
+        .map(|b| u16::from_le_bytes([b[0], b[1]]) as usize)
+        .ok_or_else(|| hdr("SFAT header"))?;
+    let names = hl + 12 + 16 * n + 8;
+    if !(names <= doff && doff <= d.len()) {
+        return Err(SplitError::Red(format!(
+            "{label}: SARC data at {doff:#x}, its {n} entries and the names end at {names:#x}, the archive at {:#x}",
+            d.len()
+        )));
+    }
+    let mut out = Vec::with_capacity(n);
+    for i in 0..n {
+        let e = hl + 12 + 16 * i;
+        let (attr, s, en) = (
+            u32le(d, e + 4).unwrap_or(0),
+            u32le(d, e + 8).unwrap_or(0) as usize,
+            u32le(d, e + 12).unwrap_or(0) as usize,
+        );
+        if !(s <= en && en <= d.len() - doff) {
+            return Err(SplitError::Red(format!(
+                "{label}: SARC member {i} at {s:#x}..{en:#x} of the data lies outside its {:#x} bytes",
+                d.len() - doff
+            )));
+        }
+        let nm = if attr >> 24 != 0 {
+            let o = names + (attr & 0xffffff) as usize * 4;
+            let rest = d.get(o..).unwrap_or(&[]);
+            let z = rest.iter().position(|&b| b == 0).unwrap_or(rest.len());
+            String::from_utf8_lossy(&rest[..z]).into_owned()
+        } else {
+            format!("#{i}")
+        };
+        out.push((nm, &d[doff + s..doff + en]));
+    }
+    Ok(out)
+}
+
+fn find_all<'a>(d: &'a [u8], pat: &'a [u8]) -> impl Iterator<Item = usize> + 'a {
+    // non-overlapping left-to-right matches, as re.finditer
+    let mut i = 0usize;
+    std::iter::from_fn(move || {
+        if i + pat.len() > d.len() {
+            return None;
+        }
+        let p = memfind(&d[i..], pat)? + i;
+        i = p + pat.len();
+        Some(p)
+    })
+}
+
+/// Position of `pat` in `d`.
+pub fn memfind(d: &[u8], pat: &[u8]) -> Option<usize> {
+    let first = *pat.first()?;
+    let mut i = 0;
+    while i + pat.len() <= d.len() {
+        let p = d[i..=d.len() - pat.len()]
+            .iter()
+            .position(|&b| b == first)?
+            + i;
+        if &d[p..p + pat.len()] == pat {
+            return Some(p);
+        }
+        i = p + 1;
+    }
+    None
+}
+
+/// The markers of readers this port does not have yet, a blob holding one is an `Unsupported` error, never a silent
+/// difference (`scan_blob`'s other branches).
+const OTHER_MARKERS: [&[u8]; 4] = [
+    b"SLCT\x03\x10\0\0",
+    b"NVNsh\0",
+    b"Ninty_NX\0\0\0\0\0\0\0\0",
+    b"HNSHV002",
+];
+
+/// `scan_blob` for the containers this port reads (SARC, BAHS, BNSH).`left` is the expansion budget.
+pub fn scan_blob(
+    d: &[u8],
+    label: &str,
+    out: &mut Vec<Found>,
+    var: &mut BahsVar,
+    depth: usize,
+) -> Result<(), SplitError> {
+    let mut left = None;
+    scan_blob_in(d, label, out, var, depth, &mut left)
+}
+
+/// `scan_blob` with its `left` budget: what the members of the file's archives may add up to, and what their Yaz0
+/// may expand to (16 times the file each).
+fn scan_blob_in(
+    d: &[u8],
+    label: &str,
+    out: &mut Vec<Found>,
+    var: &mut BahsVar,
+    depth: usize,
+    left: &mut Option<[i64; 2]>,
+) -> Result<(), SplitError> {
+    if depth > NEST {
+        return Err(SplitError::Red(format!(
+            "{label}: archives nested more than {NEST} deep"
+        )));
+    }
+    let head = d.get(..4).unwrap_or(&[]);
+    if head == b"NARC"
+        || head == b"HCPS"
+        || head == b"xbc1"
+        || head == b"DRSM"
+        || head == b"MSHD"
+        || head == b"NDSR"
+    {
+        return Err(SplitError::Unsupported(format!(
+            "{label}: container {:?}",
+            String::from_utf8_lossy(head)
+        )));
+    }
+    let stored = d.len() as i64;
+    let decoded;
+    let d = if head == b"Yaz0" {
+        if let Some(l) = left.as_mut() {
+            l[1] -= d
+                .get(4..8)
+                .map_or(0, |b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]) as i64);
+            if l[1] < 0 {
+                return Err(SplitError::Red(format!(
+                    "{label}: the Yaz0 archive members expand to more than {NEST} times the file"
+                )));
+            }
+        }
+        decoded = crate::yaz0::decode(d, label)?;
+        &decoded[..]
+    } else {
+        d
+    };
+    let head = d.get(..4).unwrap_or(&[]);
+    match left.as_mut() {
+        None => *left = Some([NEST as i64 * d.len() as i64; 2]),
+        Some(l) => {
+            l[0] -= stored;
+            if l[0] < 0 {
+                return Err(SplitError::Red(format!(
+                    "{label}: the archive members add up to more than {NEST} times the file (members that overlap)"
+                )));
+            }
+        }
+    }
+    if head == b"SARC" {
+        for (nm, m) in sarc_members(d, label)? {
+            scan_blob_in(m, &format!("{label}/{nm}"), out, var, depth + 1, left)?;
+        }
+        return Ok(());
+    }
+    if head == b"BAHS" {
+        out.extend(bahs_shaders(d, label, var)?);
+        return Ok(());
+    }
+    // `mgfx_effect` reads an effect only after 'MGFX' + version 5 or 8, other matches (four bytes in any data) give none
+    for at in find_all(d, b"MGFX") {
+        if matches!(d.get(at + 4), Some(5) | Some(8)) {
+            return Err(SplitError::Unsupported(format!(
+                "{label}: a MonoGame effect (MGFX)"
+            )));
+        }
+    }
+    if label.ends_with(".xnb")
+        && d.get(..0x200.min(d.len()))
+            .is_some_and(|h| memfind(h, b"EffectReader").is_some())
+    {
+        return Err(SplitError::Unsupported(format!("{label}: an XNB effect")));
+    }
+    for m in OTHER_MARKERS {
+        if memfind(d, m).is_some() {
+            return Err(SplitError::Unsupported(format!(
+                "{label}: holds a {:?} marker",
+                String::from_utf8_lossy(m)
+            )));
+        }
+    }
+    for at in find_all(d, b"BNSH\0\0\0\0").collect::<Vec<_>>() {
+        if at + 0x20 > d.len() {
+            continue;
+        }
+        let size = u32le(d, at + 0x1c).unwrap_or(0) as usize;
+        if at + size <= d.len() && d.get(at + 0x60..at + 0x64) == Some(b"grsc") {
+            out.extend(bnsh_shaders(d, at, label)?);
+        }
+    }
+    Ok(())
+}
+
+/// `var_pairs`: (vertex key, pixel key, from a BAHS program) within one variation.
+pub fn var_pairs(
+    p: &Profile,
+    found: &[Found],
+    var: &BahsVar,
+) -> std::collections::BTreeSet<(String, String, bool)> {
+    let mut g: BTreeMap<String, BTreeMap<&str, String>> = BTreeMap::new();
+    for f in found {
+        let grp = if f.place.contains("#var") {
+            Some(f.place.clone())
+        } else {
+            var.get(&f.place).cloned()
+        };
+        if let Some(grp) = grp {
+            g.entry(grp)
+                .or_default()
+                .insert(f.stage, skey(p, &f.ctl, &f.code));
+        }
+    }
+    g.iter()
+        .filter_map(|(grp, v)| {
+            Some((
+                v.get("vs")?.clone(),
+                v.get("ps")?.clone(),
+                grp.contains("#BAHS#prog"),
+            ))
+        })
+        .collect()
+}

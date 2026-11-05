@@ -1,0 +1,23 @@
+[package]
+name = "nxb-shader"
+description = "The shader domain: pure functions from package records to final MSL, reflection and output bytes (design-v2 sb-domain)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[package.metadata.nxb]
+layer = "L1"
+in_v = true
+
+[dependencies]
+nxb-model.workspace = true
+nxb-error.workspace = true
+nxb-pyjson.workspace = true
+
+[dev-dependencies]
+nxb-testkit.workspace = true
+
+[lints]
+workspace = true

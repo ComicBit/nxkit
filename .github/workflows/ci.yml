@@ -1,0 +1,32 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust toolchain
+        run: rustup toolchain install stable --profile minimal --component rustfmt,clippy && rustup default stable
+      - name: Hygiene
+        run: tools/no-game-data.sh
+      - name: Quality gates
+        # Tests that need game data are ignored or skip themselves. No NXB_PARITY variable is set here.
+        run: tools/check.sh
+
+  docs-lint:
+    # Informational at first: it prints candidates and never fails the build.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the text with the Simplified Technical English checker
+        continue-on-error: true
+        run: |
+          for f in README.md CHANGELOG.md CONTRIBUTING.md SECURITY.md docs/*.md; do
+            echo "== $f"
+            python3 tools/ste_check.py "$f" || true
+          done

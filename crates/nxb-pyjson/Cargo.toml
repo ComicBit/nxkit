@@ -1,0 +1,21 @@
+[package]
+name = "nxb-pyjson"
+description = "Byte-exact writer for Python json.dumps output (insertion order, indent, float repr, ensure_ascii=False)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[package.metadata.nxb]
+layer = "L1"
+in_v = true
+
+[dependencies]
+nxb-model.workspace = true
+
+[dev-dependencies]
+nxb-testkit.workspace = true
+
+[lints]
+workspace = true

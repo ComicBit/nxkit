@@ -1,0 +1,105 @@
+# Own shader front end
+
+The own front end changes the machine-generated MSL of the engine into AIR. Apple's back half then makes the library.
+By default, the own front end compiles only the shaders on the allow list. The allow list is the shipped verdict file.
+It contains only shaders with the verdict `own-identical`. The Apple front end compiles all other shaders.
+To use the Apple front end for all shaders, set `NXB_OWN_FRONT=0`.
+
+All numbers come from measurements on the reference machine (macOS 27.2, Metal toolchain 32023.922), unless they have the label "estimate".
+The corpus has 23,785 compile inputs of the reference title. It stays on the local machine. Other programs used the CPU during some measurements.
+
+## Pipeline
+
+```mermaid
+flowchart LR
+    A["MSL source"] --> B["msl-lex, msl-parse: strict parse and type check"]
+    B --> C["msl-sema: HIR, layouts, builtins"]
+    C --> D["air-emit: LLVM 14 style IR text with typed pointers"]
+    D --> E["air-bc: bitcode writer"]
+    E --> F["Apple air-opt -O1 --discard-value-names"]
+    F --> G["Apple metallib"]
+    X["Apple metal -c: all shaders not on the allow list"] -.-> G
+```
+
+| crate | function |
+|---|---|
+| `msl-lex`, `msl-parse` | tokenizer, strict parser and type checker. On the corpus, tokens and accept or reject decisions agree with the Python prototype. |
+| `msl-sema` | types and MSL layouts, HIR, scopes, explicit conversions, builtin overloads |
+| `air-emit` | LLVM text, metadata, function bodies, entry ABI and argument metadata, argument buffers, `air.*` intrinsics |
+| `air-bc` | a parser for the IR text that `air-emit` writes, and a bitcode writer in the LLVM 14 format. Other input is an error, and the caller uses the text path. |
+| `air-front` | the in-process API. `compile(msl, target)` gives bitcode and the back-half arguments. `id()` gives a version string for cache keys. |
+| `airc` | the command-line driver: `emit`, `bc`, `build`, `check`, `rank`, `deny` |
+| `mslcheck` | an accept or reject checker for engine MSL files |
+
+All crates use only the standard library and forbid `unsafe` code. `shaderbuild` reads the verdict file with `--own-front <verdict file>`.
+
+## Results
+
+| measure | macOS | iOS |
+|---|---|---|
+| inputs that compile and pass `air-validate` | 23,752 of 23,785 (99.86 %) | 23,752 of 23,785 |
+| libraries byte-identical to Apple output | 8,533 (35.9 %) | 8,537 (35.9 %) |
+| bitcode path (one `air-opt` call) | all 23,752, no text fallback | all 23,752 |
+| GPU output of different libraries (298 shaders) | 285 the same, 4 in 4 ULP, 9 with a nondeterministic reference | the Mac GPU cannot run iOS AIR |
+| GPU machine code of different libraries (`metal-tt`) | 17 of 20 pairs the same | 27 of 30 pairs the same |
+| CPU time for each input (500 inputs, 6 processes) | 96 ms (Apple: 183 ms) | 105 ms at a higher load |
+
+The 33 inputs that do not compile are parser rejects: threadgroup address-space values, some templates, `<metal_atomic>`.
+
+The own front end does not support these constructs at this time. They go to the Apple front end: texture `write` other than 2D, `read` and `gather`
+other than 2D, `get_width` other than 2D, half builtins, matrices, `simd_*`, barriers, sample gradients, arrays of
+resources in argument buffers.
+
+## Verdicts
+
+`airc check --opt --ref-store DIR` writes one verdict for each input and each target convention:
+
+1. `own-identical`: the library bytes are equal to Apple's bytes. The own path is safe by proof. A GPU test is not necessary.
+2. `own-validated`: the library passes `air-validate`, but the bytes are different. By default the Apple front end compiles it.
+   The machine code is the same in most samples, and the GPU output is in 4 ULP. But no proof applies to each shader.
+   A family can go to the own path subsequently with a data change, after a clean GPU sample.
+3. `apple`: the input does not compile. The Apple front end compiles it.
+
+`airc deny --results R.jsonl` writes the deny list. `airc deny --allow` writes the allow list.
+Mac: 8,533 permitted, 15,252 denied. iOS: 8,537 permitted, 15,248 denied.
+
+The allow list is the default. With a deny list, each shader that is not in the corpus (a new game or a new engine version)
+can go through the own path without a check. The allow list prevents this. Make the list again when `air_front::id()` or the Apple toolchain changes.
+The identity check compares with the output of that toolchain.
+
+## Speed
+
+On 500 inputs with 6 processes, the own front end with one `air-opt` call used 96 ms CPU for each input. The Apple front end
+used 183 ms (measured with load). A test without the optimizer used 83 ms, but it changed the machine code of all shaders.
+With bitcode input, one `air-opt` call does two steps and saves approximately 14 % CPU.
+
+In the full shader step, the own front end decreased the wall time by 10 % with the same output and by 36 % with
+validated output (refer to [benchmarks.md](benchmarks.md)).
+
+## Partial byte identity
+
+The own IR is equivalent to the IR of clang, but the instruction order is not always the same. The optimizer inlines,
+sinks and orders phi nodes by the shape of the IR. Thus a different shape can give a different library, and in rare
+cases a difference of 1 to 4 ULP in fast-math code. The remaining classes are call operand order, the position of `fneg`
+and `nocapture` on some helper arguments. To close them, the front end must copy the accurate instruction order of clang
+in larger helpers. Vertex positions must be accurate to the bit. Thus shaders with different libraries stay on the Apple front end
+until the IR agrees.
+
+## Own library writer and own optimizer
+
+The front-end code can parse and write the `MTLB` container (210 of 210 Apple libraries rewritten byte-identical).
+But `metallib` also runs its own pass list on each function, and no LLVM pass subset gave Apple's machine code (0 of 15 pairs).
+Thus Apple's `air-opt -O1` and `metallib` stay (decision D17). The cheapest real decrease is to write the bitcode directly
+without the text round trip: approximately 15 ms for each input (the in-process front end costs 29.5 ms mean).
+
+## Tests
+
+- Unit and case tests: `crates/msl-parse/tests`, `crates/air-emit/tests`.
+- GPU differential test of own libraries against Apple libraries: refer to [gpu-differential-testing.md](gpu-differential-testing.md).
+- `cargo test -p air-front -- --include-ignored` runs the tests that use Apple's tools.
+- The scripts in `tools/front` read environment variables and do not use a default path: `NXB_AIRC` (the `airc` binary),
+  `NXB_PROTO` (the Python prototype), `NXB_REF` (reference folder with stored Apple libraries), `NXB_CORPUS`
+  (one MSL path on each line), `NXB_SPECS` (prepared GPU test specs).
+
+For the AIR rules, refer to [air-conventions.md](air-conventions.md). For the studies, refer to
+[research/frontend-internals.md](research/frontend-internals.md) and [research/reference-corpus.md](research/reference-corpus.md).

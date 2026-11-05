@@ -1,0 +1,872 @@
+# Checker cases shared by the Rust tests (tests/cases.rs) and the Python cross-check (tools/check_cases.py).
+#
+# A case starts with `=== name`. Then header lines:
+#   expect: accept | reject <key> | <key> ... | recursion | crash:<PythonException> | lex-error
+#           (reason keys separated by ` | `, a repeated key is listed once per occurrence)
+#   prelude: <helper>   optional: the template items of this case count as the engine helper <helper>
+# Everything after the header lines up to the next `===` is the source.
+# Lines starting with `#` before the first case are comments.
+
+=== empty-file
+expect: accept
+
+=== preprocessor-accepted
+expect: accept
+#include <metal_stdlib>
+#include <simd/simd.h>
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+using namespace metal;
+
+=== preprocessor-rejected
+expect: reject pp:#include <metal_atomic> | pp:#define X
+#include <metal_atomic>
+#define X 1
+
+=== struct-fields-and-attrs
+expect: accept
+struct main0_out
+{
+    float4 color0 [[color(0)]];
+    float4 gl_Position [[position, invariant]];
+    float gl_PointSize [[point_size]];
+    float a, b;
+    uint arr[4];
+    packed_float3 p;
+    float4x4 m;
+    float depth_out [[depth(any)]];
+};
+
+=== struct-forward
+expect: reject struct-forward
+struct S;
+
+=== struct-field-attr
+expect: reject field-attr:sample_id
+struct S { uint a [[sample_id]]; };
+
+=== struct-field-depth-greater
+expect: reject field-attr:depth(greater)
+struct S { float d [[depth(greater)]]; };
+
+=== struct-field-depth-reports-first-attr
+expect: reject field-attr:depth(locn0)
+struct S { float d [[user(locn0), depth(less)]]; };
+
+=== global-function-constant
+expect: accept
+constant bool fc_0 [[function_constant(0)]];
+constant int fc_1_tmp [[function_constant(1)]];
+fragment void main0(float4 p [[position, function_constant(fc_0)]]) { }
+
+=== global-constant-array
+expect: accept
+constant float g[2] = { 1.0, 2.0 };
+constant uint h[2] = { 1u, 2u, };
+float f(uint i) { return g[i] + float(h[i]); }
+
+=== global-constant-array-nested-braces
+expect: reject syntax
+constant uint h[2][2] = { { 1u, 2u }, { 3u, 4u } };
+
+=== global-constant-form
+expect: reject global-constant-form
+constant float g = 1.0;
+
+=== function-constant-unknown
+expect: reject function_constant-unknown
+fragment void main0(float4 p [[position, function_constant(nope)]]) { }
+
+=== function-constant-without-argument-crashes
+expect: crash:IndexError
+fragment void main0(float4 p [[function_constant]]) { }
+
+=== entry-points
+expect: accept
+struct main0_in { float4 a [[user(locn0)]]; };
+struct main0_out { float4 c [[color(0)]]; };
+[[early_fragment_tests]] fragment main0_out main0(main0_in in [[stage_in]], float4 gl_FragCoord [[position]])
+{
+    main0_out out = {};
+    out.c = in.a;
+    return out;
+}
+vertex float4 main0_v(uint vid [[vertex_id]], uint iid [[instance_id]]) { return float4(float(vid), float(iid), 0.0, 1.0); }
+kernel void k(uint3 gid [[thread_position_in_grid]]) { }
+
+=== function-qualifiers
+expect: accept
+static inline __attribute__((always_inline)) float f(float x) { return x; }
+inline float g(float x) { return f(x); }
+
+=== fn-attr
+expect: reject fn-attr:max_total_threads_per_threadgroup
+[[max_total_threads_per_threadgroup(64)]] kernel void k() { }
+
+=== gnu-attr
+expect: reject gnu-attr:noinline
+static __attribute__((noinline)) void f() { }
+
+=== param-attr
+expect: reject param-attr:thread_index_in_simdgroup
+kernel void k(uint i [[thread_index_in_simdgroup]]) { }
+
+=== fn-prototype
+expect: reject fn-prototype
+float f(float x);
+
+=== using-namespace-only-metal
+expect: reject syntax
+using namespace std;
+
+=== template-unknown
+expect: reject template:foo
+template<typename T> T foo(T x) { return x; }
+
+=== template-struct
+expect: reject template:struct Box
+template<typename T> struct Box { T v; };
+
+=== template-known-but-not-allowed
+expect: reject template:mod
+prelude: mod
+template<typename T> T mod(T x, T y) { return x - y * floor(x / y); }
+
+=== template-no-name
+expect: reject template:?
+template<typename T> using V = T;
+
+=== types
+expect: accept
+struct S { float a; };
+void f(device S* s, constant float4* c, thread float2& r, texture2d<float> t, texture2d<half, access::write> w,
+       texturecube<float> tc, depth2d<float> d, sampler smp, constant S& cs, threadgroup uint* tg)
+{
+    size_t n = 0;
+    half h = 1.0h;
+    bool b = true;
+    float2x2 m;
+    const float k = 1.0;
+}
+
+=== type-unknown
+expect: reject type:atomic_uint
+void f(device atomic_uint* a) { }
+
+=== texture-elem
+expect: reject texture-elem:short
+void f(texture2d<short> t) { }
+
+=== texture-kind
+expect: reject texture-kind:texture2d_ms
+void f(texture2d_ms<float> t) { }
+
+=== thread-reference
+expect: reject thread-reference
+void f(float& r) { }
+
+=== addrspace-value
+expect: reject addrspace-value:threadgroup
+kernel void k() { threadgroup float x; }
+
+=== packed-scalar-crashes
+expect: crash:TypeError
+void f() { packed_float x; }
+
+=== array-dim-nonliteral
+expect: reject array-dim-nonliteral
+void f() { float a[N]; }
+
+=== array-dims
+expect: accept
+void f() { float a[4]; uint b[2u][3]; a[0] = 1.0; b[1][2] = 3u; }
+
+=== spvUnsafeArray
+expect: accept
+prelude: spvUnsafeArray
+template<typename T, size_t Num> struct spvUnsafeArray { T elements[Num ? Num : 1]; };
+void f() { spvUnsafeArray<uint, 4> a = {}; a[0] = 1u; uint x = a[1]; }
+
+=== spvUnsafeArray-without-prelude
+expect: reject spvUnsafeArray-without-prelude
+void f() { spvUnsafeArray<uint, 4> a; }
+
+=== statements
+expect: accept
+float f(int c, float x)
+{
+    float r = 0.0;
+    { r = x; }
+    ;
+    if (c > 0) r = 1.0; else { r = 2.0; }
+    if (c == 3) return r;
+    switch (c)
+    {
+        case 0:
+        case 1u:
+        {
+            r = 3.0;
+            break;
+        }
+        default:
+            break;
+    }
+    do { r = r + 1.0; } while (r < 10.0);
+    while (r > 0.0) { r = r - 1.0; if (r < 5.0) break; else continue; }
+    for (int i = 0; i < 4; i += 1) { r = r * 2.0; }
+    int j;
+    for (j = 0; j < 2; j += 1) { }
+    for (;;) { break; }
+    return r;
+}
+
+=== discard-fragment
+expect: accept
+fragment void main0(float4 p [[position]]) { if (p.x > 0.5) { discard_fragment(); } }
+
+=== switch-non-int
+expect: reject switch-non-int
+void f(float x) { switch (x) { default: break; } }
+
+=== case-label
+expect: reject case-label:id
+void f(int x) { switch (x) { case K: break; } }
+
+=== case-label-negative
+expect: reject case-label:punct
+void f(int x) { switch (x) { case -1: break; } }
+
+=== return-missing-value
+expect: reject return-missing-value
+float f() { return; }
+
+=== return-conversion
+expect: reject implicit-conversion
+float2 f(float4 v) { return v; }
+
+=== brace-init-nonempty
+expect: reject brace-init-nonempty
+void f() { float2 v = { 1.0, 2.0 }; }
+
+=== decl-ctor-syntax
+expect: reject decl-ctor-syntax
+void f() { float x(1.0); }
+
+=== condition-not-scalar
+expect: reject condition-not-scalar
+void f(float2 v) { if (v) { } }
+
+=== decl-conversions
+expect: accept
+void f(uint u, float x)
+{
+    float a = u;
+    float4 b = x;
+    packed_float3 p = float3(1.0);
+    float3 q = p;
+}
+
+=== implicit-conversion
+expect: reject implicit-conversion
+void f(float4 v) { float3 x = v; }
+
+=== comma-operator
+expect: reject comma-operator
+void f(int a, int b) { a = 1, b = 2; }
+
+=== assign-to-rvalue
+expect: reject assign-to-rvalue
+void f(float4 v) { float4(0.0).x = 1.0; }
+
+=== assignments
+expect: accept
+void f(device float* p, thread float4& v_unused_name_avoided)
+{
+    float4 v = float4(0.0);
+    int i = 0;
+    uint u = 1u;
+    v.x = 1.0;
+    v.xy = float2(1.0, 2.0);
+    v += float4(1.0);
+    i <<= 2;
+    i |= 1;
+    u ^= 3u;
+    *p = 2.0;
+    p[1] = 3.0;
+    v[i] = 4.0;
+}
+
+=== ternary
+expect: accept
+float f(bool c, float a, int b, float2 v) { float2 w = c ? v : a; return c ? a : b; }
+
+=== ternary-types
+expect: reject ternary-types
+float2 f(bool c, float2 a, float3 b) { return c ? a : b; }
+
+=== binary-ops
+expect: accept
+bool f(int a, uint b, float x, float y, bool p, bool q)
+{
+    int s = a + b - a * b / a % b;
+    uint t = (a << 2) | (b >> 1u) & (a ^ b);
+    float z = x * y + x / y - x;
+    bool r = p || q && !p;
+    bool4 cmp = float4(x) < float4(y);
+    bool e = x == y || x != y || x <= y || x >= y || x > y;
+    short sh = short(1);
+    int promoted = sh + sh;
+    return r;
+}
+
+=== pointer-arith
+expect: accept
+float f(device float* p, int i) { return *(p + i); }
+
+=== matrix-op
+expect: reject matrix-op
+float4 f(float4x4 m, float4 v) { return m * v; }
+
+=== binary-nonnumeric
+expect: reject binary-nonnumeric
+struct S { float a; };
+float f(S s, float x) { return s + x; }
+
+=== logical-vector
+expect: reject logical-vector
+bool f(bool2 a, bool b) { return a && b; }
+
+=== vector-width-mismatch
+expect: reject vector-width-mismatch
+float f(float2 a, float3 b) { float2 c = a + b; return c.x; }
+
+=== vector-base-mismatch
+expect: reject vector-base-mismatch
+float4 f(float4 a, int4 b) { return a + b; }
+
+=== bitop-on-float
+expect: reject bitop-on-float
+float f(float a, int b) { return a & b; }
+
+=== unary-ops
+expect: accept
+int f(int a, float x, bool b, uint2 v)
+{
+    float y = -x;
+    float z = +x;
+    bool n = !b;
+    int m = ~a;
+    uint2 w = ~v;
+    short s = short(2);
+    int ps = -s;
+    return a;
+}
+
+=== deref-nonpointer
+expect: reject deref-nonpointer
+float f(float x) { return *x; }
+
+=== address-of
+expect: accept
+void g(thread float* p) { }
+void f() { float x = 1.0; g(&x); }
+
+=== address-of-rvalue
+expect: reject address-of-rvalue
+void f() { device float* p = &(1.0); }
+
+=== prefix-incdec
+expect: reject prefix-incdec
+void f(int i) { ++i; }
+
+=== postfix-incdec
+expect: reject postfix-incdec
+void f(int i) { i++; }
+
+=== not-vector
+expect: reject not-vector
+bool2 f(bool2 a) { return !a; }
+
+=== unary-nonnumeric
+expect: reject unary-nonnumeric
+struct S { float a; };
+float f(S s) { return -s; }
+
+=== bitnot-float
+expect: reject bitnot-float
+float f(float a) { return ~a; }
+
+=== member-and-arrow
+expect: accept
+struct S { float a; float4 v; };
+struct B { S s; float4 arr[2]; };
+float f(device B* b, constant S& c, B local)
+{
+    float x = b->s.a + c.a + local.s.v.y;
+    b->arr[1].z = x;
+    return b->s.v.w;
+}
+
+=== arrow-nonpointer
+expect: reject arrow-nonpointer
+struct S { float a; };
+float f(S s) { return s->a; }
+
+=== unknown-member
+expect: reject unknown-member
+struct S { float a; };
+float f(S s) { return s.b; }
+
+=== swizzles
+expect: accept
+float4 f(float4 v)
+{
+    float4 w = v.wzyx;
+    float2 rg = v.rg;
+    float3 x = v.xxx;
+    w.xy = rg;
+    return w;
+}
+
+=== swizzle-form
+expect: reject swizzle-form
+float f(float4 v) { return v.q; }
+
+=== swizzle-mixed-sets
+expect: reject swizzle-form
+float2 f(float4 v) { return v.xg; }
+
+=== swizzle-out-of-range
+expect: reject swizzle-out-of-range
+float f(float2 v) { return v.z; }
+
+=== swizzle-on-scalar
+expect: reject swizzle-on-scalar
+float f(float s) { return s.x; }
+
+=== member-on
+expect: reject member-on:tex
+float f(texture2d<float> t) { return t.x; }
+
+=== index-non-int
+expect: reject index-non-int
+float f(device float* p, float i) { return p[i]; }
+
+=== matrix-index
+expect: reject matrix-index
+float4 f(float4x4 m) { return m[0]; }
+
+=== index-on
+expect: reject index-on:struct
+struct S { float a; };
+float f(S s) { return s[0]; }
+
+=== literals
+expect: accept
+void f()
+{
+    int a = 1;
+    uint b = 1u;
+    uint c = 0xFFFFFFFFu;
+    int d = 0x10;
+    uint e = 0x80000000;
+    float g = 1.5;
+    float h = 1.0f;
+    half i = 2.0h;
+    float j = 1e3;
+    long k = 3000000000;
+    long l = 5l;
+    ulong m = 7ul;
+    bool n = false;
+}
+
+=== literal-int-with-float-suffix-crashes
+expect: crash:ValueError
+void f() { float x = 1f; }
+
+=== c-casts
+expect: accept
+void f(device uint* p, float x)
+{
+    int i = (int)x;
+    device float* q = (device float*)p;
+    float4 v = (float4)float4(1.0);
+}
+
+=== c-cast
+expect: reject c-cast
+void f(float4 v) { float x = (float)v; }
+
+=== qualified-names
+expect: accept
+float f(float x, float y) { return metal::abs(precise::min(x, y)) + fast::max(x, y); }
+
+=== qualified
+expect: reject qualified:std
+float f(float x) { return std::abs(x); }
+
+=== constructors
+expect: accept
+void f(float x, int2 i, uint u)
+{
+    float4 a = float4(x);
+    float4 b = float4(i, x, x);
+    float2 c = float2();
+    float d = float(u);
+    uint4 e = uint4(float4(1.0));
+    int g = int(x);
+}
+
+=== packed-ctor
+expect: reject packed-ctor
+void f() { packed_float3 p = packed_float3(1.0, 2.0, 3.0); }
+
+=== matrix-ctor
+expect: reject matrix-ctor
+void f() { float2x2 m = float2x2(1.0); }
+
+=== scalar-ctor-form
+expect: reject scalar-ctor-form
+void f(float2 v) { float x = float(v); }
+
+=== ctor-arg-nonnumeric
+expect: reject ctor-arg-nonnumeric
+struct S { float a; };
+void f(S s) { float2 v = float2(s, 1.0); }
+
+=== ctor-component-count
+expect: reject ctor-component-count
+void f(float2 v) { float4 w = float4(v, 1.0); }
+
+=== casts
+expect: accept
+void f(float x, uint u)
+{
+    uint a = as_type<uint>(x);
+    float2 b = as_type<float2>(uint2(u));
+    half2 c = as_type<half2>(u);
+    int d = static_cast<int>(x);
+}
+
+=== cast-args
+expect: reject cast-args
+void f(float x) { uint a = as_type<uint>(x, x); }
+
+=== as_type-size
+expect: reject as_type-size
+void f(float x) { uint2 a = as_type<uint2>(x); }
+
+=== reinterpret_cast
+expect: reject reinterpret_cast
+void f(device float* p) { device uint* q = reinterpret_cast<device uint*>(p); }
+
+=== struct-brace-init
+expect: accept
+struct S { float a; uint b; };
+S f() { S s = S{ 1.0, 2u }; return S{ 1.0 }; }
+
+=== struct-init-too-many
+expect: reject struct-init-too-many
+struct S { float a; };
+S f() { return S{ 1.0, 2.0 }; }
+
+=== option-not-call
+expect: reject option-not-call
+float f() { return level; }
+
+=== function-pointer
+expect: reject function-pointer
+float g(float x) { return x; }
+float f() { return g; }
+
+=== unknown-identifier
+expect: reject unknown-identifier
+float f() { return y; }
+
+=== user-calls-and-overloads
+expect: accept
+float g(float x) { return x; }
+float2 g(float2 x) { return x; }
+void h(thread float& r) { r = 1.0; }
+float f(int i, float2 v)
+{
+    float a = g(i);
+    float2 b = g(v);
+    float c = 0.0;
+    h(c);
+    return a + b.x + c;
+}
+
+=== overload-resolution
+expect: reject overload-resolution
+float g(float x) { return x; }
+float f(float4 v) { return g(v); }
+
+=== call-entry-point
+expect: reject call-entry-point
+fragment void main0() { }
+void f() { main0(); }
+
+=== builtins
+expect: accept
+float4 f(float x, float4 v, int i, uint u, int2 i2)
+{
+    float a = abs(x) + sqrt(x) + rsqrt(x) + exp2(x) + log2(x) + floor(x) + fract(x) + saturate(x) + sign(x);
+    int ai = abs(i);
+    float b = min(x, 1.0) + precise::max(x, 2.0) + fast::min(x, x) + pow(x, x) + step(x, x) + fmod(x, x);
+    float4 c = fma(v, v, v) + clamp(v, 0.0, 1.0) + mix(v, v, x) + smoothstep(v, v, v) + precise::clamp(v, v, v);
+    uint p = popcount(u) + clz(u);
+    int2 ci = clz(i2);
+    bool n = isnan(x);
+    bool4 nn = isinf(v);
+    float4 s = select(v, v, isnan(v));
+    bool al = all(nn) || any(nn);
+    float d = dot(v, v) + length(v) + distance(v, v);
+    float3 cr = cross(v.xyz, v.xyz);
+    float4 un = unpack_unorm4x8_to_float(u);
+    float2 h2 = unpack_half2x16(u);
+    uint eb = extract_bits(u, 0u, 4u);
+    uint ib = insert_bits(u, u, 0u, 4u);
+    float4 bc = max(v, x);
+    return c + s + un;
+}
+
+=== builtin-arity
+expect: reject builtin-arity:fma
+float f(float x) { return fma(x, x); }
+
+=== builtin-nonnumeric
+expect: reject builtin-nonnumeric:abs
+struct S { float a; };
+float f(S s) { return abs(s); }
+
+=== builtin-width-mix
+expect: reject builtin-width-mix:min
+float2 f(float2 a, float3 b) { return min(a, b); }
+
+=== builtin-arg-types-mixed
+expect: reject builtin-arg-types-mixed:max
+float f(float a, int b) { return max(a, b); }
+
+=== builtin-int-to-float-fn
+expect: reject builtin-int-to-float-fn:sqrt
+int f(int a) { return sqrt(a); }
+
+=== builtin-float-to-int-fn
+expect: reject builtin-float-to-int-fn:popcount
+float f(float a) { return popcount(a); }
+
+=== builtin-form
+expect: reject builtin-form:isnan
+bool f(int a) { return isnan(a); }
+
+=== select-form
+expect: reject select-form
+float f(float a, float2 b, bool c) { return select(a, b, c); }
+
+=== select-cond
+expect: reject select-cond
+float2 f(float2 a, float2 b, bool c) { return select(a, b, c); }
+
+=== select-type-mix
+expect: reject select-type-mix
+float f(float a, int b, bool c) { return select(a, b, c); }
+
+=== all-any-form
+expect: reject all-any-form
+bool f(float4 v) { return all(v); }
+
+=== unpack-arg
+expect: reject unpack-arg
+float4 f(int v) { return unpack_unorm4x8_to_float(v); }
+
+=== extract_bits-form
+expect: reject extract_bits-form
+float f(float v) { return extract_bits(v, 0u, 1u); }
+
+=== insert_bits-form
+expect: reject insert_bits-form
+uint f(uint v, int w) { return insert_bits(v, w, 0u, 1u); }
+
+=== call-unknown-builtin
+expect: reject call:atomic_fetch_add_explicit
+void f(device uint* p) { atomic_fetch_add_explicit(p, 1u, 0); }
+
+=== call-arguments-are-checked-first
+expect: reject unknown-identifier
+void f(device uint* p) { atomic_fetch_add_explicit(p, 1u, memory_order_relaxed); }
+
+=== option-args
+expect: reject option-args
+float4 f(texture2d<float> t, sampler s, float2 uv) { return t.sample(s, uv, level(0.0, 1.0)); }
+
+=== texture-methods
+expect: accept
+float4 f(texture2d<float> t, texture2d_array<float> ta, texturecube<float> tc, depth2d<float> d, depth2d_array<float> da,
+         texture3d<float> t3, sampler s, float2 uv, float3 dir, uint2 px, texture2d<float, access::write> w)
+{
+    float4 a = t.sample(s, uv) + t.sample(s, uv, level(0.0)) + t.sample(s, uv, bias(1.0), int2(1, 1));
+    float4 b = ta.sample(s, uv, 1u) + tc.sample(s, dir) + t3.sample(s, dir, gradient3d(dir, dir));
+    float c = d.sample_compare(s, uv, 0.5) + da.sample_compare(s, uv, 2, 0.5, level(0));
+    float4 g = t.gather(s, uv, int2(0), component::y) + d.gather(s, uv);
+    float4 r = t.read(px) + t.read(px, 0u);
+    w.write(a, px);
+    uint wd = t.get_width() + t.get_height(0u) + ta.get_array_size() + t.get_num_mip_levels();
+    float lod = t.calculate_clamped_lod(s, uv) + t.calculate_unclamped_lod(s, uv);
+    return a + b + g + r + c;
+}
+
+=== method-on
+expect: reject method-on:sampler
+float4 f(sampler s, float2 uv) { return s.sample(s, uv); }
+
+=== sample-no-sampler
+expect: reject sample-no-sampler
+float4 f(texture2d<float> t, float2 uv) { return t.sample(uv); }
+
+=== sample-coord
+expect: reject sample-coord
+float4 f(texture2d<float> t, sampler s, float3 uv) { return t.sample(s, uv); }
+
+=== sample-without-coord-crashes
+expect: crash:IndexError
+float4 f(texture2d<float> t, sampler s) { return t.sample(s); }
+
+=== sample-array-index
+expect: reject sample-array-index
+float4 f(texture2d_array<float> t, sampler s, float2 uv) { return t.sample(s, uv, 1.0); }
+
+=== sample_compare-nondepth
+expect: reject sample_compare-nondepth
+float4 f(texture2d<float> t, sampler s, float2 uv) { return t.sample_compare(s, uv, 0.5); }
+
+=== sample_compare-ref
+expect: reject sample_compare-ref
+float f(depth2d<float> t, sampler s, float2 uv) { return t.sample_compare(s, uv, 1); }
+
+=== gather-option
+expect: reject gather-option
+float4 f(texture2d<float> t, sampler s, float2 uv) { return t.gather(s, uv, level(0.0)); }
+
+=== sample-arg
+expect: reject sample-arg
+float4 f(texture2d<float> t, sampler s, float2 uv) { return t.sample(s, uv, 1.0); }
+
+=== read-args
+expect: reject read-args
+float4 f(texture2d<float> t) { return t.read(); }
+
+=== lod-form
+expect: reject lod-form
+float f(texture2d<float> t, float2 uv) { return t.calculate_clamped_lod(uv); }
+
+=== method-unknown
+expect: reject method:fence
+void f(texture2d<float> t) { t.fence(); }
+
+=== component-outside-gather
+expect: reject sample-arg
+float4 f(texture2d<float> t, sampler s, float2 uv) { return t.sample(s, uv, component::x); }
+
+=== dm_bs-helper
+expect: accept
+prelude: dm_bs
+struct dm_border_t { float4 k[4]; };
+template<typename T, typename Tex, typename... A> T dm_bs(T r, constant dm_border_t* b, uint i, Tex t, sampler w, A... a) { return r; }
+float4 f(constant dm_border_t* b, texture2d<float> t, sampler s, float2 uv)
+{
+    float4 x = dm_bs(float4(0.0), b, 0u, t, s, uv);
+    float y = dm_bs(0.0, b, 1u, t, s, uv, level(0.0));
+    return x + y;
+}
+
+=== dm_bs-form
+expect: reject dm_bs-form
+prelude: dm_bs
+template<typename T, typename Tex, typename... A> T dm_bs(T r, constant float4* b, uint i, Tex t, sampler w, A... a) { return r; }
+float4 f(texture2d<float> t, sampler s, float2 uv) { return dm_bs(float4(0.0), t, s, uv); }
+
+=== dm_bs-instantiation
+expect: reject dm_bs-instantiation
+prelude: dm_bs
+template<typename T, typename Tex, typename... A> T dm_bs(T r, constant float4* b, uint i, Tex t, sampler w, A... a) { return r; }
+float2 f(constant float4* b, texture2d<float> t, sampler s, float2 uv) { return dm_bs(float2(0.0), b, 0u, t, s, uv); }
+
+=== dm_bs-without-prelude
+expect: reject call:dm_bs
+float4 f(texture2d<float> t, sampler s, float2 uv) { return dm_bs(float4(0.0), t, 0u, t, s, uv); }
+
+=== spvDepthCast-helper
+expect: accept
+prelude: spvDepthCast
+template<typename T> depth2d<T> spvDepthCast(texture2d<T> t) { return t; }
+float f(texture2d<float> t, sampler s, float2 uv) { return spvDepthCast(t).sample_compare(s, uv, 0.5); }
+
+=== spvDepthCast-form
+expect: reject spvDepthCast-form
+prelude: spvDepthCast
+template<typename T> depth2d<T> spvDepthCast(texture2d<T> t) { return t; }
+float f(float x) { return spvDepthCast(x); }
+
+=== spvDepthCast-3d-crashes
+expect: crash:KeyError
+prelude: spvDepthCast
+template<typename T> depth2d<T> spvDepthCast(texture2d<T> t) { return t; }
+float4 f(texture3d<float> t, sampler s, float3 uv) { return spvDepthCast(t).sample(s, uv); }
+
+=== spvFAdd-helper
+expect: accept
+prelude: spvFAdd
+template<typename T> T spvFAdd(T l, T r) { return l + r; }
+float4 f(float4 a, float4 b) { return spvFAdd(a, b); }
+
+=== spvFAdd-form
+expect: reject spvFAdd-form
+prelude: spvFAdd
+template<typename T> T spvFAdd(T l, T r) { return l + r; }
+float4 f(float4 a, float b) { return spvFAdd(a, b); }
+
+=== recovery-reports-every-item
+expect: reject type:foo | unknown-identifier | type:foo
+void f(foo x) { }
+float g() { return nope; }
+struct S { foo a; };
+float h(float x) { return x; }
+
+=== recovery-keeps-declared-function
+expect: reject unknown-identifier
+float g(float x) { return nope; }
+float f(float x) { return g(x); }
+
+=== item-end-mismatch
+expect: reject syntax
+float f(float x) { return x; } }
+
+=== syntax-expected
+expect: reject syntax
+float f(float x) { return x }
+
+=== syntax-primary
+expect: reject syntax | syntax
+float f(float x) { return ); }
+
+=== dot-of-struct-is-a-bogus-scalar
+expect: accept
+struct S { float a; };
+void f(S s) { if (dot(s, s)) { } }
+
+=== bogus-scalar-arithmetic-crashes
+expect: crash:KeyError
+struct S { float a; };
+float f(S s) { return dot(s, s) + 1.0; }
+
+=== dot-without-arguments-crashes
+expect: crash:IndexError
+float f() { return dot(); }
+
+=== attribute-arguments-run-past-the-end-crash
+expect: crash:IndexError
+struct S { float a [[user(
+
+=== lex-error
+expect: lex-error
+float f() { return @; }

@@ -1,0 +1,23 @@
+[package]
+name = "airc"
+description = "Command line driver of the own MSL front end: lower, assemble, link, validate, rank and coverage"
+version.workspace = true
+edition = "2021"
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[package.metadata.nxb]
+layer = "F"
+in_v = false
+
+[dependencies]
+msl-parse = { path = "../msl-parse" }
+msl-sema = { path = "../msl-sema" }
+air-emit = { path = "../air-emit" }
+air-bc = { path = "../air-bc" }
+air-lib = { path = "../air-lib" }
+air-front = { path = "../air-front" }
+
+[lints.rust]
+unsafe_code = "forbid"
