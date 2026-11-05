@@ -10,12 +10,13 @@ One part is different: the own shader front end. It is on only for shaders on an
 
 ## Status
 
-Version 0.1.1 is the second public release. It is early software. Read this section before you use it.
+Version 0.2.0 is the third public release. It is early software. Read this section before you use it.
 
 - Mac only. The tools run on macOS on Apple silicon. Other systems are not supported.
 - The tools need Apple tools (`metal`, `metallib`, `air-opt`, `metal-tt`, `codesign`, `xcrun`) from your own Xcode.
-- A full build is not yet one command. The steps for the host app, the app binary and the app settings file are not ported.
-  `nxb build` takes them from a work folder of the reference build.
+- A full build is not yet one command. The button-icon font is not ported. `nxb build` takes it from a work folder of the reference build.
+  The Mac host, the companion app, the app settings file and the app icon are ported in 0.2.0. `nxb build` end to end with these
+  stages was not run on a real title. Each stage was compared alone.
 - The code rewrite step (`patch_nso.py` in the reference scripts) is not ported.
 - The shader step for iOS is not part of the verified path. Only a sample was compared.
 - The reference scripts remain the fallback. If a stage fails or does not support an input, run the reference script for that stage.
@@ -30,6 +31,11 @@ more titles.
 |---|---|---|
 | Extract and split | reference title, base and update | both `RomFS.img`, ExeFS, 12 package files and all tables are byte-identical |
 | Extract, `.nup` | one real Switch 2 package (standalone update) and synthetic containers | the RomFS image digest and the ExeFS and icon files are identical to the reference script. Not checked on real data: base game with update and DLC, and the control data |
+| Extract, XCI, merged packages (`--app`), dump folders | synthetic fixtures only | byte-identical to the reference extractors. No real sample was available |
+| Extract, NSZ | one real file and synthetic fixtures | the decoded NCA is identical to the output of the reference decompressor. The NCZ block mode was not checked on real data |
+| App icon, companion app | one title | byte-identical |
+| App settings file | 142 profiles, 425 outputs | byte-identical. One multi-program header is not ported |
+| Mac host | one title | reuse key and decoder inputs are identical. The binary is not byte-identical, also not between two runs of the reference script |
 | Extract | two more titles (one with an update, `--updates-only`) | `RomFS.img`, ExeFS, control data and icon are byte-identical |
 | Shader step, Mac | one full run | 74,421 of 74,422 files are byte-identical. The listing `_b_cas.txt` differs by design |
 | Shader step, iOS | 787 sample shaders | 2,889 of 2,889 iOS files are byte-identical |
@@ -59,7 +65,7 @@ limits it. The own front end is not byte-identical in the validated mode.
 
 ### Known limits
 
-- Not ported: code rewrite, host app build, app binary build, app settings file and icon, XCI and NSZ input, geometry and mesh shaders.
+- Not ported: code rewrite, button-icon font, header of multi-program profiles, zstd dictionaries, geometry and mesh shaders.
 - Not done: Windows and Linux. The process runner and the locks refuse to run there.
 - Two processes can write the same store key at the same time. The last writer wins. The files stay valid.
 - Parsers read untrusted files. Read [SECURITY.md](SECURITY.md) and [docs/security.md](docs/security.md) for the limits.
@@ -89,7 +95,7 @@ Every binary prints its usage when you run it without arguments.
 | binary | purpose |
 |---|---|
 | `nxb` | the whole build. `nxb build --platform mac-app` runs all ported stages. `--dry-run` prints the stage graph and the cache keys |
-| `nxb-extract` | NSP package or Switch 2 package (`.nup`, no keys needed) to RomFS images, ExeFS, control data and icon |
+| `nxb-extract` | NSP, XCI, NSZ, XCZ, Switch 2 package (`.nup`, no keys needed) or dump folder (`--dump`) to RomFS images, ExeFS, control data and icon |
 | `nxb-split` | shader split of extracted images into package records and tables |
 | `shaderbuild` | the shader step: `build`, `recompile`, `guards`, `help`, `version` |
 | `nxb-pso` | plan and merge of the pipeline archive. Needs `metal-tt` and `metal-pack` |

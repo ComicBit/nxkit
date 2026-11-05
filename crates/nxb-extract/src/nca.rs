@@ -34,46 +34,79 @@ pub struct PfsEntry {
 
 /// Parses a PFS0 header from the start of `s`, offsets in the result are relative to the PFS0's start.
 pub fn read_pfs0(s: &dyn Storage) -> Result<Vec<PfsEntry>> {
+    read_partition_fs(s, b"PFS0", 24)
+}
+
+/// Parses an HFS0 header (a gamecard's partition: 0x40-byte entries, hash fields ignored) from the start of `s`.
+pub fn read_hfs0(s: &dyn Storage) -> Result<Vec<PfsEntry>> {
+    read_partition_fs(s, b"HFS0", 0x40)
+}
+
+fn read_partition_fs(s: &dyn Storage, magic: &[u8; 4], entry_size: u64) -> Result<Vec<PfsEntry>> {
+    let kind = String::from_utf8_lossy(magic).into_owned();
     if s.size() < 16 {
-        return Err(ExtractError::format("truncated PFS0 header"));
+        return Err(ExtractError::format(format!("truncated {kind} header")));
     }
     let h = s.read_vec(0, 16)?;
-    if &h[0..4] != b"PFS0" {
-        return Err(ExtractError::format("no PFS0 magic"));
+    if &h[0..4] != magic {
+        return Err(ExtractError::format(format!("no {kind} magic")));
     }
     let count = u32le(&h, 4) as u64;
     let strings = u32le(&h, 8) as u64;
-    let header_size = 16 + 24 * count + strings;
+    let header_size = 16 + entry_size * count + strings;
     if header_size > s.size() || header_size > (64 << 20) {
-        return Err(ExtractError::format("invalid PFS0 file-name table size"));
+        return Err(ExtractError::format(format!(
+            "invalid {kind} file-name table size"
+        )));
     }
     let hdr = s.read_vec(0, header_size as usize)?;
-    let st = &hdr[(16 + 24 * count) as usize..];
+    let st = &hdr[(16 + entry_size * count) as usize..];
     let mut out = Vec::new();
     for i in 0..count as usize {
-        let e = 16 + 24 * i;
+        let e = 16 + entry_size as usize * i;
         let name_off = u32le(&hdr, e + 16) as usize;
         if name_off as u64 >= strings {
-            return Err(ExtractError::format(
-                "PFS0 file-name offset outside the string table",
-            ));
+            return Err(ExtractError::format(format!(
+                "{kind} file-name offset outside the string table"
+            )));
         }
         // names end at a NUL or (older NSZ writers) at the end of the table
         let rest = &st[name_off..];
         let end = rest.iter().position(|&b| b == 0).unwrap_or(rest.len());
         let name = String::from_utf8_lossy(&rest[..end]).into_owned();
         let Some(offset) = header_size.checked_add(u64le(&hdr, e)) else {
-            return Err(ExtractError::format("PFS0 entry offset overflows"));
+            return Err(ExtractError::format(format!(
+                "{kind} entry offset overflows"
+            )));
         };
         let size = u64le(&hdr, e + 8);
         if offset.checked_add(size).is_none_or(|x| x > s.size()) {
             return Err(ExtractError::format(format!(
-                "PFS0 entry {name} outside the package"
+                "{kind} entry {name} outside the package"
             )));
         }
         out.push(PfsEntry { name, offset, size });
     }
     Ok(out)
+}
+
+/// The secure partition of a gamecard dump (`.xci`) as a storage: the card header's magic `HEAD` is at 0x100, the root
+/// HFS0 lies where the header at 0x130 says, and its `secure` entry holds the NCAs (with their keys in the key area).
+pub fn xci_secure(pkg: &Arc<dyn Storage>, file: &str) -> Result<Arc<dyn Storage>> {
+    let root_at = u64le(&pkg.read_vec(0x130, 8)?, 0);
+    if root_at < 0x200 || root_at >= pkg.size() {
+        return Err(ExtractError::format(format!(
+            "{file}: XCI root partition offset outside the file"
+        )));
+    }
+    let root: Arc<dyn Storage> =
+        Arc::new(SubStorage::new(pkg.clone(), root_at, pkg.size() - root_at)?);
+    let parts = read_hfs0(root.as_ref())?;
+    let secure = parts
+        .iter()
+        .find(|p| p.name == "secure")
+        .ok_or_else(|| ExtractError::format(format!("no secure partition in {file}")))?;
+    Ok(Arc::new(SubStorage::new(root, secure.offset, secure.size)?))
 }
 
 /// NCA content types (LibHac's `NcaContentType`).
@@ -274,13 +307,22 @@ impl Nca {
     }
 }
 
-/// Opens an NSP: imports the common tickets into `ks` and opens every NCA.
+/// Opens an NSP, or the secure partition of an XCI: imports the common tickets into `ks` and opens every NCA.
+/// `file` names the package in messages.
 pub fn open_nsp(ks: &mut KeySet, pkg: Arc<dyn Storage>) -> Result<Vec<Nca>> {
-    let magic = pkg.read_vec(0x100, 4)?;
-    if &magic == b"HEAD" {
-        return Err(ExtractError::Unsupported("XCI cartridge dumps".into()));
-    }
-    let entries = read_pfs0(pkg.as_ref())?;
+    open_package(ks, pkg, "the package")
+}
+
+/// [`open_nsp`] with the package's file name for the messages.
+pub fn open_package(ks: &mut KeySet, pkg: Arc<dyn Storage>, file: &str) -> Result<Vec<Nca>> {
+    let (pkg, entries) = if pkg.size() > 0x104 && pkg.read_vec(0x100, 4)? == b"HEAD" {
+        let sec = xci_secure(&pkg, file)?;
+        let e = read_hfs0(sec.as_ref())?;
+        (sec, e)
+    } else {
+        let e = read_pfs0(pkg.as_ref())?;
+        (pkg, e)
+    };
     for e in &entries {
         if e.name.to_ascii_lowercase().ends_with(".tik") && e.size >= 0x2c0 {
             let t = pkg.read_vec(e.offset, 0x2c0)?;
@@ -302,9 +344,10 @@ pub fn open_nsp(ks: &mut KeySet, pkg: Arc<dyn Storage>) -> Result<Vec<Nca>> {
             let raw: Arc<dyn Storage> = Arc::new(SubStorage::new(pkg.clone(), e.offset, e.size)?);
             ncas.push(Nca::open(ks, id, raw)?);
         } else if lower.ends_with(".ncz") {
-            return Err(ExtractError::Unsupported(
-                "NSZ packages (compressed NCAs)".into(),
-            ));
+            let id = lower.split('.').next().unwrap_or("").to_string();
+            let raw: Arc<dyn Storage> = Arc::new(SubStorage::new(pkg.clone(), e.offset, e.size)?);
+            let ncz: Arc<dyn Storage> = Arc::new(crate::ncz::NczStorage::open(raw, &id)?);
+            ncas.push(Nca::open(ks, id, ncz)?);
         }
     }
     Ok(ncas)

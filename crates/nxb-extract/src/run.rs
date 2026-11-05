@@ -10,7 +10,7 @@ use crate::cache::{BlockCache, CacheStats};
 use crate::error::{ExtractError, Result};
 use crate::image::ImagePlan;
 use crate::keys::KeySet;
-use crate::nca::{Nca, open_nsp};
+use crate::nca::{Nca, open_package};
 use crate::storage::{FileStorage, Storage};
 use crate::version::{
     base_data, display_version, open_romfs, pick_programs, read_control, read_exefs, title_name,
@@ -42,6 +42,12 @@ pub struct Request {
     pub html: bool,
     /// The split, fused: `(game.tsv, outputs)`, files are scanned from the extract's bytes in memory.
     pub split: Option<(PathBuf, crate::split::SplitOutputs)>,
+    /// The application to read from a package that holds several (`nx_extract --app <title ID>`): its Application
+    /// content meta for the base game and the Patch content meta of `app | 0x800` for each update. None: every
+    /// Application content meta's NCAs are kept and the lowest Program NCA is the game.
+    pub app: Option<u64>,
+    /// Compute the images' digests without writing the images (`RomFS.img` is not created).
+    pub discard_images: bool,
 }
 
 /// What the run did.
@@ -128,6 +134,16 @@ pub fn extract(req: &Request) -> Result<Summary> {
         .map_err(|e| ExtractError::io(format!("read {}", req.keys.display()), e))?;
     let mut ks = KeySet::parse(&text);
     drop(text);
+    // Decoded NCZ streams that do not fit in memory go beside the output (`NXB_TMP` names another folder).
+    let spill = std::env::var_os("NXB_TMP").map(PathBuf::from).or_else(|| {
+        req.out_base
+            .ancestors()
+            .find(|p| p.is_dir())
+            .map(Path::to_path_buf)
+    });
+    if let Some(d) = spill {
+        crate::ncz::set_spill_dir(&d);
+    }
     let cache = Arc::new(BlockCache::new(req.cache_chunks));
     let base_pkg: Arc<dyn Storage> = Arc::new(FileStorage::open(&req.base)?);
     let name = |p: &Path| {
@@ -135,24 +151,24 @@ pub fn extract(req: &Request) -> Result<Summary> {
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default()
     };
-    let base = open_nsp(&mut ks, base_pkg)?;
+    let base = open_package(&mut ks, base_pkg, &name(&req.base))?;
     let (base, base_log) = crate::meta::filter(
         &ks,
         base,
         crate::meta::APPLICATION,
-        None,
+        req.app,
         &name(&req.base),
         &cache,
     )?;
     let mut updates = Vec::new();
     for (u, _) in &req.updates {
         let pkg: Arc<dyn Storage> = Arc::new(FileStorage::open(u)?);
-        let ncas = open_nsp(&mut ks, pkg)?;
+        let ncas = open_package(&mut ks, pkg, &name(u))?;
         updates.push(crate::meta::filter(
             &ks,
             ncas,
             crate::meta::PATCH,
-            None,
+            req.app.map(|a| a | 0x800),
             &name(u),
             &cache,
         )?);
@@ -242,7 +258,7 @@ pub fn extract(req: &Request) -> Result<Summary> {
             plan,
             src,
             keys,
-            discard: false,
+            discard: req.discard_images,
         });
     }
     let t1 = Instant::now();
@@ -394,7 +410,7 @@ pub fn contents(keys: &Path, package: &Path) -> Result<String> {
     let mut ks = KeySet::parse(&text);
     let cache = Arc::new(BlockCache::new(64));
     let pkg: Arc<dyn Storage> = Arc::new(FileStorage::open(package)?);
-    let ncas = open_nsp(&mut ks, pkg)?;
+    let ncas = open_package(&mut ks, pkg, &package.display().to_string())?;
     let mut out = String::new();
     for c in crate::meta::metas(&ks, &ncas, &cache)? {
         let kind = match c.kind {
