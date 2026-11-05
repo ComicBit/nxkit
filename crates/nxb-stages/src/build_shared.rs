@@ -194,7 +194,7 @@ impl Shared {
             )
             .field("msl", src.as_bytes());
         if let Some(o) = own {
-            kb = kb.field_str("frontend", o.tag());
+            kb = kb.field_str("frontend", o.key_field(src.as_bytes()));
         }
         // test hook for the chain-delta benchmark: a compiler identity change
         if let Ok(salt) = std::env::var("NXB_TEST_COMPILER_SALT") {

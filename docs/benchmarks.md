@@ -49,6 +49,7 @@ The Apple front end and the own front end for `own-identical` shaders gave the s
 The sum of the stages is approximately 16:00 with the Apple front end, 15:00 with the own front end for `own-identical` shaders,
 and 12:30 with the own front end for `own-identical` and `own-validated` shaders. The reference build scripts take 23:42.
 This is a factor of approximately 1.5x, 1.6x or 1.9x. These sums use the first archive time (273 s). With the archive time of 207 s, each sum is approximately 1 min shorter (derived). Nobody ran this sum as one process. There is no overlap of stages in this sum.
+The overlap of stages in version 0.3.0 can make a real run shorter than the sum. Nobody timed a cold build with overlap, thus the size of the gain is an estimate.
 
 ## Findings
 
@@ -58,6 +59,16 @@ This is a factor of approximately 1.5x, 1.6x or 1.9x. These sums use the first a
 - With `metal-tt` for each batch, the archive was not faster than the reference build scripts. With `applegpu-nt -j 1` and
   `air-pack` for each batch and one batch for each core, it took 207 s against 257 s. The loader probe found all 18,300 bases.
 - Hardware SHA-256: 1,841 MB/s with the ARMv8 path, 225 MB/s scalar (1 GiB, measured with load).
+
+## Version 0.3.0
+
+- Overlap in `nxb build` (measured, one run, other jobs used the CPU, load 13 to 25): 136.2 s for the old binary and 133.0 s for the new binary.
+  The run reused extract, split and shaders, thus the host, the app parts and the app stage were the critical path in both runs.
+- Raw path (measured, 40 shaders, 105 libraries, `recompile --jobs 4`, load 11 to 18): the median compile CPU time of the 44 raw shaders was 97.5 ms
+  against 109 ms for the same shaders without the raw path (about 11 % less). The whole compile phase took 4.5 s against 5.1 s.
+  The sample is small and the machine had a high load.
+- Estimates, not measured: the gain of the overlap on a cold build. Also 4 to 6 minutes less for a full cold build with the raw path on all shaders.
+  The raw allow list covers about 14 % of the corpus, thus the second estimate does not apply to the list as it is.
 
 ## Estimates
 
