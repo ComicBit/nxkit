@@ -14,6 +14,10 @@ pub struct FileResult {
     pub keys: Vec<(String, Found)>,
     /// `(vertex, pixel, from a BAHS program)`.
     pub pairs: BTreeSet<(String, String, bool)>,
+    /// The Unity type trees this file carries (`extra` of the reference's result).
+    pub trees: crate::unity::ser::Trees,
+    /// A Unity file without type trees: scanned again once every bundle's trees are known.
+    pub defer: bool,
 }
 
 /// `uniq_keys` (files: the first occurrence of a key wins) or the dict comprehension used for `main` (`last`: the
@@ -61,8 +65,83 @@ pub struct Outputs {
     pub pairs: BTreeSet<(String, String)>,
     /// `pso_pairs.tsv` pairs.
     pub pso_pairs: BTreeSet<(String, String)>,
+    /// Single-stage programs: the number of vertex shaders paired and the cover of pixel shaders (their keys).
+    pub single: Option<(usize, Vec<String>)>,
     /// Shaders per stage, per source group.
     pub stats: (BTreeMap<&'static str, usize>, Vec<(String, usize)>),
+}
+
+/// Sources whose every shader is a program of one stage (`SINGLE_STAGE`).
+const SINGLE_STAGE: [&str; 13] = [
+    "#GLSLC@",
+    "#UE",
+    "#MTSPK@",
+    "#MGFX@",
+    "#NLG",
+    "#PGSO",
+    "#RAW@",
+    "#TFXO@",
+    "#NEEDLE@",
+    "#SNOWDROP@",
+    "#PHYRE@",
+    "#SUMO@",
+    "#NVNSH@",
+];
+
+/// The pairs and the cover of `separable_pairs`.
+type SeparablePairs = (BTreeSet<(String, String)>, Vec<String>);
+
+/// `separable_pairs`: every single-stage vertex shader paired with a greedy cover of the pixel shaders' inputs.
+fn separable_pairs(keys: &HashMap<String, &Found>) -> Result<SeparablePairs, SplitError> {
+    let single: Vec<&String> = keys
+        .iter()
+        .filter(|(_, f)| {
+            f.stage == "vs"
+                && SINGLE_STAGE.iter().any(|s| f.place.contains(s))
+                && !f.place.contains("#var")
+        })
+        .map(|(k, _)| k)
+        .collect();
+    if single.is_empty() {
+        return Ok((BTreeSet::new(), Vec::new()));
+    }
+    let mut ins: BTreeMap<&String, BTreeSet<u32>> = BTreeMap::new();
+    for (k, f) in keys.iter().filter(|(_, f)| f.stage == "ps") {
+        let mut s = BTreeSet::new();
+        for i in 0..32u32 {
+            let w = crate::shaders::u32le(&f.code, 0x30 + 4 * (6 + (i as usize >> 2))).ok_or_else(
+                || {
+                    SplitError::Red(format!(
+                        "pixel shader {k}: code area too short for its input map"
+                    ))
+                },
+            )?;
+            if w >> ((i & 3) * 8) & 0xff != 0 {
+                s.insert(i);
+            }
+        }
+        ins.insert(k, s);
+    }
+    let mut left: BTreeSet<u32> = ins.values().flatten().copied().collect();
+    let mut cover: Vec<String> = Vec::new();
+    while !left.is_empty() {
+        let Some((k, _)) = ins
+            .iter()
+            .map(|(k, s)| (k, s.intersection(&left).count()))
+            .min_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)))
+        else {
+            break;
+        };
+        for x in &ins[k] {
+            left.remove(x);
+        }
+        cover.push((*k).clone());
+    }
+    let pairs = single
+        .iter()
+        .flat_map(|v| cover.iter().map(move |p| ((*v).clone(), p.clone())))
+        .collect();
+    Ok((pairs, cover))
 }
 
 fn stage_name(st: &str) -> &'static str {
@@ -115,10 +194,23 @@ pub fn build(p: &Profile, results: &[FileResult]) -> Result<Outputs, SplitError>
         .map(|x| (x.0.clone(), x.1.clone()))
         .filter(|x| !two.contains(x))
         .collect();
-    // separable_pairs: only for single-stage sources, which this port does not read yet
+    let (sp, cover) = separable_pairs(&keys)?;
+    let single = (!cover.is_empty()).then(|| {
+        let n = sp
+            .iter()
+            .map(|x| &x.0)
+            .collect::<std::collections::BTreeSet<_>>()
+            .len();
+        (n, cover)
+    });
     let mut out = Outputs {
-        pairs: two.clone(),
-        pso_pairs: prog.difference(&two).cloned().collect(),
+        pairs: two.union(&sp).cloned().collect(),
+        pso_pairs: prog
+            .difference(&two)
+            .filter(|x| !sp.contains(*x))
+            .cloned()
+            .collect(),
+        single,
         ..Outputs::default()
     };
 
@@ -162,11 +254,18 @@ pub fn build(p: &Profile, results: &[FileResult]) -> Result<Outputs, SplitError>
         ));
         *stat.entry(f.stage).or_default() += 1;
         if f.stage == "cs" {
+            // NVN2: the thread group at +0x58, shared memory from +0x64
+            let at = if crate::shaders::nvn2_ctl(&f.ctl) {
+                0x58
+            } else {
+                0x748
+            };
             let rd = |o: usize| crate::shaders::u32le(&f.ctl, o).unwrap_or(0);
-            let (x, y, z, sh) = (rd(0x748), rd(0x74c), rd(0x750), rd(0x754));
+            let (x, y, z) = (rd(at), rd(at + 4), rd(at + 8));
+            let sh = rd(if at == 0x58 { 0x64 } else { 0x754 });
             if x as u64 * y as u64 * z as u64 == 0 {
                 return Err(SplitError::Red(format!(
-                    "compute shader {k}: control +0x748 thread group is 0 ({})",
+                    "compute shader {k}: control +{at:#x} thread group is 0 ({})",
                     f.place
                 )));
             }

@@ -1,0 +1,43 @@
+//! Produced by tools/gen_xlate_decoders.py from InstDecoders.cs: do not edit.
+#![allow(non_upper_case_globals, non_camel_case_types, dead_code, unused_parens, clippy::all)]
+
+mod insts_0;
+pub use insts_0::*;
+mod insts_1;
+pub use insts_1::*;
+mod insts_2;
+pub use insts_2::*;
+mod insts_3;
+pub use insts_3::*;
+mod insts_4;
+pub use insts_4::*;
+mod insts_5;
+pub use insts_5::*;
+mod insts_6;
+pub use insts_6::*;
+mod insts_7;
+pub use insts_7::*;
+mod insts_8;
+pub use insts_8::*;
+mod insts_9;
+pub use insts_9::*;
+mod insts_10;
+pub use insts_10::*;
+mod insts_11;
+pub use insts_11::*;
+mod insts_12;
+pub use insts_12::*;
+mod insts_13;
+pub use insts_13::*;
+mod insts_14;
+pub use insts_14::*;
+mod insts_15;
+pub use insts_15::*;
+mod insts_16;
+pub use insts_16::*;
+mod insts_17;
+pub use insts_17::*;
+mod insts_18;
+pub use insts_18::*;
+mod insts_19;
+pub use insts_19::*;

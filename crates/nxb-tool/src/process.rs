@@ -76,7 +76,7 @@ impl ProcessRegistry {
     }
 
     /// Add a group, false (and the group is killed) when the run is already cancelled.
-    fn register(&self, pgid: u32) -> bool {
+    pub(crate) fn register(&self, pgid: u32) -> bool {
         let mut g = self.lock();
         if g.cancelled {
             let _ = nxb_sys::process::kill_group(pgid, nxb_sys::process::Signal::Kill);
@@ -86,7 +86,7 @@ impl ProcessRegistry {
         true
     }
 
-    fn unregister(&self, pgid: u32) {
+    pub(crate) fn unregister(&self, pgid: u32) {
         self.lock().live.remove(&pgid);
     }
 }

@@ -27,6 +27,8 @@ pub enum StoreError {
     WrongFormat(String),
     /// Another holder has a conflicting lock on this store root or output directory.
     Locked(PathBuf),
+    /// A cache export file is damaged, truncated or not a cache export.
+    BadExport(String),
 }
 
 impl StoreError {
@@ -52,7 +54,9 @@ impl StoreError {
     pub fn class(&self) -> ErrorClass {
         match self {
             _ if self.env().is_some() => ErrorClass::Env,
-            StoreError::WrongFormat(_) | StoreError::Locked(_) => ErrorClass::Build,
+            StoreError::WrongFormat(_) | StoreError::Locked(_) | StoreError::BadExport(_) => {
+                ErrorClass::Build
+            }
             _ => ErrorClass::Internal,
         }
     }
@@ -67,6 +71,7 @@ impl fmt::Display for StoreError {
             StoreError::BadName(n) => write!(f, "store: file name {n:?} is not allowed"),
             StoreError::MissingBlob(d) => write!(f, "store: blob {d} is missing"),
             StoreError::WrongFormat(s) => write!(f, "store: unknown format {s:?}"),
+            StoreError::BadExport(s) => write!(f, "cache export: {s}"),
             StoreError::Locked(p) => write!(f, "another build is using {}", p.display()),
         }
     }

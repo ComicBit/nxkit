@@ -76,6 +76,8 @@ fn reference_extract_and_split_match_python() {
         split: Some((game, outputs)),
         app: None,
         discard_images: false,
+        allow_damaged: false,
+        manifest: false,
     };
     assert!(nxb_extract::extract(&req).is_ok());
     let mut checked = 0;

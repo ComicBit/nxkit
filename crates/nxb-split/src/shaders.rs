@@ -210,7 +210,12 @@ pub(crate) fn sph_stage(code: &[u8]) -> Option<&'static str> {
     }
 }
 
-fn span<'a>(d: &'a [u8], at: usize, n: usize, place: &str) -> Result<&'a [u8], SplitError> {
+pub(crate) fn span<'a>(
+    d: &'a [u8],
+    at: usize,
+    n: usize,
+    place: &str,
+) -> Result<&'a [u8], SplitError> {
     d.get(at..at.saturating_add(n)).ok_or_else(|| {
         SplitError::Red(format!(
             "{place}: {n:#x} bytes at {at:#x} lie outside the {:#x} bytes there are",
@@ -325,7 +330,7 @@ pub fn sarc_members<'a>(d: &'a [u8], label: &str) -> Result<Vec<(String, &'a [u8
     Ok(out)
 }
 
-fn find_all<'a>(d: &'a [u8], pat: &'a [u8]) -> impl Iterator<Item = usize> + 'a {
+pub(crate) fn find_all<'a>(d: &'a [u8], pat: &'a [u8]) -> impl Iterator<Item = usize> + 'a {
     // non-overlapping left-to-right matches, as re.finditer
     let mut i = 0usize;
     std::iter::from_fn(move || {
@@ -355,15 +360,6 @@ pub fn memfind(d: &[u8], pat: &[u8]) -> Option<usize> {
     None
 }
 
-/// The markers of readers this port does not have yet, a blob holding one is an `Unsupported` error, never a silent
-/// difference (`scan_blob`'s other branches).
-const OTHER_MARKERS: [&[u8]; 4] = [
-    b"SLCT\x03\x10\0\0",
-    b"NVNsh\0",
-    b"Ninty_NX\0\0\0\0\0\0\0\0",
-    b"HNSHV002",
-];
-
 /// `scan_blob` for the containers this port reads (SARC, BAHS, BNSH).`left` is the expansion budget.
 pub fn scan_blob(
     d: &[u8],
@@ -392,17 +388,23 @@ fn scan_blob_in(
         )));
     }
     let head = d.get(..4).unwrap_or(&[]);
-    if head == b"NARC"
-        || head == b"HCPS"
-        || head == b"xbc1"
-        || head == b"DRSM"
-        || head == b"MSHD"
-        || head == b"NDSR"
-    {
-        return Err(SplitError::Unsupported(format!(
-            "{label}: container {:?}",
-            String::from_utf8_lossy(head)
-        )));
+    if crate::sumo::is_mux(d) {
+        let members = crate::sumo::sumo_members(d, label)?;
+        let total: usize = members.iter().map(|m| m.1.len()).sum();
+        // as with Yaz0, decoded bytes are what the budget counts
+        if left.is_none() {
+            *left = Some([(NEST * total) as i64; 2]);
+        }
+        for (nm, m) in members {
+            scan_blob_in(&m, &format!("{label}{nm}"), out, var, depth + 1, left)?;
+        }
+        return Ok(());
+    }
+    if head == b"HCPS" || head == b"xbc1" || head == b"DRSM" || d.get(..8) == Some(b"cmp\0zlib") {
+        return crate::monolith::monolith_shaders(d, label, out);
+    }
+    for at in find_all(d, b"SLCT\x03\x10\0\0").collect::<Vec<_>>() {
+        out.extend(crate::monolith::slct_shaders(d, at, label)?);
     }
     let stored = d.len() as i64;
     let decoded;
@@ -440,31 +442,52 @@ fn scan_blob_in(
         }
         return Ok(());
     }
+    if head == b"NARC" {
+        // Camelot's containers: each member is packed by its first byte, so its size says nothing about the budget
+        for (i, m) in crate::narc::narc_members(d, label)?.into_iter().enumerate() {
+            let m = crate::narc::undo(m)?;
+            scan_blob_in(&m, &format!("{label}/{i}"), out, var, depth + 1, &mut None)?;
+        }
+        return Ok(());
+    }
     if head == b"BAHS" {
         out.extend(bahs_shaders(d, label, var)?);
         return Ok(());
     }
-    // `mgfx_effect` reads an effect only after 'MGFX' + version 5 or 8, other matches (four bytes in any data) give none
-    for at in find_all(d, b"MGFX") {
-        if matches!(d.get(at + 4), Some(5) | Some(8)) {
-            return Err(SplitError::Unsupported(format!(
-                "{label}: a MonoGame effect (MGFX)"
-            )));
-        }
+    if head == b"NDSR" {
+        out.extend(crate::engines::ndsr_shaders(d, label, var)?);
+        return Ok(());
     }
-    if label.ends_with(".xnb")
-        && d.get(..0x200.min(d.len()))
-            .is_some_and(|h| memfind(h, b"EffectReader").is_some())
+    let prim = crate::engines::sead_prim_shaders(d, label);
+    if !prim.is_empty() {
+        out.extend(prim);
+        return Ok(());
+    }
+    if crate::misc::is_tfxo(d) {
+        out.extend(crate::misc::tfxo_shaders(d, label)?);
+        return Ok(());
+    }
+    if head == b"MSHD" {
+        out.extend(crate::engines::mshd_shaders(d, label)?);
+        return Ok(());
+    }
+    if head == b"DAT\0"
+        && d.len() >= 0x1c
+        && let Some(members) = crate::engines::pgdat_members(d)?
     {
-        return Err(SplitError::Unsupported(format!("{label}: an XNB effect")));
-    }
-    for m in OTHER_MARKERS {
-        if memfind(d, m).is_some() {
-            return Err(SplitError::Unsupported(format!(
-                "{label}: holds a {:?} marker",
-                String::from_utf8_lossy(m)
-            )));
+        for (nm, m) in members {
+            scan_blob_in(m, &format!("{label}/{nm}"), out, var, depth + 1, left)?;
         }
+        return Ok(());
+    }
+    if let Some(st) = crate::engines::pg_object_stage(d) {
+        out.extend(crate::engines::pg_shader(d, label, st)?);
+        return Ok(());
+    }
+    let sized = crate::engines::pg_sized_shader(d, label)?;
+    if !sized.is_empty() {
+        out.extend(sized);
+        return Ok(());
     }
     for at in find_all(d, b"BNSH\0\0\0\0").collect::<Vec<_>>() {
         if at + 0x20 > d.len() {
@@ -474,6 +497,13 @@ fn scan_blob_in(
         if at + size <= d.len() && d.get(at + 0x60..at + 0x64) == Some(b"grsc") {
             out.extend(bnsh_shaders(d, at, label)?);
         }
+    }
+    if memfind(d, b"MGFX").is_some() {
+        out.extend(crate::mgfx::mgfx_shaders(d, label)?);
+    }
+    out.extend(crate::misc::needle_shaders(d, label)?);
+    if memfind(d, b"Ninty_NX\0\0\0\0\0\0\0\0").is_some() || memfind(d, b"NVNsh\0").is_some() {
+        out.extend(crate::sumo::sumo_shaders(d, label)?);
     }
     Ok(())
 }

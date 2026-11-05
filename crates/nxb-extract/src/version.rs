@@ -72,12 +72,23 @@ pub fn open_romfs(
     update: Option<&Nca>,
     cache: &Arc<BlockCache>,
 ) -> Result<VersionFs> {
+    open_romfs_with(ks, base_data, update, cache, false)
+}
+
+/// [`open_romfs`]; with `lenient` (`--allow-damaged`) data blocks that fail their hash are read as they are.
+pub fn open_romfs_with(
+    ks: &KeySet,
+    base_data: Option<(Arc<dyn Storage>, crate::nca::FsHeader)>,
+    update: Option<&Nca>,
+    cache: &Arc<BlockCache>,
+    lenient: bool,
+) -> Result<VersionFs> {
     match update {
         None => {
             let (data, fs) = base_data.ok_or_else(|| {
                 ExtractError::Unsupported("program without a data section".into())
             })?;
-            let ivfc = Arc::new(IvfcStorage::open(data, &fs)?);
+            let ivfc = Arc::new(IvfcStorage::open_with(data, &fs, lenient)?);
             let entries = read_tables(ivfc.as_ref())?;
             Ok(VersionFs {
                 fs: ivfc,
@@ -105,7 +116,7 @@ pub fn open_romfs(
             )?;
             let ind = Arc::new(ind);
             let view: Arc<dyn Storage> = ind.clone();
-            let ivfc = Arc::new(IvfcStorage::open(view, &fs)?);
+            let ivfc = Arc::new(IvfcStorage::open_with(view, &fs, lenient)?);
             let entries = read_tables(ivfc.as_ref())?;
             Ok(VersionFs {
                 fs: ivfc,
@@ -171,6 +182,10 @@ pub fn read_exefs(
     let data = read_sha256_section(sec.as_ref(), &fs)?;
     let mem = MemStorage(data);
     let list: Vec<PfsEntry> = read_pfs0(&mem)?;
+    // names are checked before any is used as a file name (`ExeFS/<name>`)
+    for e in &list {
+        crate::safe_path::rel("ExeFS", &e.name, true)?;
+    }
     list.into_iter()
         .map(|e| Ok((e.name, mem.read_vec(e.offset, e.size as usize)?)))
         .collect()

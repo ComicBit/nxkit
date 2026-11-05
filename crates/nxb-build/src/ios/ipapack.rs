@@ -76,6 +76,14 @@ pub fn plan(st: &State, i: &Inputs, app: &Path, say: &mut dyn FnMut(&str)) -> Re
     .iter()
     .map(|s| format!("{P}/{s}"))
     .collect();
+    if !st.progs.is_empty() {
+        if i.copy_romfs.as_deref() == Some("NO") {
+            return Err(die(
+                "DM_COPY_ROMFS=NO: a game of several programs keeps its programs' files in the app",
+            ));
+        }
+        return super::ipaprog::plan(st, i, app, skip, P, say);
+    }
     let romfs = &st.romfs;
     let rd = Path::new(romfs)
         .parent()
@@ -94,28 +102,13 @@ pub fn plan(st: &State, i: &Inputs, app: &Path, say: &mut dyn FnMut(&str)) -> Re
         );
         if is_file {
             mkdir_p(&st.o)?;
-            let py = i.engine.join("dm/tools/romfs_image.py");
-            let id = st
-                .runner
-                .run(
-                    "python3",
-                    [
-                        "-I",
-                        &py.to_string_lossy(),
-                        "--identity",
-                        romfs,
-                        &i.game,
-                        &st.app_version,
-                        &st.pkg,
-                    ],
-                    None,
-                )
-                .map_err(|_| die(format!("identity of {romfs}")))?
-                .stdout;
+            let id = super::romfs::identity(Path::new(romfs), &i.game, &st.app_version, &st.pkg)
+                .map(|l| format!("{l}\n"))
+                .map_err(|_| die(format!("identity of {romfs}")))?;
             let f = st.o.join("romfs.id");
             std::fs::write(&f, &id).map_err(|_| die(format!("identity of {romfs}")))?;
             maps.push((format!("{P}/romfs.id"), f));
-            let shown = String::from_utf8_lossy(&id);
+            let shown = &id;
             say(&format!(
                 "game files identity: {}",
                 shown.trim_end_matches('\n')
@@ -177,12 +170,19 @@ pub fn plan(st: &State, i: &Inputs, app: &Path, say: &mut dyn FnMut(&str)) -> Re
             .collect::<HashSet<_>>(),
         skip_suffix,
         compress: nxb_pack::ipa::ZLIB,
+        reuse: true,
     };
     Ok((maps, skip, o))
 }
 
 /// Build, sign and pack: the IPA path.
 pub fn build(st: &State, i: &Inputs, say: &mut dyn FnMut(&str)) -> Result<PathBuf, String> {
+    let app = build_app(st, i, say)?;
+    pack_ipa(st, i, &app, say)
+}
+
+/// `xcodebuild` and the ad-hoc signature with the entitlements: the app, ready to pack.
+pub fn build_app(st: &State, i: &Inputs, say: &mut dyn FnMut(&str)) -> Result<PathBuf, String> {
     let r = &st.runner;
     say("xcodebuild (Release, unsigned, iPhone + iPad)");
     mkdir_p(&st.o)?;
@@ -228,55 +228,40 @@ pub fn build(st: &State, i: &Inputs, say: &mut dyn FnMut(&str)) -> Result<PathBu
             let _ = std::fs::remove_file(&old);
         }
     }
+    // route C: the framework is signed first, then the app's executable, the order for nested code
+    if st.framework {
+        super::ipafw::sign_framework(&app, say)?;
+    }
     if i.entitlements.as_deref() != Some("") {
         let ent = st.o.join("DmIOS.entitlements");
         entitlements(i, &ent)?;
-        let mut exe = app.join("DmIOS");
-        let info = app.join("Info.plist");
-        if info.is_file() {
-            let name = r
-                .stdout(
-                    "/usr/libexec/PlistBuddy",
-                    [
-                        "-c".as_ref(),
-                        "Print :CFBundleExecutable".as_ref(),
-                        info.as_os_str(),
-                    ],
-                    None,
-                )
-                .map_err(|_| die(format!("CFBundleExecutable of {}", app.display())))?;
-            exe = app.join(name.trim_end_matches('\n'));
-        }
-        let _ = r.run("xattr", ["-cr".as_ref(), exe.as_os_str()], None);
-        r.run(
-            "codesign",
-            [
-                "--force".as_ref(),
-                "--sign".as_ref(),
-                "-".as_ref(),
-                "--entitlements".as_ref(),
-                ent.as_os_str(),
-                exe.as_os_str(),
-            ],
-            None,
-        )
-        .map_err(|_| die("ad-hoc signature with the entitlements"))?;
-        r.run(
-            "codesign",
-            [
-                "-d".as_ref(),
-                "--entitlements".as_ref(),
-                "-".as_ref(),
-                exe.as_os_str(),
-            ],
-            None,
-        )
-        .map_err(|_| die("the executable's signature has no entitlements"))?;
+        // `codesign --force --sign - --entitlements E App.app/Exe` seals the whole app and signs its executable: the
+        // own signer writes the same bytes (tests/oracle.rs of nxb-pack)
+        let ent_xml = std::fs::read(&ent).map_err(|_| die("entitlements"))?;
+        let opts = nxb_pack::bundle::BundleOptions {
+            entitlements: Some(ent_xml),
+            sign_nested: !st.framework,
+            ..nxb_pack::bundle::BundleOptions::default()
+        };
+        nxb_pack::bundle::sign_bundle(&app, &opts)
+            .map_err(|e| die(format!("ad-hoc signature with the entitlements ({e})")))?;
         say(
             "entitlements in the executable's ad-hoc signature (the install tool re-signs and keeps them)",
         );
     }
-    let (maps, _, o) = plan(st, i, &app, say)?;
+    Ok(app)
+}
+
+/// The IPA from the built app and the game's files (`pack_ipa.py`, with the reuse of the previous IPA).
+pub fn pack_ipa(
+    st: &State,
+    i: &Inputs,
+    app: &Path,
+    say: &mut dyn FnMut(&str),
+) -> Result<PathBuf, String> {
+    let r = &st.runner;
+    let out = &st.out_ipa;
+    let (maps, _, o) = plan(st, i, app, say)?;
     let n = nxb_pack::ipa::pack(out, &maps, &o).map_err(|e| die(format!("pack_ipa ({e})")))?;
     say(&format!("pack: {n} entries"));
     say(&format!(

@@ -1,0 +1,42 @@
+# nxb rewrite rules (generated from the engine's patch files). Private data: instruction words of game code.
+
+scope = "0100B7C00933A000"
+
+[[build]]
+row = ["build", "v262144", "1.1.1", "main=060f827bd2b38703e9ea11e3210d89bc", "subsdk0=38933ad31c05c6e648f8c5c540bfc5db", "sdk=30a1e87b52f5a2ac9879685cbfb93d7c"]
+
+[[rule]]
+binding = "build"
+kind = "cut"
+build = "060f827bd2b38703e9ea11e3210d89bc"
+offset = 55833964
+old = "e81361b2"
+new = "08c0bfd2"
+why = "nninitStartup: the engine region's default size orr x8,xzr,#0xf80000000 (62 GB) → mov x8,#0xfe000000 (4064 MB)"
+
+[[rule]]
+binding = "build"
+kind = "cut"
+build = "060f827bd2b38703e9ea11e3210d89bc"
+offset = 55833976
+old = "e11361b2"
+new = "01c0bfd2"
+why = "nninitStartup: AllocateAddressRegion size orr x1,xzr,#0xf80000000 (62 GB) → mov x1,#0xfe000000 (4064 MB)"
+
+[[rule]]
+binding = "build"
+kind = "cut"
+build = "060f827bd2b38703e9ea11e3210d89bc"
+offset = 55834504
+old = "a2eb0194"
+new = "1f2003d5"
+why = "GCreateMalloc: bl 0x35ba610 (FMallocBinned3 constructor) → nop; the host allocator's vtable is put in at the gate after it (hle_uemalloc.c)"
+
+[[rule]]
+binding = "build"
+kind = "obs"
+build = "060f827bd2b38703e9ea11e3210d89bc"
+offset = 55834508
+number = 21
+original = "a9417bfd"
+why = "GCreateMalloc: the allocator object is in x19, before it is used: the host puts its vtable in; orig ldp x29, x30, [sp, #0x10]"

@@ -36,9 +36,49 @@ pub fn core_counts() -> CoreCounts {
     }
 }
 
+/// Whether the file system holding `path` is APFS (`statfs` `f_fstypename`).`false` when unknown.
+pub fn is_apfs(path: &std::path::Path) -> bool {
+    imp::fs_type(path).is_some_and(|t| t == "apfs")
+}
+
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 mod imp {
-    use std::ffi::{CStr, c_char, c_void};
+    use std::ffi::{CStr, CString, c_char, c_void};
+    use std::os::unix::ffi::OsStrExt;
+
+    /// Darwin's `struct statfs` (64-bit inode layout).
+    #[repr(C)]
+    struct Statfs {
+        bsize: u32,
+        iosize: i32,
+        counts: [u64; 5],
+        fsid: [i32; 2],
+        owner: u32,
+        ftype: u32,
+        flags: u32,
+        fssubtype: u32,
+        fstypename: [c_char; 16],
+        mntonname: [c_char; 1024],
+        mntfromname: [c_char; 1024],
+        reserved: [u32; 8],
+    }
+
+    unsafe extern "C" {
+        fn statfs(path: *const c_char, buf: *mut Statfs) -> i32;
+    }
+
+    pub(super) fn fs_type(path: &std::path::Path) -> Option<String> {
+        let p = CString::new(path.as_os_str().as_bytes()).ok()?;
+        // SAFETY: a zeroed statfs is a valid value of this plain C struct.
+        let mut s: Statfs = unsafe { std::mem::zeroed() };
+        // SAFETY: `p` is NUL-terminated and `s` is writable for the call.
+        if unsafe { statfs(p.as_ptr(), &mut s) } != 0 {
+            return None;
+        }
+        // SAFETY: the kernel NUL-terminates f_fstypename.
+        let n = unsafe { CStr::from_ptr(s.fstypename.as_ptr()) };
+        Some(n.to_string_lossy().into_owned())
+    }
 
     unsafe extern "C" {
         fn sysctlbyname(
@@ -88,6 +128,10 @@ mod imp {
 
 #[cfg(not(any(target_os = "macos", target_os = "ios")))]
 mod imp {
+    pub(super) fn fs_type(_path: &std::path::Path) -> Option<String> {
+        None
+    }
+
     pub(super) fn memsize() -> Option<u64> {
         None
     }

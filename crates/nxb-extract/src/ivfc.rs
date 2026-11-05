@@ -42,6 +42,9 @@ pub struct IvfcStorage {
     hashes: Vec<u8>,
     tail: Tail,
     checked: Vec<AtomicU64>,
+    /// `--allow-damaged`: a block that fails its hash is returned as read and remembered in `bad`.
+    lenient: bool,
+    bad: std::sync::Mutex<std::collections::BTreeSet<u64>>,
 }
 
 fn check_level(level: &[u8], bs: usize, expected: &[u8], tail: Tail) -> bool {
@@ -54,6 +57,16 @@ fn check_level(level: &[u8], bs: usize, expected: &[u8], tail: Tail) -> bool {
 impl IvfcStorage {
     /// Opens the IVFC levels described by `fs` over the decrypted section `section`.
     pub fn open(section: Arc<dyn Storage>, fs: &FsHeader) -> Result<IvfcStorage> {
+        Self::open_with(section, fs, false)
+    }
+
+    /// Like [`IvfcStorage::open`]; with `lenient` a data block that fails its hash is read as it is and listed by
+    /// [`IvfcStorage::damaged_in`] (the hash levels above the data must still pass).
+    pub fn open_with(
+        section: Arc<dyn Storage>,
+        fs: &FsHeader,
+        lenient: bool,
+    ) -> Result<IvfcStorage> {
         let h = &fs.raw;
         if fs.hash_type != 3 || h.get(8..12) != Some(b"IVFC") {
             return Err(ExtractError::format("section has no IVFC hash tree"));
@@ -120,7 +133,33 @@ impl IvfcStorage {
             hashes: expected,
             tail,
             checked,
+            lenient,
+            bad: std::sync::Mutex::new(std::collections::BTreeSet::new()),
         })
+    }
+
+    /// Reads (and so checks) the whole data level of a lenient storage. Returns the number of damaged blocks.
+    pub fn scan(&self) -> Result<usize> {
+        let mut buf = vec![0u8; (self.bs as usize) * 64];
+        let mut off = 0u64;
+        while off < self.size {
+            let n = (buf.len() as u64).min(self.size - off) as usize;
+            self.read_at(off, &mut buf[..n])?;
+            off += n as u64;
+        }
+        Ok(self.bad.lock().map(|b| b.len()).unwrap_or(0))
+    }
+
+    /// True when a damaged block (found by earlier reads) overlaps `[offset, offset + len)`.
+    pub fn damaged_in(&self, offset: u64, len: u64) -> bool {
+        if len == 0 {
+            return false;
+        }
+        let (a, b) = (offset / self.bs, (offset + len - 1) / self.bs);
+        self.bad
+            .lock()
+            .map(|s| s.range(a..=b).next().is_some())
+            .unwrap_or(false)
     }
 
     fn is_checked(&self, b: u64) -> bool {
@@ -165,7 +204,12 @@ impl Storage for IvfcStorage {
                     block_hash(&block, self.bs as usize, self.tail)
                 });
                 if self.hashes[(32 * b) as usize..(32 * b + 32) as usize] != hash {
-                    return Err(ExtractError::Damaged(Vec::new()));
+                    if !self.lenient {
+                        return Err(ExtractError::Damaged(Vec::new()));
+                    }
+                    if let Ok(mut s) = self.bad.lock() {
+                        s.insert(b);
+                    }
                 }
                 self.checked[(b / 64) as usize].fetch_or(1 << (b % 64), Ordering::AcqRel);
                 dst.copy_from_slice(&block[(from - bstart) as usize..(to - bstart) as usize]);

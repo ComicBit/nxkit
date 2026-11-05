@@ -1,0 +1,19 @@
+[package]
+name = "nxb-profile"
+description = "The per-game profile as data: computed, declared and rules sections, a TOML reader and writer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[package.metadata.nxb]
+layer = "L2"
+in_v = false
+
+[dependencies]
+
+[dev-dependencies]
+
+[lints]
+workspace = true

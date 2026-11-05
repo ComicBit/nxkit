@@ -21,6 +21,7 @@ const SIDEWAYS: &[(&str, &str)] = &[
     ("nxb-model", "nxb-sys"),
     ("nxb-air", "nxb-shader"),
     ("nxb-shader", "nxb-pyjson"),
+    ("nxb-xlate", "nxb-pyjson"),
     ("nxb-hos", "nxb-romfs"),
     ("nxb-hos", "nxb-crypto"),
     ("nxb-hos", "nxb-codec"),

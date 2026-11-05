@@ -9,8 +9,9 @@ The shader step changes the GPU machine code of a game into Metal libraries. The
    This applies to orchestration, passes, reflection, variants, guards and the store.
 2. The tests compare the last output files (`.metallib`, `.json`, `.metal`, tables), not `.air` files.
    The `.air` bytes can differ when the libraries are byte-identical (measured on 300 of 300 libraries).
-3. **Front-end rule.** The own front end changes bytes by design. It ships only with a new chain version, evidence for each
-   shader and a fallback to the Apple front end for each shader (refer to [frontend.md](frontend.md)).
+3. **Front-end rule.** The own front end changes bytes by design. It ships with a new chain version and a fallback to the Apple front end for each shader
+   (refer to [frontend.md](frontend.md)). The own-identical tier has proof for each shader. **The raw tier has no proof for each shader since 0.4.0.**
+   It is the one exception to the rule: it is on for all shaders, and only a part of the corpus has a GPU test (refer to the section on the raw tier).
 4. A port and a front-end change are not in the same pull request.
 
 ## Interfaces
@@ -18,7 +19,8 @@ The shader step changes the GPU machine code of a game into Metal libraries. The
 | interface | contract |
 |---|---|
 | input from the split | package files `<stage>_<group>.bin` (`BTCDBTCD` records) and the tables `shader_map.tsv`, `shader_facts.tsv`, `shader_pairs.tsv`, `pso_pairs.tsv` |
-| translator | the `Translator` trait in `nxb-tool`. One call translates a batch of tasks. Each task has the job JSON of the reference build scripts. |
+| translator | the `Translator` trait in `nxb-tool`. One call translates a batch of tasks. Each task has the job JSON of the reference build scripts. The implementations are the Rust translator, the translator host and the process bridge (see the section on the translator choice) |
+| output of the translator | `<key>.spv` and `<key>.res.json`. The Rust translator also writes `<key>.iface.json` (the `ShaderInterface`) |
 | output to the pack stage | `b-<V>/` folders, `inputs.tsv`, `_b_build.json`, `_b_cas.txt`, `c1_full.tsv`, `cb_extent.tsv`, the reuse keys |
 | output to the archive stage | `pso_pairs.tsv` and the reflection fields `entry`, `entry_z`, `pull`, `vertex_inputs`, `raster.primitive_id`, `bindings` |
 | progress | NDJSON events |
@@ -29,8 +31,9 @@ The shader step changes the GPU machine code of a game into Metal libraries. The
 flowchart LR
   IN["package records and tables"] --> R["read record"] --> D["decode NVN"] --> K["cache key"]
   K -->|hit| H["restore from manifest"]
-  K -->|miss| T["translate in batches"] --> X["spirv-cross"] --> W["MSL passes"]
+  K -->|miss| T["translate: Rust, else C#"] --> X["spirv-cross"] --> W["MSL passes"]
   W --> FE{"front end for this shader"}
+  FE -->|raw, all shaders| RW["raw path"] --> ML
   FE -->|own, permitted| OF["own front end"] --> BH["Apple back half"]
   FE -->|Apple, fallback| AF["metal -c -O1 with PCH"]
   BH & AF --> ML["metallib for each target"]
@@ -42,6 +45,60 @@ flowchart LR
 The reference build scripts do the cache checks in series, then all translations, then two thread-pool passes.
 The shader step streams: each shader goes to the next task when its inputs are ready. The only real dependencies are the
 vertex shaders that wait for their pixel shaders (`vs_pad`) and the summary at the end.
+
+## Translator choice
+
+The step has three ways to translate one key. It tries them in this sequence for each key:
+
+1. **The Rust translator** (`nxb-xlate`, `nxb-maxwell` and `nxb-spvgen`). It runs in the process. It is on by default.
+   `--xlate-rust off` (for `shaderbuild build`) or `NXB_XLATE_RUST=0` (also for `nxb build`) turns it off.
+   A key that it cannot do returns an error that starts with `unported:`. A panic is caught. In both cases, the key goes to the next way. The step counts each reason (`rust unported`, `rust error`, `rust panic`).
+2. **The translator host.** One process loads the C# translator and does the work of many batches. It is the default when the program `dmsh_xlate_host` is next to `dmsh_xlate`.
+   `--xlate-host "PROGRAM [ARGS]"` or `NXB_XLATE_HOST` selects it, and `--xlate-host off` or `NXB_XLATE_HOST=off` turns it off. The host has a watchdog of 60 s plus 10 s for each key.
+   A host that fails or hangs is killed and started again. After more than 6 restarts, a failed start or no answer to a ping in 10 s, the step stops to use the host. The counters for starts, restarts and fallbacks are in the run report.
+3. **The process bridge.** One C# process for each batch, as the reference build scripts do. It divides a bad batch until each bad key is alone.
+
+All three ways give the same bytes for the keys that were compared. The translation cache identity does not change, because the output is byte-identical. A key without a way that works is `translation failed`.
+
+What the Rust translator does not do (the key goes to the C# translator):
+
+- Geometry, tessellation, transform feedback and vertex shaders as compute. No local title has these (only one geometry shader exists in the corpus), thus nobody ported them without a corpus.
+- The function match for the fragment interlock.
+- The helper functions for the shared store of small integers with a compare and swap (`SharedStoreSmallIntCas`).
+- Some Ampere encodings.
+- Task and mesh shaders. The job writer refuses them.
+
+Evidence (measured, SPIR-V and `res.json` compared byte for byte with the C# translator, first-attempt jobs only):
+
+| corpus | keys | identical |
+|---|---|---|
+| reference title (Maxwell) | 16,268 | 16,268 |
+| second title (Maxwell) | 19,592 | 19,592 |
+| third title (Maxwell) | 28,669 | 28,669 |
+| Switch 2 title (Ampere) | 42,331 | 42,299. The 17 compute keys that fail in the C# translator also, and 15 keys with `SharedStoreSmallIntCas` go to the C# path |
+
+An earlier test with 802 jobs gave 802 of 802 identical with the host and with the process bridge.
+The rates count first-attempt jobs. Jobs that the C# translator tries again with another option (guessed image types, a geometry reader) are not in the rates. The retry with 64-bit float helpers is in the rates.
+The Ampere path is checked on one title.
+
+Time (measured, a subset of 160 keys or 261 shaders, load average about 10, own front end off): 16 s with the process bridge, 17 s with the Rust translator, and 20.2 s with the host against 20.7 s without it.
+There is no gain in this subset, because the Metal compile dominates. The translator part alone is faster: 802 jobs took 1.0 to 1.7 s with the host against 6.3 to 8.4 s with 19 process starts.
+In a full cold build, the number of .NET starts changes from 667 to about 1. That is an **estimate**. Nobody measured a full build with the host or with the Rust translator.
+
+## Shader interface
+
+For each key, the Rust translator writes `<key>.iface.json` next to `<key>.res.json`. It is the typed `ShaderInterface` (version 1) of the shader. It has these parts:
+
+- the bindings (constant buffers, storage buffers with their address words, textures and images, and the source of each handle),
+- the handle words that the host must fill,
+- the fragment outputs for each target (component masks and the type of the job),
+- the integer vertex inputs and `frag_coord`,
+- the flags for render scale,
+- the local size and the shared memory of a compute shader,
+- the geometry stride and the fetch of 1D textures.
+
+`dual_source_candidate` is true when targets 0 and 1 are written. Only the blend state decides if the shader is a dual-source shader. The interface works for each translator that writes a `res.json`.
+Tests: derived facts, a round trip of the schema, a refusal of a different version and a round trip of 802 `res.json` files. The host does not read the file yet.
 
 ## Versions and keys
 
@@ -83,7 +140,7 @@ each SDK path one time for each target. The step then calls the tools directly. 
 | tool | variables |
 |---|---|
 | `metal`, `metallib` | `SDKROOT` (from `xcrun -sdk macosx` or `-sdk iphoneos --show-sdk-path`), `PATH`, `TMPDIR`, `HOME` |
-| translator | `DOTNET_ROOT` (if set), `HOME`, `TMPDIR`, `PATH`, `DOTNET_CLI_TELEMETRY_OPTOUT=1`, `XLATE_DEBUG`, `XLATE_REDUCED` |
+| C# translator (host or process bridge) | `DOTNET_ROOT` (if set), `HOME`, `TMPDIR`, `PATH`, `DOTNET_CLI_TELEMETRY_OPTOUT=1`, `XLATE_DEBUG`, `XLATE_REDUCED`. The Rust translator needs none of these |
 | `spirv-cross` | `PATH`, `TMPDIR` |
 
 The step does not pass `DEVELOPER_DIR`, `TOOLCHAINS`, `MTL_*`, `METAL_*`, `CLANG_*`, `CCC_*`, `LLVM_*`, `CPATH`,
@@ -114,24 +171,33 @@ maximum of 2 x log2(batch) runs for each bad key. For the other tools, a crash o
 ## Raw container tier
 
 The raw tier (`own-raw`) is the first tier of the own front end in `build` and `recompile`. It is for the Mac target only.
-For a shader on its allow list, the step calls `air_front::build_raw` in the same process. This call does the front end,
+For a shader, the step calls `air_front::build_raw` in the same process. This call does the front end,
 the split of the entries, the optimizer, the bitcode writer and the library writer. It uses no Apple tool and starts no process.
 
-- **Allow list.** A shader takes the raw path only when the SHA-256 of its MSL is in `raw-verified.txt` for the id of the front end.
-  Each entry passed the GPU differential test: 12 test vectors gave the same output words as Apple's library.
-  The list has 3,365 entries. The list is not in this repository. Without a list, the tier is off.
-- **Fallback.** If the raw path rejects a shader or fails, the shader goes to the next tier. The next tiers are the own `own-identical`
-  path and then Apple's `metal -c` with `metallib`. A shader that is not on the list keeps its path and its cache key.
-- **Cache key.** A raw shader has the key field `own-raw@` and the front-end id. A raw library is thus never given to a run with the tier off.
-- **Switches.** `NXB_OWN_RAW=0` turns only the raw tier off. `NXB_OWN_RAW=<file>` selects a different list.
-  `NXB_OWN_FRONT=0` or `--own-front off` turns all own tiers off. The tier needs the own front end to be on.
-- **Output.** A raw library is not byte-identical to Apple's library. This is by design. The GPU test is the evidence.
-  A change of the optimizer does not change `air_front::id()`. Thus make the list again and change the id before you ship a front-end change.
+**Since 0.4.0, the tier is on for each shader that the own front end accepts.** In 0.3.0, it was on only for shaders on an allow list.
+The new default has a check in the process, but no GPU test for each shader.
 
-Measured on a small sample (40 shaders, 20 on the list and 20 not, 105 libraries, loaded machine): 44 raw libraries, no fallback,
-and the 61 other libraries byte-identical to the reference. With `NXB_OWN_RAW=0`, all 105 libraries were byte-identical to the reference.
-The median compile CPU time of the 44 raw shaders was 97.5 ms with the tier and 109 ms without it (about 11 % less).
-This sample is small. Nobody measured a full build with the tier. The estimate of 4 to 6 minutes less on a cold build is not measured.
+- **Check in the process.** The library must parse as a metallib and write back to the same bytes. Each function must have a name and a bitcode wrapper with the magic `BC C0DE`.
+  A reject by the front end, an internal error, a panic or a failed check sends the shader to the next tier. The next tiers are the own `own-identical`
+  path and then Apple's `metal -c` with `metallib`.
+- **What the check does not do.** It does not run the shader. A library can load in Metal and still give a different output than Apple's library.
+- **Evidence.** An earlier GPU test used 12 test vectors for each shader. It covered 3,625 of the 23,752 candidates (about 15 %).
+  3,375 gave the same output as Apple's library, 220 gave a different output, 29 were not deterministic and 1 was not built.
+  So 220 of 3,625 (about 6 %) differed in that sample. The other shaders were not tested. The sample was not random, thus 6 % is not an estimate for the whole corpus.
+  A smoke test of the harness on 8 shaders gave 7 equal and 1 different (the largest error was 166 ulp).
+  The old allow list (3,365 entries, about 14 % of the corpus) has the shaders that matched in the test. It is not in this repository.
+- **Switches.** `NXB_OWN_RAW=0` turns only the raw tier off. `NXB_OWN_RAW=list` uses only the shaders of the shipped allow list (old behavior).
+  The tier is off when the file is missing. `NXB_OWN_RAW=<file>` uses another list. `NXB_OWN_FRONT=0` or `--own-front off` turns all own tiers off. The tier needs the own front end to be on.
+  The run note of the step tells which mode is on and how many libraries came from the raw tier and from Apple.
+- **Cache key.** A raw library has the key field `own-raw@` and the front-end id, for each shader. A raw library is thus never given to a run with the tier off.
+  Entries that an older version made in the list mode are not used.
+- **Output.** A raw library is not byte-identical to Apple's library, and it is larger (1.33 times on 40 samples, measured). This is by design.
+  A change of the optimizer does not change `air_front::id()`. Thus change the id when you ship a front-end change.
+
+Measured (subset of 160 keys, 261 shaders, cold store, load average 8 to 12, `shaderbuild build`): 363 library compiles gave 363 raw libraries, with no fallback, and Apple made 0.
+All 699 output libraries load in Metal (1,092 functions, 0 failures). The wall time was 6.5 s with the tier and 14.4 s without it. This is not a benchmark.
+A smaller measurement (40 shaders, 44 raw libraries, loaded machine) gave a median compile CPU time of 97.5 ms against 109 ms without the tier (about 11 % less).
+Nobody measured a full cold build with the tier on all shaders. The estimate of 4 to 6 minutes less is **not measured**.
 
 ## Errors
 
@@ -179,6 +245,8 @@ The results are for the reference title and the Mac target (measured).
 | translator bridge | 652 shaders | 652 `.spv` and `res.json` byte-identical |
 | `spirv-cross` and MSL passes | 649 pixel and 3 compute shaders | all `_b.metal` and `_b.json` byte-identical |
 | full step | one full run | 74,421 of 74,422 files byte-identical. The step does not write `_b_cas.txt` at this time. |
+| Rust translator | 16,268 keys of this title | all `.spv` and `res.json` byte-identical to the C# translator |
 
 These parts are not ported at this time: geometry and mesh shaders (the reference title has none), some guards that do
-not fire on the reference title, the iOS target, `_b_cas.txt`, and the calculation of V from Rust sources.
+not fire on the reference title, the full iOS target (a sample of 787 shaders was compared), `_b_cas.txt`, and the calculation of V from Rust sources.
+These parity results use the Apple front end or the own-identical tier. They do not cover the raw tier, which is not byte-identical.

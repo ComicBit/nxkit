@@ -6,9 +6,11 @@ pub mod app;
 pub mod companion;
 pub mod fingerprint;
 pub mod header;
+pub mod header_multi;
 pub mod icon;
 pub mod machost;
 pub mod profile;
+pub mod profile_tsv;
 pub mod pyfmt;
 pub mod settings;
 #[cfg(test)]

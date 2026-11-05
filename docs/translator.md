@@ -3,6 +3,24 @@
 This document gives the translator part of the shader step and the plan to replace it. The study is from 2026-11-05.
 It is a read-only survey. Numbers with the label "estimate" are not measured.
 
+## Status in version 0.4.0
+
+Two of the three phases of the plan are done. The study below is the state before this work. The estimates in it are not updated.
+
+| phase | state | evidence |
+|---|---|---|
+| S1: translator host (option a, the host) | done and the default when its binary is found | 802 of 802 results equal to the process bridge. Translation of 802 jobs: 1.0 to 1.7 s against 6.3 to 8.4 s (measured) |
+| S1: server for `spirv-cross` | not done | |
+| S2: Rust translator (option b) | done for Maxwell and Ampere. On by default. The C# translator does the keys that it cannot do | byte-identical for all keys of three titles and for 42,299 of 42,331 keys of a Switch 2 title (measured, first-attempt jobs) |
+| S3: Rust `spirv-cross` or direct MSL (options c and d) | not done | |
+
+The Rust translator is in the crates `nxb-maxwell` (the decoders for Maxwell and Ampere), `nxb-xlate` (the translation) and `nxb-spvgen` (the SPIR-V generator).
+It is in the process of the shader step, and it needs no .NET runtime for the keys that it does. These parts are not ported, and the key goes to the C# translator:
+geometry, tessellation, transform feedback, vertex shaders as compute, the interlock function match, `SharedStoreSmallIntCas` and the task and mesh jobs.
+No local title has the first four, thus nobody tested them. The C# translator and `spirv-cross` stay necessary.
+In a subset run, the Rust translator gave no gain in wall time (17 s against 16 s), because the Metal compile dominates (measured, one run). The gain is that the shader step needs no .NET process for most keys.
+Refer to [shader-step.md](shader-step.md) for the choice between the three ways to translate and for the `ShaderInterface` file.
+
 ## Function
 
 The chain for each shader is:

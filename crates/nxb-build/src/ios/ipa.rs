@@ -4,13 +4,14 @@
 //! [`super::ipapack`] builds the app unsigned, signs its executable ad hoc with the entitlements and packs the IPA.
 //!
 //! Ported generators run here (`gen_build`, `gen_embed`, `gen_resources`, the app binary settings, `game.py modules`,
-//! the profile inputs digest), the engine's other Python tools (`nacp.py`, `romfs.py`, `romfs_image.py`,
-//! `make_ext_font.py`, `pso_offline.py`) and Apple's tools run as the script runs them, through [`Runner`].
-//! Not ported (refused as unsupported, the caller runs the script): a game of several programs (`PROGRAMS_TSV`) and
-//! route C's framework builds (`DM_FRAMEWORK=1`, `DM_FRAMEWORK_ONLY`).
+//! the profile inputs digest, `nacp.py`, `romfs.py`, `romfs_image.py --identity`, the button-icon font, `pso_offline.py`).
+//! Apple's tools run as the script runs them, through [`Runner`].
+//! Games of several programs (`PROGRAMS_TSV`) are in `ipaprog`, route C (`DM_FRAMEWORK`, `DM_FRAMEWORK_ONLY`) in `ipafw`.
 
+use super::ipafw::FwIn;
+use super::ipagen::check_program;
 pub use super::ipagen::modules;
-use super::ipagen::{check_program, pso_gpus};
+use super::ipaprog::{self as prog, Prog, ProgIn, TablesCtx, program_tables};
 use super::script::{
     chain_version, die, ln_sfn, mkdir_p, paste_commas, pwd_of, rm_rf, set_nonempty,
 };
@@ -81,6 +82,15 @@ pub struct State {
     pub(crate) o: PathBuf,
     pub(crate) dd: PathBuf,
     pub(crate) app_version: String,
+    /// The programs of a game of several (empty: one program).
+    pub(crate) progs: Vec<Prog>,
+    pub(crate) chain: String,
+    /// Route C: the game's modules are in a framework (`DM_FRAMEWORK=1`, or `DM_FRAMEWORK_ONLY`).
+    pub(crate) framework: bool,
+    pub(crate) fw_only: bool,
+    pub(crate) fw_name: String,
+    /// `ICON`: the game's icon image.
+    pub(crate) icon: String,
 }
 
 /// `${X:-default}`.
@@ -108,6 +118,16 @@ pub(crate) fn append(p: &Path, line: &str) -> Result<(), String> {
         .map_err(|e| die(format!("{}: {e}", p.display())))
 }
 
+pub(crate) fn append_bytes(p: &Path, data: &[u8]) -> Result<(), String> {
+    use std::io::Write;
+    std::fs::OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(p)
+        .and_then(|mut f| f.write_all(data))
+        .map_err(|e| die(format!("{}: {e}", p.display())))
+}
+
 pub(crate) fn copy(from: &Path, to: &Path, what: &str) -> Result<(), String> {
     std::fs::copy(from, to).map(|_| ()).map_err(|_| die(what))
 }
@@ -132,6 +152,9 @@ pub fn run(
         Target::Prepare => Ok(generate(base, true, None, i, say)?.ios),
         Target::Ipa(out) => {
             let st = generate(base, false, out, i, say)?;
+            if st.fw_only {
+                return super::ipafw::build_framework_only(&st, i, say);
+            }
             super::ipapack::build(&st, i, say)
         }
     }
@@ -146,12 +169,18 @@ pub fn generate(
     i: &Inputs,
     say: &mut dyn FnMut(&str),
 ) -> Result<State, String> {
-    if set_nonempty(&i.programs_tsv)
-        || set_nonempty(&i.framework_only)
-        || or(&i.framework, "0") != "0"
-    {
-        return Err("unsupported: a game of several programs or a route C framework build (run build_ipa.sh)".into());
+    let fw_only = set_nonempty(&i.framework_only);
+    let framework = fw_only || i.framework.as_deref() == Some("1");
+    if fw_only && prepare {
+        return Err(die(
+            "DM_FRAMEWORK_ONLY builds the game framework for the shell; it cannot be combined with --prepare-xcode",
+        ));
     }
+    let fw_name = if fw_only {
+        format!("DmGame{}", i.game.to_uppercase())
+    } else {
+        "DmGame".to_string()
+    };
     let dm = i.engine.join("dm");
     let ios_source = dm.join("ios");
     if i.game.is_empty() {
@@ -197,18 +226,15 @@ pub fn generate(
     if !Path::new(&nacp).is_file() {
         nacp = format!("{rd}/control.nacp");
     }
-    let nacp_py = dm.join("tools/nacp.py").to_string_lossy().into_owned();
-    let py_out = |args: &[&str]| -> Result<String, String> {
-        base.stdout("python3", args, None)
-            .map(|s| s.trim_end_matches('\n').to_string())
-    };
     let name = match i.display_name.clone().filter(|x| !x.is_empty()) {
         Some(n) => n,
-        None => py_out(&[&nacp_py, &nacp]).map_err(|_| {
-            die(format!(
-                "no game name in {nacp} (re-extract with nx_extract, or set DM_DISPLAY_NAME)"
-            ))
-        })?,
+        None => Some(super::nacp::name(Path::new(&nacp)))
+            .filter(|n| !n.is_empty())
+            .ok_or_else(|| {
+                die(format!(
+                    "no game name in {nacp} (re-extract with nx_extract, or set DM_DISPLAY_NAME)"
+                ))
+            })?,
     };
     let mut vnacp = format!("{rd}/control.nacp");
     if !Path::new(&vnacp).is_file() {
@@ -216,9 +242,9 @@ pub fn generate(
     }
     let version = match i.app_version.clone().filter(|x| !x.is_empty()) {
         Some(v) => v,
-        None => match py_out(&[&nacp_py, "--version", &vnacp]) {
-            Ok(v) => v,
-            Err(_) => {
+        None => match Some(super::nacp::version(Path::new(&vnacp))).filter(|v| !v.is_empty()) {
+            Some(v) => v,
+            None => {
                 say(&format!(
                     "no display version in {vnacp}: the app version is 1.0"
                 ));
@@ -249,8 +275,17 @@ pub fn generate(
         for item in ["Sources", "tools"] {
             ln_sfn(&ios_source.join(item), &ios.join(item))?;
         }
+        // route C: the framework target's marker source lives in dm/ios/framework
+        if framework {
+            ln_sfn(&ios_source.join("framework"), &ios.join("framework"))?;
+        }
+        let template = if framework {
+            "project-framework.yml"
+        } else {
+            "project.yml"
+        };
         copy(
-            &ios_source.join("project.yml"),
+            &ios_source.join(template),
             &ios.join("project.yml"),
             "copy project template",
         )?;
@@ -283,7 +318,38 @@ pub fn generate(
         i.v.clone()
             .filter(|x| !x.is_empty())
             .unwrap_or_else(|| chain_version(&dm.join("gfx/nvn/dmsh_chain.h")));
-    let (mods, gfx) = check_program(&r, i, &g, [&patched, &romfs, &msl], &marker, &v)?;
+    let (mods, gfx) = check_program(
+        &r,
+        (i.gfxapi.as_deref(), &i.game),
+        &g,
+        [&patched, &romfs, &msl],
+        &marker,
+        &v,
+    )?;
+    let progs: Option<Vec<Prog>> = match i.programs_tsv.as_deref().filter(|x| !x.is_empty()) {
+        Some(tsv) => {
+            let ps = prog::load(tsv, &Profiles::new(&i.engine, &var))?;
+            for p in &ps {
+                say(&format!(
+                    "program {}: {} ({}), {}",
+                    p.n,
+                    p.game,
+                    p.g.get("name").unwrap_or_default(),
+                    p.gfx
+                ));
+                check_program(
+                    &r,
+                    (Some(p.gfx.as_str()), &p.game),
+                    &p.g,
+                    [&p.patched, &p.romfs, &p.msl],
+                    &p.marker,
+                    &v,
+                )?;
+            }
+            Some(ps)
+        }
+        None => None,
+    };
     say(&format!(
         "app: {name} {version} ({bundle_id}), language {lang}{}",
         if show_fps == "YES" {
@@ -300,158 +366,97 @@ pub fn generate(
     let text = genbuild::generate(&r, &dm.join("host"), &gen_dir)
         .map_err(|e| die(format!("gen_build ({e})")))?;
     std::fs::write(&cfg, text).map_err(|_| die("gen_build"))?;
-    let jit = format!("{rd}/jit/jit.img");
-    let jit = Path::new(&jit).is_file().then_some(jit);
-    let flags = embed::write(
-        &patched,
-        &gen_dir.join("embed.S"),
-        &mods,
-        "",
-        jit.as_deref(),
-    )
-    .map_err(|e| die(format!("gen_embed ({e})")))?;
+    let flags = match &progs {
+        None => {
+            let jit = format!("{rd}/jit/jit.img");
+            let jit = Path::new(&jit).is_file().then_some(jit);
+            embed::write(
+                &patched,
+                &gen_dir.join("embed.S"),
+                &mods,
+                "",
+                jit.as_deref(),
+            )
+            .map_err(|e| die(format!("gen_embed ({e})")))?
+        }
+        Some(ps) => {
+            // each program's modules under its tag, one after the other in Gen/embed.S
+            let all = gen_dir.join("embed.S");
+            std::fs::write(&all, "").map_err(|_| die("gen_embed"))?;
+            let mut f = String::new();
+            for p in ps {
+                let jit = format!("{}/jit/jit.img", dirname(&p.romfs));
+                let jit = Path::new(&jit).is_file().then_some(jit);
+                let part = gen_dir.join(format!("embed_p{}.S", p.n));
+                let fl = embed::write(
+                    &p.patched,
+                    &part,
+                    &p.mods,
+                    &format!("p{}", p.n),
+                    jit.as_deref(),
+                )
+                .map_err(|e| die(format!("gen_embed (program {}: {e})", p.n)))?;
+                f = format!("{f} {fl}");
+                let text = std::fs::read(&part).map_err(|_| die("gen_embed"))?;
+                append_bytes(&all, &text)?;
+                let _ = std::fs::remove_file(&part);
+            }
+            f
+        }
+    };
     append(
         &cfg,
         &format!("OTHER_LDFLAGS = $(inherited) $(DM_FRAMEWORKS) {flags}\n"),
     )?;
-    // program_tables
     let td = gen_dir.join("dm");
-    let mut tables: Vec<PathBuf> = Vec::new();
-    for suf in [".fixups.tsv", ".gates.tsv", ".cuts.tsv", ".obs.tsv"] {
-        let mut m: Vec<PathBuf> = std::fs::read_dir(&patched)
-            .map(|d| d.flatten().map(|e| e.path()).collect())
-            .unwrap_or_default();
-        m.retain(|p| {
-            let n = p
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            n.ends_with(suf) && !n.starts_with('.') && n.len() > suf.len()
-        });
-        if m.is_empty() {
-            return Err(die("copy rewriter tables"));
-        }
-        tables.extend(m);
-    }
-    for t in &tables {
-        copy(
-            t,
-            &td.join(t.file_name().unwrap_or_default()),
-            "copy rewriter tables",
-        )?;
-    }
-    let nro = Path::new(&patched).join("nro.tsv");
-    if nro.is_file() {
-        copy(&nro, &td.join("nro.tsv"), "copy the NRO table")?;
-    }
-    let mut shader_tables = vec!["shader_map.tsv", "pso_manifest.tsv"];
-    if gfx != "vulkan" && gfx != "gl" {
-        shader_tables.push("c1_full.tsv");
-    }
-    for t in &shader_tables {
-        copy(&g.dir.join(t), &td.join(t), "copy shader tables")?;
-    }
-    if gfx != "vulkan" && gfx != "gl" {
-        if g.dir.join("cb_extent.tsv").is_file() {
-            copy(
-                &g.dir.join("cb_extent.tsv"),
-                &td.join("cb_extent.tsv"),
-                "copy cb_extent.tsv",
-            )?;
-        } else {
-            say(&format!(
-                "no {gd}/cb_extent.tsv: the host copies whole uniform bindings"
-            ));
-        }
-        for f in ["shader_pairs.tsv", "pso_pairs.tsv"] {
-            if g.dir.join(f).is_file() {
-                copy(&g.dir.join(f), &td.join(f), &format!("copy {f}"))?;
-            }
-        }
-    }
-    let lj = td.join("launcher.json");
-    let env_of = |k: &str| -> Option<String> {
-        if k == "GFXAPI" {
-            return Some(gfx.clone());
-        }
-        exports
-            .iter()
-            .find(|(n, _)| *n == k)
-            .map(|(_, v)| v.clone())
-            .or_else(|| r.env().get(k).map(|v| v.to_string_lossy().into_owned()))
+    let tctx = TablesCtx {
+        i,
+        r: &r,
+        exports: &exports,
     };
-    let settings = crate::host::settings::build(
-        &i.engine,
-        &i.game,
-        Path::new(&patched),
-        Path::new(&vnacp),
-        &env_of,
-    )
-    .map_err(|_| die("app binary settings (dm/games/settings.py)"))?;
-    std::fs::write(&lj, format!("{}\n", nxb_pyjson::dumps_indent(&settings, 1)))
-        .map_err(|_| die("app binary settings (dm/games/settings.py)"))?;
+    let settings = match &progs {
+        None => {
+            let pin = ProgIn {
+                game: &i.game,
+                g: &g,
+                patched: &patched,
+                gfx: &gfx,
+                vnacp: &vnacp,
+            };
+            program_tables(&tctx, &td, &pin, say)?
+        }
+        Some(ps) => {
+            let list = td.join("programs.txt");
+            std::fs::write(&list, "").map_err(|_| die("programs.txt"))?;
+            let mut first = None;
+            for p in ps {
+                let d = td.join(format!("p{}", p.n));
+                mkdir_p(&d)?;
+                let nacp = format!("{}/control.nacp", dirname(&p.romfs));
+                let nacp = if p.n == "0" {
+                    or(&i.control, nacp)
+                } else {
+                    nacp
+                };
+                let pin = ProgIn {
+                    game: &p.game,
+                    g: &p.g,
+                    patched: &p.patched,
+                    gfx: &p.gfx,
+                    vnacp: &nacp,
+                };
+                let s = program_tables(&tctx, &d, &pin, say)?;
+                first = first.or(Some(s));
+                append_bytes(&list, format!("{}\n", p.n).as_bytes())?;
+            }
+            first.ok_or_else(|| die("no program"))?
+        }
+    };
     let list = settings
         .get("settings")
         .and_then(|s| s.as_list())
         .unwrap_or(&[]);
-    let envs: Vec<&str> = list.iter().filter_map(|s| s.get("env")?.as_str()).collect();
-    say(&format!("app binary: {}", envs.join(" ")));
-    // the pipeline archive
-    let mut pso = String::new();
-    let p4 = g.get_or("pso_mtl4", "off");
-    let pg = g.get_or("pso_gpu", "");
-    let (gpus, warn) = pso_gpus(&i.pso_gpus, &p4, &pg);
-    if let Some(wn) = warn {
-        say(&format!("profile {gd}: {wn}"));
-    }
-    let pairs = g.dir.join("shader_pairs.tsv").is_file();
-    if gfx == "nvn" && !gpus.is_empty() && gpus != "none" && pairs {
-        pso = format!("{w}/build/ios/pso/bundle");
-        say(&format!(
-            "pipeline archive for {gpus} (metal-tt; minutes when its inputs changed)"
-        ));
-        let mut a: Vec<String> = vec![
-            dm.join("gfx/tools/pso_offline.py")
-                .to_string_lossy()
-                .into_owned(),
-            "--game".into(),
-            i.game.clone(),
-            "--msl".into(),
-            format!("{msl}/b-{v}"),
-            "--out".into(),
-            pso.clone(),
-            "--work".into(),
-            format!("{w}/build/ios/pso/work"),
-            "--gpu".into(),
-            gpus.clone(),
-        ];
-        if let Some(m) = i.pso_ios_min.clone().filter(|x| !x.is_empty()) {
-            a.extend(["--os-min".into(), m]);
-        }
-        match r.stdout("python3", &a, None) {
-            Ok(text) => text.lines().for_each(&mut *say),
-            Err(_) => {
-                say(
-                    "[RED] pipeline archive: pso_offline.py failed (its output is above); the app is built without one and the device builds its pipeline bases on its first start (DM_PSO_GPUS=none skips this step)",
-                );
-                rm_rf(Path::new(&pso))?;
-                pso.clear();
-            }
-        }
-    } else if gfx == "nvn" {
-        let why = if i.pso_gpus.is_some() {
-            format!(
-                "DM_PSO_GPUS={}",
-                if gpus.is_empty() { "empty" } else { &gpus }
-            )
-        } else {
-            "the profile does not set pso_mtl4 on; DM_PSO_GPUS=g18p builds one".into()
-        };
-        say(&format!(
-            "no pipeline archive ({why}{})",
-            if pairs { "" } else { ", no shader_pairs.tsv" }
-        ));
-    }
+    let pso = super::pso::stage(i, &g, &gfx, (w, &msl, &v), say)?;
     // the packed language is the Game language row's default
     let ld = list
         .iter()
@@ -507,6 +512,23 @@ pub fn generate(
             pkg: &pkg,
             scheme: &scheme,
             paths: [&romfs, &marker, &shaders, &msldir, &aoc, &xcode_dd, &pso],
+            programs: progs.as_deref().unwrap_or(&[]),
+            chain: &v,
+            fw: framework.then_some(FwIn {
+                name: &fw_name,
+                only: fw_only,
+                mods: &mods,
+                flags: &flags,
+                display_name: &name,
+                display_version: &version,
+                pkg: &pkg,
+                patched: &patched,
+                chain: &v,
+                marker: &marker,
+                romfs: &romfs,
+                o: &o,
+                g: &g,
+            }),
         },
         say,
     )?;
@@ -524,9 +546,15 @@ pub fn generate(
         o,
         dd,
         app_version: version,
+        progs: progs.unwrap_or_default(),
+        chain: v.clone(),
+        framework,
+        fw_only,
+        fw_name,
+        icon: or(&i.icon, format!("{rd}/icon.jpg")),
     })
 }
 
 #[cfg(test)]
 #[path = "ipa_tests.rs"]
-mod tests;
+pub(crate) mod tests;

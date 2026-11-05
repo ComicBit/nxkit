@@ -2,6 +2,7 @@
 # Packs the release: signs the binaries, makes the ZIP file, the checksum file and the release notes.
 # Usage: tools/release-package.sh TAG            (for example v0.1.0, run after cargo build --release)
 # Environment: NXB_RELEASE_BINS (names of the binaries, default "nxb nxb-extract nxb-split nxb-ios airc"), TARGET_DIR (default target).
+# The archive also holds rewrite-rules/ (data/rewrite-rules of the repository).
 # Output in dist/: nxb-TAG-macos-arm64.zip, SHA256SUMS, notes.md
 set -eu
 cd "$(dirname "$0")/.."
@@ -19,6 +20,8 @@ for b in $bins; do
   codesign --verify "dist/$name/$b"
 done
 cp LICENSE THIRD_PARTY.md "dist/$name/"
+# the rewrite rules (`nxb rewrite` finds them next to the binary)
+cp -R data/rewrite-rules "dist/$name/rewrite-rules"
 ( cd dist && zip -qr "$name.zip" "$name" && shasum -a 256 "$name.zip" > SHA256SUMS \
   && ( cd "$name" && shasum -a 256 $bins ) | sed "s|  |  $name/|" >> SHA256SUMS && cat SHA256SUMS )
 

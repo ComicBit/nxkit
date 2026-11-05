@@ -50,7 +50,8 @@ flowchart LR
 - **Damaged blocks.** A block that does not agree with the IVFC hash marks its files as damaged. Without `--allow-damaged`,
   the stage lists all damaged files and stops with exit code 3. With `--allow-damaged`, it writes the bytes and sets the damaged flag.
 - **Special packages.** Each special case (sparse NCAs, XCI secure partitions, merged NSPs, NUP, dump folders) gets a named test with a synthetic fixture.
-- **Exit codes:** 2 incorrect command, 3 damaged, 4 sparse without update, 5 no meta, 6 keys too old.
+- **Exit codes:** 1 error, 2 incorrect command, 3 damaged data, 4 not supported, 6 missing key.
+  Exit code 4 means that the caller must run the reference step. This is the same for `nxb-split`, `nxb rewrite`, `nxb nro`, `nxb-ios` and `nxb build`.
 
 At this time, the stage supports NSP packages (NCA, IVFC, BKTR, RomFS image, ExeFS, NACP, zstd, LZ4).
 It also reads game cards (XCI), compressed packages (NSZ and XCZ), Switch 2 packages (`.nup`) and dump folders.
@@ -67,7 +68,7 @@ Without `--version`, it takes the newest update. When the package has no base ga
 - **Merged packages.** A package can hold more than one game. `--app <id>` gives the application id in hexadecimal.
   The stage then uses only the contents of that application.
 
-Not ported at this time: zstd dictionaries, the `--html` output of some titles and games with more than one program.
+Not ported at this time: the `--html` output of some titles. A sparse NCA stops with exit code 4, because no sample was available.
 
 ### Tests on real data
 
@@ -88,14 +89,60 @@ Not ported at this time: zstd dictionaries, the `--html` output of some titles a
   of the reference build scripts: versions, sorted paths, `main`, NROs, captures. It does not use the completion sequence.
 - Decoders that only the game has (for example Oodle) operate through the host, behind a `Tool` adapter.
 
-At this time, the split supports the container formats of the three tested titles (for example SARC, BNSH, BAHS and NSO).
-A different format stops the split with a named `Unsupported` error. The reference build scripts read approximately 35 container formats.
+Since version 0.4.0, the split reads many more container families. A format that is not ported stops the split with a named
+`Unsupported` error and exit code 4. The split never gives a silent difference.
+
+| family | state |
+|---|---|
+| SARC, BNSH, BAHS, NSO, GLSLC outputs, NARC, sized frames, gzip files | ported. Compared with the reference functions on real or synthetic files |
+| zstd dictionaries (standard format) | ported. Files of one real title are byte-identical to the output of `zstd -D` |
+| archive families that the reference split reads by ranges (a large archive, zip, KPKA, CPK, dvdbnd, ARH, LINKDATA, Unreal packages and others) | ported. The split reads the archive by ranges from the image. A 17.6 GB archive is never in memory |
+| Unity bundles and serialized files (LZMA, LZ4, stored blocks, format 17 to 22, type trees) | ported. Compared on synthetic files only, because no real Unity title was available |
+| Needle, Sumo, Phyre, MGFX, XNB, SLCT, Monolith, Snowdrop, SDF, MT Framework and some more | ported. Compared on synthetic files |
+| formats that need Oodle (some packs, Frostbite roots, some Unreal blocks) | not ported. Exit code 4 |
+| the CRA family | not ported. Exit code 4 |
+| zip members in bzip2 or lzma, encrypted Unreal indexes, LZ5 packages | not ported. Exit code 4 or a note |
+
+Real data: the update image of one title with a 17.6 GB archive gave all 12 package files and all tables byte-identical to the reference split (measured: 298 s, and about 25 minutes for the reference).
+The reference scripts read approximately 35 container formats, and the port covers most of them. Only the real image and the NSP titles have real-data results. For all other families, the evidence is synthetic.
 
 ## Rewrite
 
 `nxb-rewrite` decodes each AArch64 instruction of each code module with the own decoder `nxb-a64`. It changes `x18`,
-`tpidr*`, `svc`, `cntpct_el0`, misaligned `sp`, lock acquires, spin loops, cuts and observation gates, and writes
-`.patched.bin` and five TSV tables. At this time, the rewrite stage is a skeleton.
+`tpidr*`, `svc`, `cntpct_el0`, misaligned `sp`, lock acquires, spin loops, cuts and observation gates. It writes
+`.patched.bin` and five TSV tables. The command is `nxb rewrite <module> <out dir> <name>`. It has the command line of `patch_nso.py`.
+The extract stage of `nxb build` runs it for the modules of the profile.
+
+- **Input.** NSO and NRO modules. The loader reads LZ4 segments and ZBIC segments (a zstd variant, with an own decoder), and it checks the SHA-256 of each segment.
+- **Decoder.** `nxb-a64` follows Capstone 5 for the mnemonic, the operand text, the registers and the write-back. A test compared 2.7 million distinct words of 9 modules with 0 differences.
+  The decoder rejects some words that Capstone decodes (SVE, SME, MTE and most extensions after Armv8). The modules tested have none of these.
+- **Layouts.** The rewriter has the layouts of the script: near, far, and two patch areas. If the first size of the front area is too small, it runs again with the size that it needs, as the script does.
+- **Rules are data.** The registered patches (cuts, observation gates, capabilities, frame step stubs and the build rows of the game tables) are in `data/rewrite-rules`.
+  There is one file for each scope, and one file with the hashes of the engine files. Each rule has a binding: `build` (a fixed offset in one build ID, with the original bytes),
+  `sdk`, `game`, `engine` or `host`. A `build` rule without its original bytes is an error. The rules come from a snapshot (`snapshot.tsv`) and a test makes the snapshot again from the files.
+  The licence notice of the engine that the rules come from is in `data/rewrite-rules/NOTICE` and in `THIRD_PARTY.md`.
+- **Where the rules are found.** In this sequence: `NXB_REWRITE_RULES` (a folder), `NXB_REWRITE_PATCHES` (a snapshot), the folder `rewrite-rules` next to the binary (the release ZIP file),
+  `data/rewrite-rules` above the binary or in the checkout, and last the older file `rewrite_patches.tsv` next to the script.
+- **When the port refuses.** The port gives exit code 4, and the caller runs the script, in three conditions. The first is an engine file that hashes differently from the file that the rules come from.
+  The second is a set `DM_GAMES_DIR`. The third is a frame step stub that the trace cannot express. A jump table that no rule knows stops with exit code 1, the address and the function name.
+- **NRO modules.** `nxb nro <RomFS image> <out dir> [<nrr name>]` collects the NRO modules that the `.nrr` files list. It has the command line of `nro_collect.py`.
+  It reads the archive index of the large archive by ranges. It gives exit code 4 for an image of another format, for hashes that are left after the index (the scan of the script is not ported),
+  and for a damaged `.nrr` file.
+
+Results (measured, the reference script as oracle, all five tables and `.patched.bin` byte-identical unless a line says synthetic):
+
+| input | result |
+|---|---|
+| 25 real modules, including a Switch 2 title with ZBIC segments, modules with NRO tables and modules with frame step stubs | 25 of 25 identical |
+| 98 NRO modules of one title | 98 of 98 identical, and `nro.tsv` identical |
+| synthetic modules with text of 100, 125.3 and 185.6 MB, and the two re-run cases | identical. Only the layout code and the registered rows are tested |
+| synthetic main modules of three frame step builds and of one build with registered cuts | identical. The words are the asserted original bytes only |
+| the rules from `data/rewrite-rules` | 120 of 130 earlier cases ran again and were identical. 14 cases cannot run again, because their input files are deleted |
+
+Time (measured, release build, machine not quiet): a 29 MB main module took 3.4 s against 63 s for the script. A larger module took 8.9 s against 121 s.
+The synthetic large modules took 1 to 3.5 s against 183 to 672 s. The NRO collection took 3.5 s against 4.5 s, because the archive table dominates both times.
+
+Not tested: rules on real code of the builds that have no local sample, and modules with words that the decoder does not cover.
 
 ## Host stages around the app
 
@@ -106,17 +153,15 @@ Each program runs through the `Tool` trait with the exact environment of the ref
 |---|---|
 | App icon | byte-identical (measured on one title) |
 | Companion app | byte-identical (measured on one title). The reuse key file contains the sources, the compiler versions, the SDK and the minimum system version |
-| App settings file (`launcher.json`) | 425 of 425 outputs byte-identical for the 142 profiles of the reference engine. The test skips one multi-program profile. Its header is not ported, but its settings are identical |
+| App settings file (`launcher.json`) | 425 of 425 outputs byte-identical for the 142 profiles of the reference engine. The header of the multi-program profile is byte-identical since 0.4.0 |
 | Mac host | the reuse key and the decoder inputs are byte-identical. The binary is not byte-identical |
 
 The Mac host binary is not reproducible, also not with the reference script. Two builds with the reference script differ in 2,029 bytes.
 The differences are the `LC_UUID` and the debug map in `__LINKEDIT`. Thus the test compares the same key, the same decoder inputs
 and the same bytes before `__LINKEDIT` with the UUID set to zero. The reference script reuses a build of the Rust stage and the other way round.
 
-These stages are not ported:
-
-- The button-icon font (`make_ext_font.py`). `nxb build` uses the `font/` folder of the work folder.
-- The header of multi-program profiles.
+Two parts that 0.3.0 did not port are ported in 0.4.0: the button-icon font (the tool writes a time stamp, thus the test fixes the time) and the header of multi-program profiles.
+The font file is byte-identical with a fixed time. The reference script stays the fallback when the letter font is not the expected font.
 
 Some conversions approximate Python behavior. The code documents them: the `repr` of non-ASCII characters
 (the stage escapes only C1 control characters, the no-break space and the soft hyphen), the whitespace rules of `shlex`,
@@ -188,11 +233,12 @@ with the same command lines and the same environment variables:
 - `nxb-ios ipa [<out.ipa> | --prepare-xcode]` does the work of the IPA script.
 - `nxb-ios shell --prepare-xcode` and `nxb-ios shell --build` do the work of the shell script.
 
-`NXB_ENGINE` gives the folder of the engine files that the stages read. `nxb build` does not run these stages.
-It refuses a `--platform` value other than `mac-app`.
+`NXB_ENGINE` gives the folder of the engine files that the stages read. `nxb build --platform ios` runs the iOS flow in one process graph
+(see the end of this section). Without `--platform`, `nxb build` refuses a value other than `mac-app` and `ios`.
 
-`xcodegen`, `xcodebuild`, `codesign`, `sips`, `PlistBuddy`, `plutil` and some Python tools of the engine stay external.
-They run through the `Tool` trait. The stage signs the executable with the `codesign` of the host, not with the own signer.
+`xcodegen`, `xcodebuild`, `sips` and `plutil` stay external. They run through the `Tool` trait.
+Since 0.4.0, the stage signs the iOS executable with the own signer. No call of `codesign`, `xattr` or `PlistBuddy` is left in the signing step.
+The test `signing_an_ios_executable_by_path_matches_sign_bundle` (with `NXB_ORACLE_EXACT=1`) compares the bytes with the signer. The full `xcodebuild` run was not repeated with the own signer.
 
 | part | compared with the reference script on | result (measured) |
 |---|---|---|
@@ -208,20 +254,37 @@ They run through the `Tool` trait. The stage signs the executable with the `code
 The font tool writes a time stamp. Thus two runs of the reference tool differ in 4 bytes. In the IPA, two entries are equal only in part.
 In the executable, only `__LINKEDIT` differs (the debug map paths of each work folder and the signature). The bytes before it are identical, and the UUID is equal.
 
+Added in 0.4.0:
+
+- **Games with more than one program** (`PROGRAMS_TSV`). The stage checks each program, tags the embeds and writes the tables, the resources and the IPA folders.
+  Checked with a fixture of three programs (two NVN programs and one Vulkan program): 17 step lines and 320 project files equal. A real `xcodebuild` run gave 83 of 83 IPA entries equal (the executable and the font file equal in part).
+  The fixture is synthetic. No real multi-program title was built.
+- **Framework builds** (`DM_FRAMEWORK`, `DM_FRAMEWORK_ONLY`). The port of the profile step gave 142 of 142 profiles byte-identical.
+  On a fixture, `--prepare-xcode` gave 12 step lines and 311 project files equal. With a real `xcodebuild` run, the IPA had 47 of 47 entries equal (the executable, the framework binary and the font file equal in part).
+  `DM_FRAMEWORK_ONLY` gave 19 of 19 files equal (the binary by its code before `__LINKEDIT`).
+- **Reuse of the previous IPA.** The writer keeps the index (`.idx`). A full pack equals `pack_ipa.py`. A pack with reuse equals a fresh pack. The reference script and the Rust writer keep each other's output.
+  The writer is serial. `NXB_IPA_NO_REUSE` turns the reuse off.
+- **The iOS helper scripts.** `nacp.py`, `romfs.py` (identity line), `pso_offline.py` for iOS and the button-icon font are ported. The check of the identity line equals the script on a 3.7 GB image.
+  The `pso_offline` run for iOS gave `prebuilt.tsv`, `archive.tsv` and `bases.mtl4-json` byte-identical on 40 pairs.
+
+`nxb build --platform ios` has the stages `extract`, `shader split`, `iOS shaders`, `app build` and `IPA pack`, with the usual events.
+The shader step runs with the iOS target (and builds the Mac libraries also). The wiring is checked: `--dry-run` prints the graph, and a run reaches the first check with real inputs.
+**It was not run end to end**, because no iOS libraries were available and the translator run takes minutes. The default platform is `ios`, as in the reference script.
+
 Limits of the iOS stages:
 
-- Exit code 3 for games with more than one program and for framework builds (`DM_FRAMEWORK`). The caller runs the reference script.
+- Exit code 4 means unsupported input. The caller runs the reference script.
 - The default name of the shell app is `NxbShell`. The reference script has a different default name. Set `DM_SHELL_NAME` to get the same name.
 - Not run: `nxb-ios shell --build`, and an IPA with a pipeline archive in it.
-- The IPA is always packed in full. The reuse of the previous IPA is not ported.
 - The tests that compare with the reference script skip when the `NXB_ORACLE_*` variables are not set.
+- The font file and the executable are equal in part only (see above). A framework IPA and a multi-program IPA were compared on fixtures.
 
 ## IPA
 
 `xcodebuild` and the entitlement signature of the executable stay external tools. `nxb-zip` writes the archive with the
 entry sequence, headers, zip64 rules, times, modes and deflate decisions of the reference build scripts. Deflate comes from
 the system zlib, thus compressed bytes are the same only with the same zlib. Measured: byte-identical on a 59-entry sample
-and on a bundle with a 300 MB streamed file. A full game IPA was not compared.
+and on a bundle with a 300 MB streamed file. A full game IPA was not compared. The reuse of the previous IPA is described in the iOS section.
 
 ## Pipeline archive
 
@@ -237,12 +300,54 @@ The archive stage compiles one Metal 4 render pipeline base for each shader pair
 
 For the study of the archive back end, refer to [research/backend-survey.md](research/backend-survey.md).
 
+## Events and codes
+
+`nxb build` writes NDJSON events: `stage`, `stage_end`, `step`, `progress` and `say`. Since 0.4.0, each event has the fields `code` and `severity`.
+The new fields come after the old fields, and `t` stays the last field. No old field changed.
+
+- A code has the form `NXB` and four digits. A code never changes its meaning after a release. The table is in `nxb-obs/src/codes.rs`.
+- `1xxx` is for the events of the build and `2xxx` is for the events of the library.
+  `3xxx` is reserved for the cache and `4xxx` is reserved for the manifest and the partial state.
+- The severity is `debug`, `info`, `warn` or `error`. A `say` text that starts with `[RED]` has the severity `error`. A text that starts with `[YELLOW]` has the severity `warn`.
+  A failed `stage_end` has the severity `error`.
+- A test makes sure of three facts. Each event has a code from the table. The code and the event name agree. The field `t` is the last field.
+
+The shader step adds fields to the `say` event "shaders done": `xlate_starts`, `xlate_restarts` and `xlate_fallbacks` (an object of reasons and keys).
+
+## Cache export
+
+`nxb cache` moves the cache of one title between stores.
+
+- `nxb cache export <store> <out> [--device-family F] [--translator T] [--emitter E] [--variant V]` writes one file.
+- `nxb cache import <store> <file> [--cap-mb N]` reads a file. It hashes each blob again and checks the checksum at the end of the file.
+  It checks that the key of each entry is the key that the entry names. A damaged file adds no entry.
+- `nxb cache prune <store> --cap-mb N` removes the entries that were not used for the longest time, and then the blobs that no entry uses.
+- `nxb cache list <store> [filters]` lists the entries.
+
+A cache key has the shader key, the translator id, the emitter id, the device family and the variant. The export file has the format `nxb-cache-export 1`, and the same entries give the same bytes.
+Tests: a round trip, 60 random single-byte changes and 4 cuts (all refused with no entry added), and the limit of the size. **The shader step does not write these entries yet.**
+Thus the command works on a store that other tools filled. A cache that the shader step made is not yet in this form.
+
+## Manifest-first order and partial builds
+
+`nxb build --shader-manifest <file>` takes a list of shader keys (one for each line, `#` starts a comment). The shader step translates these shaders first, in the order of the list.
+The other shaders keep their order. `--partial` needs the manifest. It builds only the listed shaders and writes `_b_partial.json` (`{"partial":true,"built":N,"total":M}`) into the output folder.
+The summaries of the shader step, the archive and the app stage then have the line `partial prebuilt state: N of M shaders`. A full build later removes the marker.
+Without the options, nothing changes. The unit tests check the order and the marker. No full build with a manifest was timed.
+
+## The profile of a game
+
+The crate `nxb-profile` (layer L2) holds the profile of a game as typed data: computed values, declared values with a proof for each override, and rules (engine, frame limit, cuts with a reason).
+It has a reader and a writer for a subset of TOML (the workspace has no external crates). It finds problems such as an override without a proof or a cut without a reason.
+The build stages do not use it yet.
+
 ## Byte identity for each stage
 
 | stage | byte-identical to the reference build scripts | not compared |
 |---|---|---|
 | extract | `RomFS.img` (header, data, index, names, damaged flags), ExeFS, `control.nacp`, `icon.jpg`, `html*/`, `romfs.id`, exit codes | log text, times |
 | rewrite | all six outputs of each module | |
+| NRO collection | `nro<i>.nro` and `nro.tsv` | |
 | split | package records, `shader_map.tsv`, answer table, `shader_pairs.tsv`, `pso_pairs.tsv` | progress lines |
 | icon, companion app, settings file | see the table in the section on host stages | |
 | Mac app | all files of the bundle, `CodeResources`, the signed Mach-O files | the reuse key file |
