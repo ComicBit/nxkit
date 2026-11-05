@@ -2,6 +2,30 @@
 
 All notable changes are in this file. The format follows Keep a Changelog. Versions follow Semantic Versioning.
 
+## 0.2.0
+
+### Added
+
+- `nxb-extract` reads game cards (`.xci`), compressed packages (`.nsz`, `.xcz`) and dump folders (`--dump`).
+  The zstd decoder streams the data and has an output limit. `--app <id>` selects one application in a merged package.
+- Mac stages in `nxb build`: the Mac host (`make` and `clang`), the companion app, the app settings file and the app icon.
+  The reference build scripts are the oracle.
+
+### Checked
+
+- XCI, merged packages and dump folders: synthetic fixtures only. The output is byte-identical to the reference extractors.
+  No real sample was available.
+- NSZ: one real file. The decoded NCA is identical to the output of the reference decompressor. The NCZ block mode was not checked on real data.
+- App icon and companion app: byte-identical on one title.
+- App settings file: 425 of 425 outputs are byte-identical for 142 profiles. One multi-program header is not ported.
+- Mac host: the reuse key and the decoder inputs are byte-identical. The binary is not byte-identical.
+  The reference script also gives a different binary on each run (`LC_UUID` and the debug map). The code part is identical.
+
+### Limits
+
+- `nxb build` end to end with the new stages was not run on a real title.
+- Not ported: the button-icon font, the header of multi-program profiles, zstd dictionaries, code rewrite.
+
 ## 0.1.1
 
 ### Added

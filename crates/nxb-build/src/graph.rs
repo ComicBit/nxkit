@@ -233,6 +233,12 @@ pub fn plan(a: &Args) -> Result<Build, String> {
             reused: None,
         });
     }
+    nodes.push(Node {
+        name: "Mac host".into(),
+        deps: vec![],
+        key: key("host", &[("work", work.display().to_string())]),
+        reused: None,
+    });
     let app_deps: Vec<usize> = (2..nodes.len()).collect();
     nodes.push(Node {
         name: "Mac app".into(),
@@ -293,9 +299,8 @@ pub fn describe(b: &Build) -> String {
     }
     let _ = writeln!(
         s,
-        "not ported, from the work folder: rewrite (patched_{}), Mac host (tools/dmhost), companion app (previous app or --companion-app), app settings (app/{}), icon (previous app)",
-        b.package,
-        nxb_pack::macapp::SETTINGS_JSON
+        "not ported, from the work folder: rewrite (patched_{}), button-icon font (font/)",
+        b.package
     );
     s
 }
@@ -319,6 +324,8 @@ fn stage_extract(a: &Args, b: &Build, p: &Progress) -> Result<String, String> {
         digests: None,
         html: true,
         base_outputs: true,
+        app: None,
+        discard_images: false,
         split: Some((
             b.profile.0.join("game.tsv"),
             nxb_extract::split::SplitOutputs {
@@ -339,16 +346,9 @@ fn stage_app(a: &Args, b: &Build) -> Result<String, String> {
     let w = &b.work;
     let prof = &b.profile.1;
     let previous = b.out.is_dir().then(|| b.out.clone());
-    let companion = a
-        .companion
-        .clone()
-        .or_else(|| previous.as_ref().map(|p| p.join("Contents/MacOS/nxnative")))
-        .ok_or("no companion app: pass --companion-app (its build is not ported)")?;
-    let icns = previous
-        .as_ref()
-        .map(|p| p.join("Contents/Resources/AppIcon.icns"))
-        .filter(|p| p.is_file());
     let ex = w.join("extract").join(&b.package);
+    let parts = crate::host::app::prepare(a, b, previous.as_deref())?;
+    let (companion, icns, lang) = (parts.companion, parts.icns, parts.lang);
     let nacp = std::fs::read(ex.join("control.nacp")).unwrap_or_default();
     let version = nxb_extract::version::display_version(&nacp);
     let name = a
@@ -356,13 +356,14 @@ fn stage_app(a: &Args, b: &Build) -> Result<String, String> {
         .clone()
         .or_else(|| nxb_extract::version::title_name(&nacp).ok())
         .unwrap_or_else(|| b.title.clone());
+    let patched = w.join(format!("patched_{}", b.package));
     let fork = std::fs::read_to_string(b.engine.join("dm/fork_patches.txt")).unwrap_or_default();
     let tables = b.profile.0.clone();
     let pso_pairs = w.join("shader/pso_pairs.tsv");
     let inputs = nxb_pack::macapp::MacAppInputs {
         host: w.join("tools/dmhost"),
         companion: companion.clone(),
-        patched: w.join(format!("patched_{}", b.package)),
+        patched: patched.clone(),
         romfs: ex.join("RomFS.img"),
         msl: b.shaders.clone(),
         msl_name: None,
@@ -372,14 +373,14 @@ fn stage_app(a: &Args, b: &Build) -> Result<String, String> {
         pso_pairs: pso_pairs.is_file().then_some(pso_pairs),
         html: Some(ex.join("html")),
         env_file: None,
-        settings: Some(w.join("app").join(nxb_pack::macapp::SETTINGS_JSON)).filter(|p| p.is_file()),
+        settings: Some(parts.settings),
         icns,
         title_id: b.title.clone(),
         name,
         version: (!version.is_empty()).then_some(version),
         bundle_id: a.bundle_id.clone(),
         category: prof.get("app_category").cloned(),
-        lang: a.language.clone(),
+        lang: Some(lang.clone()),
         marker: prof.get("romfs_marker").cloned(),
         fork_patches: fork
             .lines()
@@ -563,6 +564,7 @@ pub fn run(a: &Args, p: &std::sync::Arc<Progress>) -> Result<(), String> {
                     Some(s) => s,
                     None => stage_pso(&b, name.trim_start_matches("Pipeline archive "))?,
                 },
+                (_, "Mac host") => crate::host::machost::stage(&b.engine, &b.work, &b.title)?,
                 _ => stage_app(a, &b)?,
             }
         };

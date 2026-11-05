@@ -53,12 +53,30 @@ flowchart LR
 - **Exit codes:** 2 incorrect command, 3 damaged, 4 sparse without update, 5 no meta, 6 keys too old.
 
 At this time, the stage supports NSP packages (NCA, IVFC, BKTR, RomFS image, ExeFS, NACP, zstd, LZ4).
-It also reads Switch 2 packages (`.nup`). A `.nup` package needs no keys. Use `nxb extract --nup <game.nup>` or `nxb-extract` with the same arguments.
+It also reads game cards (XCI), compressed packages (NSZ and XCZ), Switch 2 packages (`.nup`) and dump folders.
+A `.nup` package needs no keys. Use `nxb extract --nup <game.nup>` or `nxb-extract` with the same arguments.
+Use `--dump <folder>` for a dump folder. The output layout is the same as the layout of the reference script for dump folders.
 The stage writes `extract/v<version>/` (ExeFS, RomFS image, control data and icon) and `aoc/<index>.img` for each DLC.
 It checks each file against its size and its SHA-256, and it stops on a damaged or incomplete package.
 Without `--version`, it takes the newest update. When the package has no base game, it uses the update as the whole game.
 `--discard-images` makes the digests and does not write the images. `--no-images` writes only the code modules and the control data.
-XCI, NSZ, zstd dictionaries, the `--html` output and games with more than one program are not ported at this time.
+
+- **XCI.** The stage reads the secure partition of the game card.
+- **NSZ and XCZ.** The stage decodes the NCZ block streams and the NCZ solid streams with the own zstd decoder.
+  The decoder streams the data and has an output limit. The stage needs no external program.
+- **Merged packages.** A package can hold more than one game. `--app <id>` gives the application id in hexadecimal.
+  The stage then uses only the contents of that application.
+
+Not ported at this time: zstd dictionaries, the `--html` output of some titles and games with more than one program.
+
+### Tests on real data
+
+- NSP: three titles.
+- NUP: one real package (a standalone update). The RomFS image digest, the ExeFS and the icon are identical.
+- NSZ: one real file. The digest of the decoded NCA is identical to the digest of the output of the reference decompressor.
+  The NCZ block mode was not checked on real data.
+- XCI, merged packages (`--app`) and dump folders: only synthetic fixtures. The output is byte-identical to the output of the reference extractors on these fixtures.
+  No real sample was available.
 
 ## Split
 
@@ -78,6 +96,35 @@ A different format stops the split with a named `Unsupported` error. The referen
 `nxb-rewrite` decodes each AArch64 instruction of each code module with the own decoder `nxb-a64`. It changes `x18`,
 `tpidr*`, `svc`, `cntpct_el0`, misaligned `sp`, lock acquires, spin loops, cuts and observation gates, and writes
 `.patched.bin` and five TSV tables. At this time, the rewrite stage is a skeleton.
+
+## Host stages around the app
+
+The Mac stages around the app use `make`, `clang`, `swiftc`, `sips` and `iconutil` as external programs.
+Each program runs through the `Tool` trait with the exact environment of the reference build script.
+
+| stage | result against the reference build scripts |
+|---|---|
+| App icon | byte-identical (measured on one title) |
+| Companion app | byte-identical (measured on one title). The reuse key file contains the sources, the compiler versions, the SDK and the minimum system version |
+| App settings file (`launcher.json`) | 425 of 425 outputs byte-identical for the 142 profiles of the reference engine. The test skips one multi-program profile. Its header is not ported, but its settings are identical |
+| Mac host | the reuse key and the decoder inputs are byte-identical. The binary is not byte-identical |
+
+The Mac host binary is not reproducible, also not with the reference script. Two builds with the reference script differ in 2,029 bytes.
+The differences are the `LC_UUID` and the debug map in `__LINKEDIT`. Thus the test compares the same key, the same decoder inputs
+and the same bytes before `__LINKEDIT` with the UUID set to zero. The reference script reuses a build of the Rust stage and the other way round.
+
+These stages are not ported:
+
+- The button-icon font (`make_ext_font.py`). `nxb build` uses the `font/` folder of the work folder.
+- The header of multi-program profiles.
+
+Some conversions approximate Python behavior. The code documents them: the `repr` of non-ASCII characters
+(the stage escapes only C1 control characters, the no-break space and the soft hyphen), the whitespace rules of `shlex`,
+and the replacement of `DMSH_CHAIN` line by line. The tools do not get `DEVELOPER_DIR`.
+When you set it, the `clang --version` text of the reference script can be different.
+
+`nxb build` runs these stages. This complete path (`nxb build` end to end with the new stages) was not run on a real title.
+The test compared each stage alone.
 
 ## Mac app and code signature
 
@@ -132,6 +179,7 @@ For the study of the archive back end, refer to [research/backend-survey.md](res
 | extract | `RomFS.img` (header, data, index, names, damaged flags), ExeFS, `control.nacp`, `icon.jpg`, `html*/`, `romfs.id`, exit codes | log text, times |
 | rewrite | all six outputs of each module | |
 | split | package records, `shader_map.tsv`, answer table, `shader_pairs.tsv`, `pso_pairs.tsv` | progress lines |
+| icon, companion app, settings file | see the table in the section on host stages | |
 | Mac app | all files of the bundle, `CodeResources`, the signed Mach-O files | the reuse key file |
 | IPA | entry list, sequence, headers, modes, times, CRCs, uncompressed bytes | compressed bytes across zlib versions |
 | pipeline archive | `prebuilt.tsv`, `rest_pairs.tsv`, `archive.tsv` | `metal-tt` output bytes |

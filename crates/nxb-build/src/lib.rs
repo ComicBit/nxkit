@@ -9,12 +9,13 @@
 //! staging the non-shader files during the shader step) is the next step. `--dry-run` prints the graph and the keys.
 //!
 //! Not ported yet, taken from the work folder (the Python build's outputs) and named in the plan: the rewrite
-//! (`patch_nso.py`), the Mac host and companion app builds, the app settings, the icon, the survey and profile steps. The
+//! (`patch_nso.py`), the button-icon font (`make_ext_font.py`), the survey and profile steps. The
 //! shader step is an existing library folder (`--shaders`, or the work folder's `shader/cache/b-<chain>`), running the
 //! lead's `shaderbuild build` as a process from here is not wired yet.
 
 pub mod events;
 pub mod graph;
+pub mod host;
 pub mod pipeline;
 
 use std::path::PathBuf;
@@ -54,8 +55,8 @@ pub struct Args {
     pub engine: Option<PathBuf>,
     /// `--shaders`: an existing `b-<chain>` library folder.
     pub shaders: Option<PathBuf>,
-    /// `--companion-app`: the companion app binary embedded next to the built app (`Contents/MacOS/nxnative`, built by
-    /// clang + swiftc in the Python build).
+    /// `--companion-app`: the companion app binary embedded next to the built app (`Contents/MacOS/nxnative`), default:
+    /// built from the engine's sources by clang + swiftc (`host::companion`) into `<work>/app/nxnative`.
     pub companion: Option<PathBuf>,
     /// Worker threads.
     pub threads: usize,
