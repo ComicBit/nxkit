@@ -201,9 +201,6 @@ fn rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
 fn check_limits(all: &[Krate]) -> Vec<String> {
     let mut errs = Vec::new();
     for k in all {
-        if k.layer == "F" {
-            continue;
-        }
         let mut files = Vec::new();
         rs_files(&k.dir.join("src"), &mut files);
         for f in files {
