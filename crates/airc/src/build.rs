@@ -4,7 +4,7 @@
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, ExitCode, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::Instant;
@@ -156,10 +156,10 @@ fn one(
 }
 
 /// Builds every input, prints a summary line (inputs/s, medians).
-pub fn run(opts: &Opts) -> ExitCode {
+pub fn run(opts: &Opts) -> i32 {
     let Some(work) = &opts.work else {
         eprintln!("airc build: --work DIR is required");
-        return ExitCode::from(2);
+        return 2;
     };
     let _ = std::fs::create_dir_all(work);
     let t = Tools {
@@ -231,5 +231,5 @@ pub fn run(opts: &Opts) -> ExitCode {
         med(1),
         p90
     );
-    ExitCode::SUCCESS
+    0
 }

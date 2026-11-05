@@ -51,11 +51,11 @@ flowchart LR
   the stage lists all damaged files and stops with exit code 3. With `--allow-damaged`, it writes the bytes and sets the damaged flag.
 - **Special packages.** Each special case (sparse NCAs, XCI secure partitions, merged NSPs, NUP, dump folders) gets a named test with a synthetic fixture.
 - **Exit codes:** 1 error, 2 incorrect command, 3 damaged data, 4 not supported, 6 missing key.
-  Exit code 4 means that the caller must run the reference step. This is the same for `nxb-split`, `nxb rewrite`, `nxb nro`, `nxb-ios` and `nxb build`.
+  Exit code 4 means that the caller must run the reference step. This is the same for `nxb split`, `nxb rewrite`, `nxb nro`, `nxb ios` and `nxb build`.
 
 At this time, the stage supports NSP packages (NCA, IVFC, BKTR, RomFS image, ExeFS, NACP, zstd, LZ4).
 It also reads game cards (XCI), compressed packages (NSZ and XCZ), Switch 2 packages (`.nup`) and dump folders.
-A `.nup` package needs no keys. Use `nxb extract --nup <game.nup>` or `nxb-extract` with the same arguments.
+A `.nup` package needs no keys. Use `nxb extract --nup <game.nup>`.
 Use `--dump <folder>` for a dump folder. The output layout is the same as the layout of the reference script for dump folders.
 The stage writes `extract/v<version>/` (ExeFS, RomFS image, control data and icon) and `aoc/<index>.img` for each DLC.
 It checks each file against its size and its SHA-256, and it stops on a damaged or incomplete package.
@@ -227,11 +227,11 @@ On the reference title (58,207 sealed files, 4.99 GB), `CodeResources` and the t
 
 ## iOS stages
 
-The crate `nxb-build` has the module `ios`, and the binary `nxb-ios` runs it. It does the work of the reference iOS scripts
+The crate `nxb-build` has the module `ios`, and the command `nxb ios` runs it. It does the work of the reference iOS scripts
 with the same command lines and the same environment variables:
 
-- `nxb-ios ipa [<out.ipa> | --prepare-xcode]` does the work of the IPA script.
-- `nxb-ios shell --prepare-xcode` and `nxb-ios shell --build` do the work of the shell script.
+- `nxb ios ipa [<out.ipa> | --prepare-xcode]` does the work of the IPA script.
+- `nxb ios shell --prepare-xcode` and `nxb ios shell --build` do the work of the shell script.
 
 `NXB_ENGINE` gives the folder of the engine files that the stages read. `nxb build --platform ios` runs the iOS flow in one process graph
 (see the end of this section). Without `--platform`, `nxb build` refuses a value other than `mac-app` and `ios`.
@@ -275,7 +275,7 @@ Limits of the iOS stages:
 
 - Exit code 4 means unsupported input. The caller runs the reference script.
 - The default name of the shell app is `NxbShell`. The reference script has a different default name. Set `DM_SHELL_NAME` to get the same name.
-- Not run: `nxb-ios shell --build`, and an IPA with a pipeline archive in it.
+- Not run: `nxb ios shell --build`, and an IPA with a pipeline archive in it.
 - The tests that compare with the reference script skip when the `NXB_ORACLE_*` variables are not set.
 - The font file and the executable are equal in part only (see above). A framework IPA and a multi-program IPA were compared on fixtures.
 
@@ -290,7 +290,7 @@ and on a bundle with a 300 MB streamed file. A full game IPA was not compared. T
 
 The archive stage compiles one Metal 4 render pipeline base for each shader pair into native GPU code with Apple's `metal-tt`.
 
-- `nxb-pso` copies the plan, the script, the stamp and the batch cut byte for byte: the same base sequence, contiguous batches of 1,000.
+- `nxb pso` copies the plan, the script, the stamp and the batch cut byte for byte: the same base sequence, contiguous batches of 1,000.
 - Each batch is a task that holds CPU and memory (2.1 GiB default, from the measured peak memory). It waits for the libraries that its bases use.
 - Each batch runs `applegpu-nt -j 1` and then `air-pack`. The stage runs one batch for each core.
 - The merge keeps the batch sequence (`metal-pack` inputs in index sequence).

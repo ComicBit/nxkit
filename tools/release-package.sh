@@ -1,29 +1,44 @@
 #!/bin/sh
-# Packs the release: signs the binaries, makes the ZIP file, the checksum file and the release notes.
+# Packs the release: signs the one binary, makes the ZIP file, the checksum file and the release notes.
 # Usage: tools/release-package.sh TAG            (for example v0.1.0, run after cargo build --release)
-# Environment: NXB_RELEASE_BINS (names of the binaries, default "nxb nxb-extract nxb-split nxb-ios airc"), TARGET_DIR (default target).
-# The archive also holds rewrite-rules/ (data/rewrite-rules of the repository).
+# Environment: TARGET_DIR (default target).
+# The archive holds the one binary nxb, rewrite-rules/ (data/rewrite-rules of the repository), LICENSE and THIRD_PARTY.md.
+# There are no other program names and no links: every stage is a command of nxb.
 # Output in dist/: nxb-TAG-macos-arm64.zip, SHA256SUMS, notes.md
 set -eu
 cd "$(dirname "$0")/.."
 tag=${1:?usage: release-package.sh TAG}
-bins=${NXB_RELEASE_BINS:-"nxb nxb-extract nxb-split nxb-ios airc"}
 target=${TARGET_DIR:-${CARGO_TARGET_DIR:-target}}/release
 version=${tag#v}
 name="nxb-${tag}-macos-arm64"
 
 rm -rf dist; mkdir -p "dist/$name"
-for b in $bins; do
-  test -x "$target/$b" || { echo "missing binary: $target/$b" >&2; exit 1; }
-  cp "$target/$b" "dist/$name/$b"
-  codesign -s - --force "dist/$name/$b"
-  codesign --verify "dist/$name/$b"
-done
+test -x "$target/nxb" || { echo "missing binary: $target/nxb" >&2; exit 1; }
+cp "$target/nxb" "dist/$name/nxb"
+# ad-hoc signature of the one real binary
+codesign -s - --force "dist/$name/nxb"
+codesign --verify "dist/$name/nxb"
 cp LICENSE THIRD_PARTY.md "dist/$name/"
 # the rewrite rules (`nxb rewrite` finds them next to the binary)
 cp -R data/rewrite-rules "dist/$name/rewrite-rules"
 ( cd dist && zip -qr "$name.zip" "$name" && shasum -a 256 "$name.zip" > SHA256SUMS \
-  && ( cd "$name" && shasum -a 256 $bins ) | sed "s|  |  $name/|" >> SHA256SUMS && cat SHA256SUMS )
+  && ( cd "$name" && shasum -a 256 nxb ) | sed "s|  |  $name/|" >> SHA256SUMS && cat SHA256SUMS )
+
+# check the zip: the one binary, the rules, the two texts, no links and no other program
+chk=$(mktemp -d "${TMPDIR:-/tmp}/nxb-zipcheck.XXXXXX")
+trap 'rm -rf "$chk"' EXIT
+unzip -q "dist/$name.zip" -d "$chk"
+test -x "$chk/$name/nxb" || { echo "zip check: nxb is missing or not executable" >&2; exit 1; }
+for f in LICENSE THIRD_PARTY.md rewrite-rules/files.toml; do
+  test -f "$chk/$name/$f" || { echo "zip check: $f is missing" >&2; exit 1; }
+done
+test -z "$(find "$chk/$name" -type l)" || { echo "zip check: the zip holds a link" >&2; exit 1; }
+extra=$(cd "$chk/$name" && find . -maxdepth 1 -type f -perm -u+x ! -name nxb)
+test -z "$extra" || { echo "zip check: more than one program: $extra" >&2; exit 1; }
+codesign --verify "$chk/$name/nxb"
+"$chk/$name/nxb" version >/dev/null
+cmp "$chk/$name/nxb" "dist/$name/nxb"
+( cd dist && grep " $name/nxb\$" SHA256SUMS | shasum -a 256 -c - >/dev/null )
 
 # notes: the section of CHANGELOG.md for this version
 awk -v v="$version" '

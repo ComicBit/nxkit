@@ -9,10 +9,10 @@
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::process::ExitCode;
 
-fn main() -> ExitCode {
-    let a: Vec<String> = std::env::args().skip(1).collect();
+/// `nxb app` / `nxb-macapp`: returns the exit code.
+pub fn main(args: &[String]) -> i32 {
+    let a = args;
     let mut opt: BTreeMap<String, String> = BTreeMap::new();
     let mut program_rows: Vec<String> = Vec::new();
     let mut out = None;
@@ -45,7 +45,7 @@ fn main() -> ExitCode {
                 .join(","),
             Err(e) => {
                 eprintln!("nxb-macapp: {}: {e}", f.display());
-                return ExitCode::from(1);
+                return 1;
             }
         },
         None => String::new(),
@@ -75,9 +75,9 @@ fn main() -> ExitCode {
     )
     else {
         eprintln!("usage: see the source header of nxb-macapp");
-        return ExitCode::from(2);
+        return 2;
     };
-    let inputs = nxb_pack::macapp::MacAppInputs {
+    let inputs = crate::macapp::MacAppInputs {
         host,
         companion,
         patched,
@@ -104,40 +104,40 @@ fn main() -> ExitCode {
         aoc: p("aoc"),
         programs: match program_rows
             .iter()
-            .map(|r| nxb_pack::macapp::Program::parse(r))
+            .map(|r| crate::macapp::Program::parse(r))
             .collect()
         {
             Ok(v) => v,
             Err(e) => {
                 eprintln!("nxb-macapp: {e}");
-                return ExitCode::from(2);
+                return 2;
             }
         },
     };
     let threads = s("threads")
         .and_then(|t| t.parse().ok())
-        .unwrap_or_else(nxb_pack::digest::default_threads);
+        .unwrap_or_else(crate::digest::default_threads);
     let t = std::time::Instant::now();
     // digests the producers know (a store), by destination path relative to `Contents/` (`nxb-pack digests` form)
     let known = match p("dest-digests") {
-        Some(f) => match nxb_pack::TsvDigests::load(&f) {
+        Some(f) => match crate::TsvDigests::load(&f) {
             Ok(t) => Some(t),
             Err(e) => {
                 eprintln!("nxb-macapp: {e}");
-                return ExitCode::from(1);
+                return 1;
             }
         },
         None => None,
     };
-    let with_known = |mut plan: nxb_pack::appstage::StagePlan| {
-        use nxb_pack::DigestSource;
+    let with_known = |mut plan: crate::appstage::StagePlan| {
+        use crate::DigestSource;
         if let Some(k) = &known {
             for e in &mut plan.entries {
                 let size = match &e.content {
-                    nxb_pack::appstage::Content::File(p) => {
+                    crate::appstage::Content::File(p) => {
                         std::fs::metadata(p).map(|m| m.len()).unwrap_or(0)
                     }
-                    nxb_pack::appstage::Content::Bytes(b) => b.len() as u64,
+                    crate::appstage::Content::Bytes(b) => b.len() as u64,
                 };
                 if let Some(rel) = e.dest.strip_prefix("Contents/") {
                     e.digests = k.lookup(rel, size);
@@ -150,32 +150,32 @@ fn main() -> ExitCode {
     let mut key_file = out.as_os_str().to_owned();
     key_file.push(".key");
     let key_file = PathBuf::from(key_file);
-    let plan = match nxb_pack::macapp::plan(&inputs) {
+    let plan = match crate::macapp::plan(&inputs) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("nxb-macapp: {e}");
-            return ExitCode::from(1);
+            return 1;
         }
     };
-    let key = nxb_pack::macapp::reuse_key(&plan).unwrap_or_default();
+    let key = crate::macapp::reuse_key(&plan).unwrap_or_default();
     if out.is_dir()
         && !key.is_empty()
         && std::fs::read_to_string(&key_file).is_ok_and(|k| k.trim() == key)
     {
         println!("app: {}, reused (inputs unchanged)", out.display());
-        return ExitCode::SUCCESS;
+        return 0;
     }
     let _ = std::fs::remove_file(&key_file);
-    let r = Ok::<_, nxb_pack::Error>(with_known(plan)).and_then(|plan| match p("previous") {
+    let r = Ok::<_, crate::Error>(with_known(plan)).and_then(|plan| match p("previous") {
         Some(prev) => {
-            nxb_pack::incremental::update(&plan, &prev, &out, threads).map(|r| r.to_string())
+            crate::incremental::update(&plan, &prev, &out, threads).map(|r| r.to_string())
         }
         None => {
-            let opts = nxb_pack::appstage::StageOptions {
+            let opts = crate::appstage::StageOptions {
                 threads,
                 ..Default::default()
             };
-            nxb_pack::appstage::stage_and_sign(&plan, &out, &opts).map(|r| {
+            crate::appstage::stage_and_sign(&plan, &out, &opts).map(|r| {
                 format!(
                     "staged {} files ({} MB) in {:.2} s, signed in {:.2} s",
                     r.files,
@@ -196,15 +196,15 @@ fn main() -> ExitCode {
                 out.display(),
                 t.elapsed().as_secs_f64()
             );
-            ExitCode::SUCCESS
+            0
         }
         Err(e) => {
             eprintln!("nxb-macapp: {e}");
-            ExitCode::from(if matches!(e, nxb_pack::Error::Unsupported(_)) {
+            if matches!(e, crate::Error::Unsupported(_)) {
                 3
             } else {
                 1
-            })
+            }
         }
     }
 }

@@ -21,6 +21,7 @@ pub mod events;
 pub mod graph;
 pub mod host;
 pub mod ios;
+pub mod ios_cli;
 mod iosbuild;
 pub mod order;
 pub mod pipeline;

@@ -3,7 +3,7 @@
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode, Stdio};
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::Instant;
@@ -244,21 +244,21 @@ fn ref_lib_sha(store: &Path, key: &str) -> Option<String> {
 }
 
 /// Runs the pipeline over all inputs, one JSON line per input on stdout.
-pub fn run(opts: &Opts) -> ExitCode {
+pub fn run(opts: &Opts) -> i32 {
     let Some(work) = &opts.work else {
         eprintln!("airc check: --work DIR is required");
-        return ExitCode::from(2);
+        return 2;
     };
     if let Err(e) = std::fs::create_dir_all(work) {
         eprintln!("airc check: {}: {e}", work.display());
-        return ExitCode::from(1);
+        return 1;
     }
     let target = opts.target();
     let tools = match Tools::find(opts.sdk()) {
         Ok(t) => t,
         Err(e) => {
             eprintln!("airc check: {e}");
-            return ExitCode::from(1);
+            return 1;
         }
     };
     let next = AtomicUsize::new(0);
@@ -315,5 +315,5 @@ pub fn run(opts: &Opts) -> ExitCode {
             parts.join(", ")
         );
     }
-    ExitCode::SUCCESS
+    0
 }
