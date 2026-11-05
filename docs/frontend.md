@@ -19,6 +19,7 @@ flowchart LR
     E --> F["Apple air-opt -O1 --discard-value-names"]
     F --> G["Apple metallib"]
     X["Apple metal -c: all shaders not on the allow list"] -.-> G
+    E -.->|raw path, raw allow list| R["own optimizer and own MTLB writer"]
 ```
 
 | crate | function |
@@ -28,7 +29,7 @@ flowchart LR
 | `air-emit` | LLVM text, metadata, function bodies, entry ABI and argument metadata, argument buffers, `air.*` intrinsics |
 | `air-bc` | a parser for the IR text that `air-emit` writes, and a bitcode writer in the LLVM 14 format. Other input is an error, and the caller uses the text path. |
 | `air-front` | the in-process API. `compile(msl, target)` gives bitcode and the back-half arguments. `id()` gives a version string for cache keys. |
-| `airc` | the command-line driver: `emit`, `bc`, `build`, `check`, `rank`, `deny` |
+| `airc` | the command-line driver: `emit`, `bc`, `build`, `check`, `rank`, `deny`, `raw`, `rawcmp`, `rawcheck` |
 | `mslcheck` | an accept or reject checker for engine MSL files |
 
 All crates use only the standard library and forbid `unsafe` code. `shaderbuild` reads the verdict file with `--own-front <verdict file>`.
@@ -89,8 +90,30 @@ until the IR agrees.
 
 The front-end code can parse and write the `MTLB` container (210 of 210 Apple libraries rewritten byte-identical).
 But `metallib` also runs its own pass list on each function, and no LLVM pass subset gave Apple's machine code (0 of 15 pairs).
-Thus Apple's `air-opt -O1` and `metallib` stay (decision D17). The cheapest real decrease is to write the bitcode directly
-without the text round trip: approximately 15 ms for each input (the in-process front end costs 29.5 ms mean).
+Thus Apple's `air-opt -O1` and `metallib` stay for the default path (decision D17).
+
+## Raw container path
+
+Version 0.3.0 adds a second path, the raw path. It is not byte-identical to Apple's output. It does not use `air-opt` or `metallib`.
+
+- `air-bc` splits the module into one module for each entry point and prunes the function constants.
+- The own optimizer in `air-bc` does `mem2reg`, removal of trivial phi nodes, block-local common subexpression removal and removal of dead code.
+- `air-front` writes the bitcode and the `MTLB` container itself. The call is `build_raw`. The commands `airc raw`, `rawcmp` and `rawcheck` use it.
+- The raw libraries are larger than Apple's libraries (1.33 times on 40 samples, measured).
+
+The evidence for a raw library is the GPU differential test, not byte identity. A shader is on the raw allow list only when 12 test vectors
+gave the same output words as Apple's library and the current front end rebuilds the tested library byte for byte.
+Of 3,625 candidates (23,752 inputs are possible), 3,375 were the same, 220 were different, 29 were not deterministic and 1 was not built.
+10 of the same sources no longer exist on the test machine, thus they are not on the list. The list has 3,365 entries (about 14 % of the corpus).
+[shader-step.md](shader-step.md) describes the nxbuild tier that uses the list.
+
+Speed (measured, 20 large vertex shaders, loaded machine): the raw path used a median of 39 ms for the emit, 35 ms for the text IR to bitcode step,
+18 ms for the split and the writer, and 40 ms for the optimizer. This is more than the earlier estimate of 15 to 20 ms for each shader.
+A full-corpus run at 6 threads gave a median of 33 ms and a mean of 71 ms for each input (measured).
+The next cheap decrease is to write the bitcode without the text IR (about 35 ms, estimate).
+
+Not done: the raw path for iOS (there is no GPU test for iOS libraries), a list for the other 86 % of the corpus,
+and a GPU test of the side-unit cut of a raw library on its own.
 
 ## Tests
 

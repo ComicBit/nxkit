@@ -17,6 +17,7 @@ pub mod front;
 pub mod guard_tables;
 pub mod inputs;
 pub mod own_front;
+pub mod own_raw;
 pub mod recompile;
 mod recompile_build;
 pub mod recompile_summary;

@@ -342,12 +342,17 @@ fn stage_extract(a: &Args, b: &Build, p: &Progress) -> Result<String, String> {
     Ok(format!("{} images", s.images.len()))
 }
 
-fn stage_app(a: &Args, b: &Build) -> Result<String, String> {
+/// The app stage: stage and sign (an in-place update of `previous`, the app as it was when the build started) with the
+/// parts made ahead (`host::app::prepare`).
+fn stage_app(
+    a: &Args,
+    b: &Build,
+    previous: Option<PathBuf>,
+    parts: crate::host::app::AppParts,
+) -> Result<String, String> {
     let w = &b.work;
     let prof = &b.profile.1;
-    let previous = b.out.is_dir().then(|| b.out.clone());
     let ex = w.join("extract").join(&b.package);
-    let parts = crate::host::app::prepare(a, b, previous.as_deref())?;
     let (companion, icns, lang) = (parts.companion, parts.icns, parts.lang);
     let nacp = std::fs::read(ex.join("control.nacp")).unwrap_or_default();
     let version = nxb_extract::version::display_version(&nacp);
@@ -423,153 +428,76 @@ fn stage_app(a: &Args, b: &Build) -> Result<String, String> {
     }
 }
 
-/// The minimum OS of the Mac archive: this Mac's major version (`sw_vers`), as `pso_offline.py`.
-pub(crate) fn osmin() -> Result<String, String> {
-    std::process::Command::new("/usr/bin/sw_vers")
-        .arg("-productVersion")
-        .output()
-        .map(|o| {
-            String::from_utf8_lossy(&o.stdout)
-                .trim()
-                .split('.')
-                .next()
-                .unwrap_or("27")
-                .to_string()
-                + ".0"
-        })
-        .map_err(|e| e.to_string())
-}
-
-/// `prebuilt.tsv` and `archive.tsv` of a streamed archive (the counts from the whole plan, as `pso_offline.py`).
-pub(crate) fn write_archive_stamps(
-    b: &Build,
-    lib: &Path,
-    c: &nxb_archive::Config,
-    arch: &str,
-    text: &[u8],
-    zero: bool,
-    bases: usize,
-) -> Result<(), String> {
-    use nxb_archive::plan;
-    let chain = lib
-        .file_name()
-        .and_then(|n| n.to_str())
-        .and_then(|n| n.strip_prefix("b-"))
-        .ok_or("library folder is not b-<chain>")?;
-    let p = plan::plan(lib, chain, &plan::read_pairs(text), zero);
-    let out = b.work.join("pso/mac");
-    std::fs::write(out.join("prebuilt.tsv"), plan::stamp(chain, zero, text))
-        .map_err(|e| e.to_string())?;
-    let tsv = plan::archive_tsv(
-        &[arch.to_string()],
-        "macos",
-        &c.osmin,
-        &c.toolchain,
-        bases,
-        p.rest.len(),
-    );
-    std::fs::write(out.join("archive.tsv"), tsv).map_err(|e| e.to_string())
-}
-
-/// One architecture's pipeline archive: the plan of `pso_offline.py` (profile pairs, then the split's pso_pairs.tsv)
-/// and `nxb_archive::build` (content-cut batches in the store). Output in `<work>/pso/mac`, as the NSP script's.
-fn stage_pso(b: &Build, arch: &str) -> Result<String, String> {
-    use nxb_archive::plan;
-    let pairs = [
-        b.profile.0.join("shader_pairs.tsv"),
-        b.work.join("shader/pso_pairs.tsv"),
-    ];
-    let text = plan::pair_text(&pairs);
-    let chain = b
-        .shaders
-        .file_name()
-        .and_then(|n| n.to_str())
-        .and_then(|n| n.strip_prefix("b-"))
-        .ok_or("library folder is not b-<chain>")?;
-    let zero = b.profile.1.get("depth_mode").map(String::as_str) == Some("zero");
-    let p = plan::plan(&b.shaders, chain, &plan::read_pairs(&text), zero);
-    let (out, work) = (b.work.join("pso/mac"), b.work.join("pso/mac-work"));
-    std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
-    std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
-    let js = work.join("bases.mtl4-json");
-    std::fs::write(&js, plan::script_text(&b.shaders, &p.bases)).map_err(|e| e.to_string())?;
-    let osmin = std::process::Command::new("/usr/bin/sw_vers")
-        .arg("-productVersion")
-        .output()
-        .map(|o| {
-            String::from_utf8_lossy(&o.stdout)
-                .trim()
-                .split('.')
-                .next()
-                .unwrap_or("27")
-                .to_string()
-                + ".0"
-        })
-        .map_err(|e| e.to_string())?;
-    let c = nxb_archive::Config::for_tools(
-        "macos",
-        arch,
-        &osmin,
-        &js,
-        &out.join(format!("{arch}.mtl4a")),
-        &work,
-    )?;
-    let r = nxb_archive::build(&c)?;
-    std::fs::write(out.join("prebuilt.tsv"), plan::stamp(chain, zero, &text))
-        .map_err(|e| e.to_string())?;
-    std::fs::write(
-        out.join("archive.tsv"),
-        plan::archive_tsv(
-            &[arch.to_string()],
-            "macos",
-            &osmin,
-            &c.toolchain,
-            p.bases.len(),
-            p.rest.len(),
-        ),
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(format!(
-        "{} bases, {} MB, {} batches",
-        p.bases.len(),
-        r.size >> 20,
-        r.batches.len()
-    ))
-}
-
-/// Runs the build.
+/// Runs the build. Stages overlap where the graph allows ([`crate::order`]): the Mac host from the start, the app's
+/// companion app, icon and settings once the extract and the host are done (beside the shader step), the first
+/// archive streamed beside the shader step ([`crate::pipeline`]); the events stay those of a run one after another.
 pub fn run(a: &Args, p: &std::sync::Arc<Progress>) -> Result<(), String> {
+    use crate::order::{Stage, Work};
+    use std::sync::Mutex;
     let b = plan(a)?;
     if a.dry_run {
         print!("{}", describe(&b));
         return Ok(());
     }
     p.plan(b.nodes.len());
-    let mut streamed: Option<String> = None;
+    let b = &b;
+    let streamed: Mutex<Option<String>> = Mutex::new(None);
+    let parts: Mutex<Option<crate::host::app::AppParts>> = Mutex::new(None);
+    let (streamed, parts) = (&streamed, &parts);
+    let previous = b.out.is_dir().then(|| b.out.clone());
+    let host = b.nodes.iter().position(|n| n.name == "Mac host");
+    let mut stages: Vec<Stage<'_>> = Vec::new();
     for (i, n) in b.nodes.iter().enumerate() {
-        p.stage(&n.name, "");
-        let summary = if let Some(r) = &n.reused {
-            format!("reused: {r}")
-        } else {
-            match (i, n.name.as_str()) {
-                (0, _) => stage_extract(a, &b, p)?,
-                (1, _) => "in the extract's pass".into(),
-                (2, _) => {
-                    // the shader step and the first architecture's archive together (crate::pipeline)
-                    let o = crate::pipeline::shaders_and_archive(a, &b, p)?;
-                    streamed = o.archive;
-                    o.shaders
-                }
-                (_, name) if name.starts_with("Pipeline archive") => match streamed.take() {
-                    Some(s) => s,
-                    None => stage_pso(&b, name.trim_start_matches("Pipeline archive "))?,
-                },
-                (_, "Mac host") => crate::host::machost::stage(&b.engine, &b.work, &b.title)?,
-                _ => stage_app(a, &b)?,
+        let mut deps = n.deps.clone();
+        let work = match (&n.reused, i, n.name.as_str()) {
+            (Some(r), _, _) => Work::Reused(format!("reused: {r}")),
+            (_, 0, _) => Work::Turn(Box::new(move || stage_extract(a, b, p))),
+            (_, 1, _) => Work::Reused("in the extract's pass".into()),
+            (_, 2, _) => Work::Turn(Box::new(move || {
+                // the shader step and the first architecture's archive together (crate::pipeline)
+                let o = crate::pipeline::shaders_and_archive(a, b, p)?;
+                *streamed.lock().map_err(|_| "lock")? = o.archive;
+                Ok(o.shaders)
+            })),
+            (_, _, name) if name.starts_with("Pipeline archive") => {
+                let arch = name.trim_start_matches("Pipeline archive ");
+                Work::Turn(Box::new(move || {
+                    match streamed.lock().map_err(|_| "lock")?.take() {
+                        Some(s) => Ok(s),
+                        None => crate::pipeline::stage_pso(b, arch),
+                    }
+                }))
+            }
+            (_, _, "Mac host") => Work::Early(Box::new(move || {
+                crate::host::machost::stage(&b.engine, &b.work, &b.title)
+            })),
+            _ => {
+                // the app's parts (companion app, icon, settings) need the extract and the host only: made ahead
+                let prev = previous.clone();
+                stages.push(Stage {
+                    name: None,
+                    deps: std::iter::once(0).chain(host).collect(),
+                    work: Work::Early(Box::new(move || {
+                        let made = crate::host::app::prepare(a, b, prev.as_deref())?;
+                        *parts.lock().map_err(|_| "lock")? = Some(made);
+                        Ok(String::new())
+                    })),
+                });
+                deps.push(stages.len() - 1);
+                let prev = previous.clone();
+                Work::Turn(Box::new(move || {
+                    let made = parts.lock().map_err(|_| "lock")?.take();
+                    stage_app(a, b, prev, made.ok_or("the app's parts were not made")?)
+                }))
             }
         };
-        p.end(&summary, true);
+        stages.push(Stage {
+            name: Some(n.name.clone()),
+            deps,
+            work,
+        });
     }
+    crate::order::run(p, stages)?;
     p.say(&format!("done: {}", b.out.display()));
     Ok(())
 }

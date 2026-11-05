@@ -25,9 +25,12 @@ The documents use Simplified Technical English (ASD-STE100). The terms below are
 | own front end | The Rust compiler from MSL to AIR in this workspace (layer F). |
 | parity test | A test that compares the output of a stage with the output of the reference build scripts, byte for byte. |
 | PCE | P-core equivalent. PCE = P + e x E, with P and E the core counts and e the relative speed of an E core. |
+| raw allow list | The list of shader digests that the raw path can compile. Each entry passed the GPU differential test. |
+| raw path | The path of the own front end that writes the bitcode and the library container itself. Its output is not byte-identical to Apple's output. |
 | reference build scripts | The Python and C# build scripts that the workspace replaces. The tests use them as the reference. |
 | reference machine | An Apple M2 Max with 8 performance cores, 4 efficiency cores and 32 GB of memory. |
 | reference title | The one game that gave all measured numbers in these documents. |
+| overlap | Two stages of `nxb build` run at the same time. The events stay the same as in a run in series. |
 | reuse key | A digest of all inputs of a stage. If the key does not change, the stage uses its previous output. |
 | shader step | The stage that translates and compiles the shaders of a game into libraries. The binary is `shaderbuild`. |
 | stage | One part of the build: extract, rewrite, split, shader step, pipeline archive, pack, sign. |

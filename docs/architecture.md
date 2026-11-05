@@ -8,6 +8,7 @@ For the decisions behind this structure, refer to [decisions.md](decisions.md).
 - The repository is one Cargo workspace. All crates are in `crates/`. The developer tools are in `xtask/`.
 - Each crate has the name `nxb-<concern>`. The front-end crates of layer F keep their names (`msl-*`, `air-*`, `airc`, `mslcheck`).
 - `nxb-cli` makes two binaries from the same code: `nxb` (the full build) and `shaderbuild` (the shader step).
+- `nxb-build` makes the binary `nxb-ios` (the iOS stages) in addition to the library of the orchestrator.
 - The workspace uses the standard library only. At this time, it has no external crates.
 
 ## Layers

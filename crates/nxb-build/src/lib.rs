@@ -5,8 +5,11 @@
 //!
 //! The graph (`--platform mac-app`): extract + split (fused, one pass for all versions) -> shaders -> pipeline archive
 //! (when `--gpu` names an architecture.`nxb-archive`, not run on a full game from here yet) -> app (stage + sign, an in-place update of the previous app).
-//! The stages run one after another today, the overlap the design asks for (archive batches as their libraries appear,
-//! staging the non-shader files during the shader step) is the next step. `--dry-run` prints the graph and the keys.
+//! Stages overlap where the graph allows ([`order`]): the Mac host from the start, the app's companion app, icon and
+//! settings beside the shader step, the first archive's batches as their libraries appear (widening to every core when
+//! the shader step ends), the console events stay those of a run one after another. Not overlapped yet: the shader
+//! step with the extract (it reads the split's packages when they are all written) and the staging of the app's
+//! non-shader files with the shader step. `--dry-run` prints the graph and the keys.
 //!
 //! Not ported yet, taken from the work folder (the Python build's outputs) and named in the plan: the rewrite
 //! (`patch_nso.py`), the button-icon font (`make_ext_font.py`), the survey and profile steps. The
@@ -16,6 +19,8 @@
 pub mod events;
 pub mod graph;
 pub mod host;
+pub mod ios;
+pub mod order;
 pub mod pipeline;
 
 use std::path::PathBuf;

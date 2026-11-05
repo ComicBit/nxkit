@@ -4,6 +4,9 @@
 //! Off by default. It compiles only shaders the verdict file allows (per-shader verdicts of the emitter project's
 //! validation, keyed by the SHA-256 of the MSL), every other shader and every reject goes to Apple's `metal -c`.
 //! With only `own-identical` allowed the libraries are byte-identical to Apple's.
+//!
+//! [`RawFrontEnd`] is the raw container tier: `air_front::build_raw` writes the whole library in process (no Apple
+//! tool). It takes only shaders in a [`RawAllowList`] (GPU differential test passed), with cache-key id [`raw_id`].
 
 use crate::apple::{Io, MetalTools, StepCost};
 use crate::frontend::{FrontEnd, FrontEndError, FrontEndOutput};
@@ -146,9 +149,130 @@ impl FrontEnd for AirFrontEnd {
     }
 }
 
+/// The identity of the raw container tier: `own-raw@` + [`front_id`]. It is the cache-key field of raw libraries.
+pub fn raw_id() -> String {
+    format!("own-raw@{}", air_front::id())
+}
+
+/// The allow list of the raw tier: SHA-256 of the MSL of every shader whose raw library passed the GPU differential
+/// test (`gputier.py tiers` with `GPUTIER_RAW=1`). One lower-case hex digest per line, `#` comments.
+/// Allow semantics only: a shader not in the list never takes the raw path.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RawAllowList {
+    digests: BTreeSet<Digest>,
+}
+
+impl RawAllowList {
+    /// Parse the text form. A bad line is an error, so a damaged list turns the tier off instead of guessing.
+    pub fn parse(text: &str) -> Result<RawAllowList, String> {
+        let mut digests = BTreeSet::new();
+        for (n, raw) in text.lines().enumerate() {
+            let line = raw.split('#').next().unwrap_or("").trim();
+            if line.is_empty() {
+                continue;
+            }
+            let d = Digest::from_hex(line).map_err(|e| format!("raw list line {}: {e}", n + 1))?;
+            digests.insert(d);
+        }
+        Ok(RawAllowList { digests })
+    }
+
+    /// True when the shader with this MSL digest may take the raw path.
+    pub fn allows_digest(&self, d: &Digest) -> bool {
+        self.digests.contains(d)
+    }
+
+    /// Number of entries.
+    pub fn len(&self) -> usize {
+        self.digests.len()
+    }
+
+    /// True when empty.
+    pub fn is_empty(&self) -> bool {
+        self.digests.is_empty()
+    }
+}
+
+/// The raw container path: `air_front::build_raw` in process (front end, per-entry split, mem2reg, DCE, own bitcode
+/// and MTLB writer). No Apple tool and no process runs. The library is not byte-identical to Apple's: it ships only
+/// for shaders in a [`RawAllowList`], every other shader goes to the next tier.
+#[derive(Debug)]
+pub struct RawFrontEnd {
+    target: air_front::Target,
+    id: String,
+}
+
+impl RawFrontEnd {
+    /// The raw tier for macOS (`ios` false) or iOS.
+    pub fn new(ios: bool) -> Self {
+        RawFrontEnd {
+            target: if ios {
+                air_front::Target::ios()
+            } else {
+                air_front::Target::macos()
+            },
+            id: raw_id(),
+        }
+    }
+}
+
+impl FrontEnd for RawFrontEnd {
+    fn id(&self) -> &str {
+        &self.id
+    }
+
+    fn compile(&self, msl: &[u8]) -> Result<FrontEndOutput, FrontEndError> {
+        let t = std::time::Instant::now();
+        // A panic in the in-process front end must not end the build: the shader goes to the next tier.
+        let res = std::panic::catch_unwind(|| air_front::build_raw(msl, &self.target));
+        let lib = match res {
+            Ok(Ok(lib)) => lib,
+            Ok(Err(Ok(r))) => return Err(FrontEndError::Reject(r.0)),
+            Ok(Err(Err(e))) => return Err(FrontEndError::Reject(format!("raw: {e}"))),
+            Err(_) => return Err(FrontEndError::Reject("raw: front end panicked".into())),
+        };
+        let wall = t.elapsed();
+        Ok(FrontEndOutput {
+            metallib: lib,
+            frontend: self.id.clone(),
+            // in process: the wall time of the call stands for its CPU time
+            steps: vec![StepCost {
+                wall,
+                cpu: wall,
+                max_rss: 0,
+            }],
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn raw_list_parse_and_lookup() {
+        let d = sha256(b"verified shader");
+        let list = RawAllowList::parse(&format!("# raw-verified: 1\n{}\n\n", d.to_hex())).unwrap();
+        assert_eq!(list.len(), 1);
+        assert!(list.allows_digest(&d));
+        assert!(!list.allows_digest(&sha256(b"other")));
+        assert!(RawAllowList::parse("zz\n").is_err());
+        assert!(RawAllowList::parse("").unwrap().is_empty());
+    }
+
+    #[test]
+    fn raw_front_end_builds_and_rejects() {
+        let fe = RawFrontEnd::new(false);
+        assert!(fe.id().starts_with("own-raw@air-front@"));
+        let msl = b"#include <metal_stdlib>\nusing namespace metal;\nkernel void k(device float* o [[buffer(0)]], uint i [[thread_position_in_grid]]) { o[i] = 1.0; }\n";
+        let out = fe.compile(msl).expect("raw library");
+        assert_eq!(&out.metallib[..4], b"MTLB");
+        assert_eq!(out.frontend, fe.id());
+        assert!(matches!(
+            fe.compile(b"this is not metal {"),
+            Err(FrontEndError::Reject(_))
+        ));
+    }
 
     #[test]
     fn verdicts_select_allowed() {

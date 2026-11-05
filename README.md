@@ -6,19 +6,25 @@ No game data, keys or shaders are in this repository.
 
 The tools replace a set of reference build scripts (written in Python). The reference scripts are the oracle.
 A Rust stage is correct when its output files are byte-identical to the output of the reference scripts.
-One part is different: the own shader front end. It is on only for shaders on an allow list, where its output is byte-identical. All other shaders use Apple's compiler. A switch turns the front end off.
+One part is different: the own shader front end. It has two paths. The first path is on only for shaders on an allow list, where its output is byte-identical.
+The second path (the raw path, new in 0.3.0) is on only for shaders on a second allow list. Its output is not byte-identical. A GPU test is the evidence.
+All other shaders use Apple's compiler. Switches turn the front end and the raw path off.
 
 ## Status
 
-Version 0.2.0 is the third public release. It is early software. Read this section before you use it.
+Version 0.3.0 is the fourth public release. It is early software. Read this section before you use it.
 
 - Mac only. The tools run on macOS on Apple silicon. Other systems are not supported.
 - The tools need Apple tools (`metal`, `metallib`, `air-opt`, `metal-tt`, `codesign`, `xcrun`) from your own Xcode.
 - A full build is not yet one command. The button-icon font is not ported. `nxb build` takes it from a work folder of the reference build.
   The Mac host, the companion app, the app settings file and the app icon are ported in 0.2.0. `nxb build` end to end with these
   stages was not run on a real title. Each stage was compared alone.
+  Version 0.3.0 adds the overlap of stages in `nxb build` (one title, extract, split and shaders reused). It also adds the iOS stages
+  in the binary `nxb-ios`. `nxb build` does not run them. A full build in one run was not timed.
 - The code rewrite step (`patch_nso.py` in the reference scripts) is not ported.
 - The shader step for iOS is not part of the verified path. Only a sample was compared.
+- The iOS stages (`nxb-ios`) return exit code 3 for games with more than one program and for framework builds. `nxb-ios shell --build` and
+  an IPA with a pipeline archive were not run. The IPA is always packed in full. The host `codesign` signs the executable.
 - The reference scripts remain the fallback. If a stage fails or does not support an input, run the reference script for that stage.
   The signer returns exit code 3 for unsupported input. The caller then runs `codesign`.
 
@@ -42,7 +48,10 @@ more titles.
 | App stage and signer | tested bundles | app tree, `Info.plist` and `CodeResources` are byte-identical. The signer matches `codesign` |
 | Pipeline archive planning | 18,301 pairs | the plan files are byte-identical. `metal-tt` output is not deterministic, so archives are compared by content |
 | IPA writer | a 59-entry sample and a bundle with a 300 MB file | byte-identical. A full game IPA was not built |
+| iOS stages (`nxb-ios`) | generators and workspace writer on real and synthetic inputs, one title for the IPA | the generators are byte-identical. 75 of 75 IPA entries are equal in name, method, sizes, CRC and attributes. Two entries are equal in part only: the executable (only `__LINKEDIT` differs) and the font file |
+| Overlap in `nxb build` | one title, extract, split and shaders reused | the event streams are the same, except the times. 58,211 of 58,211 paths exist in both outputs. All files are byte-identical, except two rebuilt Mach-O files and their lines in `CodeResources` |
 | Own front end | 23,785 inputs | 23,752 lower and validate. 8,533 final libraries are byte-identical to Apple's |
+| Raw path of the own front end | 3,625 candidates, GPU test with 12 vectors | 3,375 gave the same output as Apple's library. 3,365 are on the allow list. The libraries are **not** byte-identical to Apple's |
 
 ### Timings
 
@@ -59,6 +68,9 @@ The numbers are therefore a little worse than on an idle machine. Source: `docs/
 | Mac app stage, fresh | 129 s | 23 s | 5.6 times | measured |
 | `nxb build`, shaders given | about 623 s | 317 s | 2.0 times | measured |
 | Full build in sequence | 1,422 s | about 960 s | 1.5 times | estimate |
+| Raw path, compile CPU for each library, 44 shaders | 109 ms | 97.5 ms | 1.1 times | measured, small sample, loaded machine |
+| `nxb build` with overlap, shaders given | 136.2 s | 133.0 s | 1.02 times | measured, one run, no cold gain shown |
+| `nxb build` with overlap, cold | | | | not timed. A gain is an estimate |
 
 The estimate is the sum of the measured stages. It was not run as one process. The archive step is slower because `metal-tt`
 limits it. The own front end is not byte-identical in the validated mode.
@@ -66,6 +78,7 @@ limits it. The own front end is not byte-identical in the validated mode.
 ### Known limits
 
 - Not ported: code rewrite, button-icon font, header of multi-program profiles, zstd dictionaries, geometry and mesh shaders.
+- The allow lists of the own front end are not in this repository. Without a list, the own path and the raw path are off.
 - Not done: Windows and Linux. The process runner and the locks refuse to run there.
 - Two processes can write the same store key at the same time. The last writer wins. The files stay valid.
 - Parsers read untrusted files. Read [SECURITY.md](SECURITY.md) and [docs/security.md](docs/security.md) for the limits.
@@ -101,6 +114,7 @@ Every binary prints its usage when you run it without arguments.
 | `nxb-pso` | plan and merge of the pipeline archive. Needs `metal-tt` and `metal-pack` |
 | `nxb-macapp` | the Mac app stage |
 | `nxb-ipa` | IPA writer |
+| `nxb-ios` | the iOS stages: `ipa [<out.ipa> \| --prepare-xcode]` and `shell --prepare-xcode \| --build`. Same command lines as the reference scripts. Exit code 3 means unsupported |
 | `nxb-pack` | ad-hoc signer for bundles and Mach-O files |
 | `airc` | the own MSL to AIR front end: `emit`, `bc`, `build`, `check`, `rank` |
 
@@ -124,6 +138,9 @@ The tools read no fixed private path. Inputs come from arguments or from these v
 | `NXB_PARITY_*` | parity tests | game files for the comparison tests. Without them the tests skip |
 | `NXB_ORACLE_EXACT` | signer tests | set to `1` to compare bytes with the `codesign` of the host. Without it, the tests check that `codesign --verify` accepts our output. Set it on the Mac where the signer was proven |
 | `NXB_OWN_FRONT` | `shaderbuild` | set to `0` to switch off the own front end |
+| `NXB_OWN_RAW` | `shaderbuild` | set to `0` to switch off the raw path. Set to a file to select another raw allow list |
+| `NXB_ENGINE` | `nxb-ios` | the folder with the engine files that the iOS stages read |
+| `NXB_ORACLE_*` | iOS tests | inputs for the tests that compare with the reference scripts. Without them the tests skip |
 
 ## Architecture
 
