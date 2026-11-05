@@ -148,6 +148,28 @@ fn open_part(dst: &Path, size: u64, discard: bool) -> Result<(PathBuf, File)> {
 /// from the bytes in memory (design-pipeline-rest 9.3).
 pub type FileHook<'a> = dyn Fn(usize, &[u8], &[u8], &Digest) + Sync + 'a;
 
+/// The TSV of the images' digests (`# image`, path, offset, size, sha256): the whole image, then each file.
+pub fn digests_text(results: &[ImageResult]) -> String {
+    let mut t = String::from("# image\tpath\toffset\tsize\tsha256\n");
+    for r in results {
+        let img = r.dst.display().to_string();
+        t.push_str(&format!(
+            "{img}\t\t0\t{}\t{}\tsha1={}\n",
+            r.size,
+            r.digest.file.sha256.to_hex(),
+            r.digest.sha1.to_hex()
+        ));
+        for (path, off, size, d) in &r.files_digests {
+            t.push_str(&format!(
+                "{img}\t{}\t{off}\t{size}\t{}\n",
+                String::from_utf8_lossy(path),
+                d.to_hex()
+            ));
+        }
+    }
+    t
+}
+
 /// Writes all images with `threads` workers and at most `mem_limit` bytes of file data in flight.
 pub fn write_images(
     images: Vec<ImageJob>,
