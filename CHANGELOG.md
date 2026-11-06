@@ -2,6 +2,12 @@
 
 All notable changes are in this file. The format follows Keep a Changelog. Versions follow Semantic Versioning.
 
+## Unreleased
+
+### Added
+
+- `airc rawcheck` writes the reason of a reject or a failed build (`error`) and the SHA-256 of each library (`lib_sha256`).
+
 ## 0.6.4
 
 ### Changed
