@@ -12,6 +12,7 @@
 
 #![deny(missing_docs)]
 
+mod atomic;
 mod entry;
 pub mod func;
 pub mod fx;
@@ -407,7 +408,8 @@ pub fn emit(m: &Module, t: &Target, source_name: &str) -> Result<String, Error> 
         let name = if f.entry.is_some() {
             f.name.to_string()
         } else {
-            mangle::helper_name(f, &cx.types)
+            mangle::template_name(f, &cx.types)
+                .or_else(|| mangle::helper_name(f, &cx.types))
                 .filter(|n| !cx.funcs_sig.iter().any(|(m, _)| m == n))
                 .unwrap_or_else(|| format!("{}.{fid}", f.name))
         };

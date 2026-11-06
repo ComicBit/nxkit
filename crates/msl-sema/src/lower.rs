@@ -13,6 +13,8 @@ use crate::hir::{
 use crate::types::{is_float, Access, Scalar, Space, Tex, TexKind, Type};
 use crate::{builtins, conv, Error};
 
+mod pool;
+
 type R<T> = Result<T, Error>;
 
 /// A dm_bs instantiation: argument types, sampling option per extra argument, function.
@@ -46,6 +48,8 @@ struct Cx {
     ret: Type,
     /// dm_bs instantiations: argument types -> function.
     dm_bs_inst: Vec<DmBsInstance>,
+    /// dm_pool_mark instantiations: pool pointer type -> function.
+    dm_pool_inst: Vec<(Type, usize)>,
 }
 
 fn parse_int(text: &str) -> R<i128> {
@@ -94,6 +98,7 @@ impl Cx {
             },
             Ty::Ptr(sp, inner) => Type::Ptr(*sp, Rc::new(self.ty(inner)?)),
             Ty::Ref(_, inner) => self.ty(inner)?,
+            Ty::Array { metal: true, .. } => return Err(Error::unsupported("metal-array")),
             Ty::Array { elem, n, .. } => {
                 let n: u32 = n
                     .parse()
@@ -139,7 +144,7 @@ impl Cx {
             Item::Prelude { name, .. } => {
                 if !matches!(
                     *name,
-                    "dm_bs" | "spvFAdd" | "spvDepthCast" | "spvUnsafeArray"
+                    "dm_bs" | "dm_pool_mark" | "spvFAdd" | "spvDepthCast" | "spvUnsafeArray"
                 ) {
                     return Err(Error::unsupported(format!("prelude:{name}")));
                 }
@@ -149,10 +154,30 @@ impl Cx {
             Item::Rejected { reason, .. } => Err(Error::unsupported(format!("rejected:{reason}"))),
             Item::Struct(s) => {
                 let mut fields = Vec::with_capacity(s.fields.len());
-                for f in &s.fields {
-                    fields.push((f.name.clone(), self.ty(&f.ty)?, f.attrs.clone(), f.is_const));
+                let mut metal = Vec::new();
+                for (k, f) in s.fields.iter().enumerate() {
+                    let ty = match &f.ty {
+                        // `array<T, n>` of textures or samplers, only as an argument-buffer member
+                        Ty::Array {
+                            elem,
+                            n,
+                            metal: true,
+                            ..
+                        } => {
+                            let n: u32 = n
+                                .parse()
+                                .map_err(|_| Error::invalid(format!("array length {n}")))?;
+                            metal.push(k);
+                            Type::Array(Rc::new(self.ty(elem)?), n)
+                        }
+                        t => self.ty(t)?,
+                    };
+                    fields.push((f.name.clone(), ty, f.attrs.clone(), f.is_const));
                 }
                 let id = self.out.types.add_struct(s.name.clone(), fields);
+                for k in metal {
+                    self.out.types.structs[id].fields[k].metal_array = true;
+                }
                 self.struct_ids.insert(s.name.clone(), id);
                 Ok(())
             }
@@ -746,6 +771,13 @@ impl Cx {
                         }
                         _ => conv(v, &ty),
                     },
+                    CastKind::Reinterpret => match (&v.ty, &ty) {
+                        (
+                            Type::Ptr(..) | Type::Scalar(Scalar::Ulong | Scalar::Long),
+                            Type::Ptr(..),
+                        ) => Ok(Expr::new(ExprKind::PtrCast(Box::new(v)), ty)),
+                        _ => Err(Error::unsupported("reinterpret_cast")),
+                    },
                 }
             }
             A::StructInit { args, .. } => {
@@ -910,6 +942,7 @@ impl Cx {
                 Ok(Expr::new(ExprKind::TexCast(Box::new(v)), ty))
             }
             Callee::Prelude("dm_bs") => self.dm_bs(args, ty),
+            Callee::Prelude("dm_pool_mark") => self.dm_pool_mark(args),
             Callee::Prelude(p) => Err(Error::unsupported(format!("prelude-call:{p}"))),
             Callee::Builtin(name) => {
                 let mut vals = Vec::with_capacity(args.len());

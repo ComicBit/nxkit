@@ -49,10 +49,15 @@ pub fn struct_info(cx: &mut ModCx, sid: usize) -> R<usize> {
             ops.push(s("air.struct_type_info"));
             ops.push(Md::Node(n));
         }
-        let size = cx.types.layout(&elem).size;
-        let tname = match &elem {
-            Type::Ptr(_, p) => cx.types.msl_name(p),
-            t => cx.types.msl_name(t),
+        let (size, count, tname) = if f.metal_array {
+            // `metal::array<T, n>` is one member of n elements, not a C array
+            (cx.types.layout(&f.ty).size, 0, cx.types.field_msl_name(f))
+        } else {
+            let tname = match &elem {
+                Type::Ptr(_, p) => cx.types.msl_name(p),
+                t => cx.types.msl_name(t),
+            };
+            (cx.types.layout(&elem).size, count, tname)
         };
         ops.extend([i(f.offset), i(size), i(count), s(&tname), s(&f.name)]);
         if !indirect {
@@ -68,7 +73,9 @@ pub fn struct_info(cx: &mut ModCx, sid: usize) -> R<usize> {
             ops.push(i(id));
             continue;
         }
-        let arg = if matches!(elem, Type::Ptr(..) | Type::Texture(_) | Type::Sampler) {
+        let arg = if f.metal_array {
+            metal_array_md(cx, &elem, fi as i64, id, &f.ty, &f.name)?
+        } else if matches!(elem, Type::Ptr(..) | Type::Texture(_) | Type::Sampler) {
             if count != 0 {
                 return Err(Error::unsupported("argbuf:array-of-resources"));
             }
@@ -92,6 +99,44 @@ pub fn struct_info(cx: &mut ModCx, sid: usize) -> R<usize> {
     Ok(cx.meta.node(&ops))
 }
 
+/// Metadata of a `metal::array<T, n>` argument-buffer member of textures or samplers: one
+/// binding of n consecutive ids named by the array type.
+fn metal_array_md(
+    cx: &mut ModCx,
+    elem: &Type,
+    lead: i64,
+    slot: u32,
+    t: &Type,
+    name: &str,
+) -> R<usize> {
+    let Type::Array(_, n) = t else {
+        return Err(Error::invalid("metal array member without array type"));
+    };
+    let tn = format!("array<{}, {n}>", cx.types.msl_name(elem));
+    let mut ops = vec![i(lead)];
+    match elem {
+        Type::Texture(tx) => {
+            ops.extend([s("air.texture"), s("air.location_index"), i(slot), i(*n)]);
+            ops.push(s(access_name(tx.access)));
+        }
+        Type::Sampler => {
+            ops.extend([s("air.sampler"), s("air.location_index"), i(slot), i(*n)]);
+        }
+        _ => return Err(Error::unsupported(format!("metal-array:{elem}"))),
+    }
+    ops.extend([s("air.arg_type_name"), s(&tn), s("air.arg_name"), s(name)]);
+    Ok(cx.meta.node(&ops))
+}
+
+fn access_name(a: Access) -> &'static str {
+    match a {
+        Access::Sample => "air.sample",
+        Access::Read => "air.read",
+        Access::Write => "air.write",
+        Access::ReadWrite => "air.read_write",
+    }
+}
+
 /// Metadata of a resource (argument-buffer member or entry argument) without the leading index.
 fn resource_md(
     cx: &mut ModCx,
@@ -106,12 +151,7 @@ fn resource_md(
     match t {
         Type::Texture(tx) => {
             ops.extend([s("air.texture"), s("air.location_index"), i(slot), i(count)]);
-            ops.push(s(match tx.access {
-                Access::Sample => "air.sample",
-                Access::Read => "air.read",
-                Access::Write => "air.write",
-                Access::ReadWrite => "air.read_write",
-            }));
+            ops.push(s(access_name(tx.access)));
             let tn = cx.types.msl_name(t);
             ops.extend([s("air.arg_type_name"), s(&tn), s("air.arg_name"), s(name)]);
         }
@@ -133,7 +173,8 @@ fn resource_md(
                     pointee,
                     slot,
                     buffer_size: None,
-                    indirect: false,
+                    // a pointer to an argument buffer (a descriptor pool) is itself indirect
+                    indirect: matches!(**pointee, Type::Struct(sid) if cx.types.is_argument_buffer(sid)),
                     is_const,
                 },
             )?;

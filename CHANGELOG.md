@@ -2,6 +2,18 @@
 
 All notable changes are in this file. The format follows Keep a Changelog. Versions follow Semantic Versioning.
 
+## Unreleased
+
+### Added
+
+- The own front end compiles texture pools. A pool is an argument buffer with an `array<texture2d<float>, N>` or `array<sampler, N>` member.
+- The own front end compiles the translator's helper `dm_pool_mark`, with one instantiation for each pool type.
+  Its relaxed device atomics become `air.atomic.global.load.i32` and `air.atomic.global.or.u.i32`.
+- The own front end compiles `reinterpret_cast` from pointer to pointer and from integer to pointer.
+- On one title, 1,081 of 2,282 shaders with `dm_pool_mark` now take the raw path and pass `air-validate`.
+  The other shaders stop at builtins that the own front end does not support, mostly `simd_shuffle` and `front_facing`.
+  The libraries that built before stay byte-identical.
+
 ## 0.6.4
 
 ### Changed

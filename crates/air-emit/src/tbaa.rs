@@ -80,12 +80,32 @@ pub fn structure(cx: &mut ModCx, sid: usize) -> usize {
     let st = cx.types.structs[sid].clone();
     let mut ops = vec![s(&format!("_ZTS{}{}", st.name.len(), st.name))];
     for f in &st.fields {
-        let n = member(cx, &f.ty);
+        let n = match &f.ty {
+            Type::Array(e, len) if f.metal_array => metal_array(cx, e, *len),
+            t => member(cx, t),
+        };
         ops.push(Md::Node(n));
         ops.push(Md::Raw(format!("i64 {}", f.offset)));
     }
     let n = cx.meta.node(&ops);
     cx.tbaa.structs.insert(sid, n);
+    n
+}
+
+/// The node of a `metal::array<T, n>` member: `_ZTSN5metal5arrayI<T>Lm<n>EEE` with T mangled
+/// inside the `metal` namespace.
+fn metal_array(cx: &mut ModCx, e: &Type, len: u32) -> usize {
+    let el = wrapper_name(e);
+    let inner = el.strip_prefix("_ZTSN5metal").unwrap_or(&el);
+    let name = format!("_ZTSN5metal5arrayINS_{inner}Lm{len}EEE");
+    if let Some(n) = cx.tbaa.wrappers.get(&name) {
+        return *n;
+    }
+    let c = char(cx);
+    let n = cx
+        .meta
+        .node(&[s(&name), Md::Node(c), Md::Raw("i64 0".into())]);
+    cx.tbaa.wrappers.insert(name, n);
     n
 }
 
@@ -110,9 +130,9 @@ fn handle_name(t: &Type) -> String {
     }
 }
 
-/// The node of a `metal::texture*` or `metal::sampler` wrapper struct.
-fn wrapper(cx: &mut ModCx, t: &Type) -> usize {
-    let name = match t {
+/// The mangled type-info name of a `metal::texture*` or `metal::sampler` wrapper struct.
+fn wrapper_name(t: &Type) -> String {
+    match t {
         Type::Texture(tx) => {
             let el = match tx.elem {
                 Scalar::Float => "f",
@@ -133,7 +153,12 @@ fn wrapper(cx: &mut ModCx, t: &Type) -> usize {
             )
         }
         _ => "_ZTSN5metal7samplerE".to_string(),
-    };
+    }
+}
+
+/// The node of a `metal::texture*` or `metal::sampler` wrapper struct.
+fn wrapper(cx: &mut ModCx, t: &Type) -> usize {
+    let name = wrapper_name(t);
     if let Some(n) = cx.tbaa.wrappers.get(&name) {
         return *n;
     }

@@ -556,8 +556,26 @@ expect: reject as_type-size
 void f(float x) { uint2 a = as_type<uint2>(x); }
 
 === reinterpret_cast
+expect: accept
+void f(device float* p, ulong a) { device uint* q = reinterpret_cast<device uint*>(p); device uint* w = reinterpret_cast<device uint*>(a) + 1; }
+
+=== reinterpret_cast-to-value
 expect: reject reinterpret_cast
-void f(device float* p) { device uint* q = reinterpret_cast<device uint*>(p); }
+void f(device float* p) { uint q = reinterpret_cast<uint>(p); }
+
+=== reinterpret_cast-from-float
+expect: reject reinterpret_cast
+void f(float x) { device uint* q = reinterpret_cast<device uint*>(x); }
+
+=== metal-array-member
+expect: accept
+struct P { uint n; ulong seen; array<texture2d<float>, 2> e; };
+struct S { uint n; array<sampler, 1> e; };
+float4 f(constant P* p, constant S* s, uint i, float2 uv) { return (&p->e[0])[i].sample((&s->e[0])[i], uv); }
+
+=== metal-array-element
+expect: reject metal-array-elem
+struct P { array<float, 2> e; };
 
 === struct-brace-init
 expect: accept
@@ -794,6 +812,23 @@ float2 f(constant float4* b, texture2d<float> t, sampler s, float2 uv) { return 
 === dm_bs-without-prelude
 expect: reject call:dm_bs
 float4 f(texture2d<float> t, sampler s, float2 uv) { return dm_bs(float4(0.0), t, 0u, t, s, uv); }
+
+=== dm_pool_mark-helper
+expect: accept
+prelude: dm_pool_mark
+struct P { uint n; ulong seen; array<texture2d<float>, 1> e; };
+template<typename P> static inline __attribute__((always_inline)) uint dm_pool_mark(constant P* p, uint i) { return i; }
+uint f(constant P* p, uint i) { return dm_pool_mark(p, min(i, p->n)); }
+
+=== dm_pool_mark-form
+expect: reject dm_pool_mark-form
+prelude: dm_pool_mark
+template<typename P> static inline __attribute__((always_inline)) uint dm_pool_mark(constant P* p, uint i) { return i; }
+uint f(device uint* p, uint i) { return dm_pool_mark(p, i); }
+
+=== dm_pool_mark-without-prelude
+expect: reject call:dm_pool_mark
+uint f(constant uint* p, uint i) { return dm_pool_mark(p, i); }
 
 === spvDepthCast-helper
 expect: accept

@@ -266,11 +266,13 @@ pub enum Ty {
     Ptr(Space, Rc<Ty>),
     /// An lvalue (or reference) of the inner type in an address space.
     Ref(Space, Rc<Ty>),
-    /// `n` is the decimal length without leading zeros. `unsafe_` is `spvUnsafeArray`.
+    /// `n` is the decimal length without leading zeros. `unsafe_` is `spvUnsafeArray`, `metal`
+    /// is `metal::array<T, n>`.
     Array {
         elem: Rc<Ty>,
         n: Rc<str>,
         unsafe_: bool,
+        metal: bool,
     },
     /// `kind` may be a name outside `TEX_KINDS` (see `spvDepthCast`).
     Tex {
@@ -565,6 +567,7 @@ mod tests {
             elem: Rc::new(UINT),
             n: "4".into(),
             unsafe_: true,
+            metal: false,
         };
         assert_eq!(a.repr().unwrap(), "uint[4]");
         let t = Ty::Tex {
