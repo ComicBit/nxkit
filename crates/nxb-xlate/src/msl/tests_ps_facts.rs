@@ -4,9 +4,9 @@
 use super::tests::{B, F4, fragment};
 use super::{Context, Translated};
 use crate::attr::Stage;
-use crate::codegen::props::TextureDef;
 use crate::driver::TexInfo;
 use crate::ir::{Inst, IoVariable, StorageKind};
+use crate::props::TextureDef;
 use crate::structured::StructFunction;
 use crate::structured::ast::{AstTex, BlockType};
 use crate::structured::types::AggType;

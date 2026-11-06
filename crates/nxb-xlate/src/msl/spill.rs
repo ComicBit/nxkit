@@ -10,7 +10,7 @@ use super::abi::{TG_GROUPS, TG_MAX, TG_SLOT};
 use super::emit::R;
 use super::io::Builtin;
 use super::types::{msl_type, scalar};
-use crate::codegen::props::MemoryDef;
+use crate::props::MemoryDef;
 use std::collections::BTreeMap;
 use std::fmt::Write;
 

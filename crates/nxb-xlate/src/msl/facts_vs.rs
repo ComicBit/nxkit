@@ -9,7 +9,7 @@ use super::facts_vs_screen;
 use super::facts_vs_sym::{Node, Sym, Trace, trace};
 use super::io::Plan;
 use super::refl::{Raster, UvAffine};
-use crate::codegen::props::Props;
+use crate::props::Props;
 use crate::structured::StructInfo;
 
 /// The first attribute location the host cannot read a draw's vertices from.

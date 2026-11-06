@@ -4,8 +4,8 @@ use super::ast::{A, AstTex, Kind};
 use super::context::Context;
 use super::types::*;
 use super::{StructInfo, StructResources, goto, helper, optimizer};
-use crate::codegen::props::Definitions;
 use crate::ir::*;
+use crate::props::Definitions;
 
 const FUNC_PARAMETER_TYPE: AggType = AggType::S32;
 

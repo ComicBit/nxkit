@@ -1,6 +1,9 @@
 //! Everything the back end reads besides the structured program: the shader definitions, host capabilities, resource
 //! properties and attribute usage as plain data. The probe phase `props` dumps it (see `tools/xlate-probe/Probe.cs`,
 //! `Props`) and [`Props::parse`] reads that text; the translation core fills the same structs from the real objects.
+//! These are the back end's view. The front end's port of `ShaderProperties` is `translation::props`.
+
+pub mod text;
 
 use crate::attr::Stage;
 use crate::ir::IoVariable;
@@ -66,7 +69,7 @@ impl Definitions {
         _component: i32,
         is_output: bool,
     ) -> bool {
-        // fail closed: `codegen::generate` rejects transform feedback before this can matter
+        // fail closed: `msl::translate` refuses transform feedback before this can matter
         let _ = (v, is_output);
         false
     }

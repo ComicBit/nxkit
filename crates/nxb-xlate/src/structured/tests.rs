@@ -1,8 +1,8 @@
 use super::program::{FunctionIn, make_structured_program};
 use super::test_util::*;
 use super::text::ast_text;
-use crate::codegen::props::Props;
 use crate::ir::{Ir, text};
+use crate::props::Props;
 
 /// Structure every key's final `xform` IR and compare the AST with the probe's `ast` dump.
 #[test]

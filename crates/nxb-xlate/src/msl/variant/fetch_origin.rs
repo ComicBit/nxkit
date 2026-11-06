@@ -5,10 +5,10 @@
 //! a pixel position scaled by two uniforms (`gl_FragCoord.xy [/ render scale] * uniform`). Every variable on the way
 //! must have exactly one definition.
 
-use crate::codegen::props::Props;
 use crate::ir::{Inst, IoVariable, OperandType, StorageKind};
 use crate::msl::args::Res;
 use crate::msl::io::Plan;
+use crate::props::Props;
 use crate::structured::StructInfo;
 use crate::structured::ast::{A, Kind, OpData};
 use std::collections::BTreeMap;

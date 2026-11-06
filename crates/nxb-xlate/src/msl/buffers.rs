@@ -5,7 +5,7 @@
 //! a run time array of 32 bit words.
 
 use super::types::scalar;
-use crate::codegen::props::{BufferDef, Field};
+use crate::props::{BufferDef, Field};
 use crate::structured::types::AggType;
 
 /// The name of the scalar type of a field.

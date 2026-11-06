@@ -9,7 +9,7 @@ use super::facts_ps::{self, KILL};
 use super::io;
 use super::spill::Spill;
 use super::types::{msl_type, scalar};
-use crate::codegen::props::MemoryDef;
+use crate::props::MemoryDef;
 use crate::structured::types::AggType;
 use crate::translation::msl_entry::Structured;
 use std::fmt::Write;

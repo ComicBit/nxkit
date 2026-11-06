@@ -7,9 +7,9 @@
 
 use super::super::usage::const_of;
 use super::super::walk::for_each_node;
-use crate::codegen::props::Props;
 use crate::ir::OperandType;
 use crate::ir::{Inst, IoVariable, StorageKind};
+use crate::props::Props;
 use crate::structured::StructInfo;
 use crate::structured::ast::{A, Kind};
 use crate::structured::types::AggType;

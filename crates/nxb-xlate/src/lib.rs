@@ -8,7 +8,6 @@
 
 pub mod accessor;
 pub mod cfg;
-pub mod codegen;
 pub mod corpus;
 pub mod driver;
 pub mod emit;
@@ -16,6 +15,7 @@ pub mod ir;
 pub mod job;
 pub mod msl;
 pub mod opt;
+pub mod props;
 pub mod structured;
 pub mod translation;
 pub mod types;

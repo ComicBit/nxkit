@@ -6,10 +6,10 @@ use super::core::structure_context;
 use super::geometry::{structure_geometry_compute, structure_geometry_reader};
 use super::pipeline::options_of;
 use crate::accessor::Accessor;
-use crate::codegen::props::Props;
 use crate::driver::{Program, retry};
 use crate::job::Job;
 use crate::msl::walk::uses_float64;
+use crate::props::Props;
 use crate::structured::StructInfo;
 use std::collections::BTreeSet;
 

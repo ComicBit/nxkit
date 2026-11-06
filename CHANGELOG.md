@@ -22,7 +22,7 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 - The tools `spirv-cross` and `dotnet`. `nxb self-check` does not look for them.
 - The options `--xlate`, `--xlate-host`, `--xlate-rust`, `--dotnet-root` and `--spirv-cross`, and the variables `NXB_XLATE_RUST` and `NXB_XLATE_HOST`.
 - The command `nxb shaders recompile`. It depended on the MSL text passes.
-- The SPIR-V generator: the crate `nxb-spvgen` and the module `nxb-xlate::codegen` (only the shader definitions in `codegen::props` stay). With it go the `.spv` and `res.json` outputs of the driver, the SPIR-V lowering of one vertex shader, the `<key>.iface.json` writer and the `xlate-diff` tool.
+- The SPIR-V generator: the crate `nxb-spvgen` and the module `nxb-xlate::codegen` (the shader definitions in `codegen::props` move to `nxb-xlate::props`). With it go the `.spv` and `res.json` outputs of the driver, the SPIR-V lowering of one vertex shader, the `<key>.iface.json` writer and the `xlate-diff` tool.
 - The MSL text passes of `nxb-shader` (`msl`, `reflect`, `variants` and the side unit builder). The job writer, the chain version, the guards and the side library cut stay.
 
 ### Added
