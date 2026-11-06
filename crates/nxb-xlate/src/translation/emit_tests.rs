@@ -70,3 +70,37 @@ fn voteu_writes_the_uniform_predicate() {
     let t = ampere_cs_text(&[vote(false, 1)]).expect("emit");
     assert!(t.contains("d=R2:2,"));
 }
+
+/// `BMSK R1, R2, R3`, with `.W` when `w`.
+fn bmsk(w: bool) -> (u64, u64) {
+    let lo = 0x01b | 1 << 9 | APT | 1 << 16 | 2 << 24 | 3 << 32;
+    (lo, if w { 1 << (75 - 64) } else { 0 })
+}
+
+#[test]
+fn bmsk_clamps_unless_w() {
+    let count_geu = |t: &str| count(t, "23");
+    let plain = ampere_cs_text(&[bmsk(false)]).expect("emit");
+    let wrap = ampere_cs_text(&[bmsk(true)]).expect("emit");
+    // the field reaching bit 32, and with the clamping form a and b at least 32 as well
+    assert_eq!(count_geu(&plain), 3);
+    assert_eq!(count_geu(&wrap), 1);
+}
+
+/// `PIXLD.COVERED R1` (0x925 with 78..81 = 1 and no predicate result).
+fn pixld() -> (u64, u64) {
+    (0x925 | APT | 1 << 16, 1 << (78 - 64) | 7 << (81 - 64))
+}
+
+#[test]
+fn pixld_reads_the_helper_invocation() {
+    let t = ampere_ps_text(&[pixld()]).expect("emit");
+    // Load Input, IoVariable 43, and a select of 0 and 1
+    assert!(t.contains("op 4a 1 0 0 d=l0, s=#2b,"), "{t}");
+}
+
+#[test]
+fn pixld_is_refused_outside_a_pixel_shader() {
+    let r = ampere_cs_text(&[pixld()]);
+    assert!(r.is_err_and(|e| e.contains("0x925 form 1")));
+}

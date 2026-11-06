@@ -53,6 +53,8 @@ pub enum AEmit {
     AFlo,
     ABrev,
     ASgxt,
+    ABmsk,
+    APixelCovered,
     AUMov,
     AUp2ur,
     ACs2r,
@@ -219,10 +221,20 @@ fn build() -> Tables {
     a(t, 0x0be, InstName::Flo, AEmit::ABrev, 0, true, true);
     a(t, 0x01a, InstName::Bfe, AEmit::ASgxt, 0, false, true);
     a(t, 0x09a, InstName::Bfe, AEmit::ASgxt, 0, true, true);
+    a(t, 0x01b, InstName::Bfe, AEmit::ABmsk, 0, false, true);
     x(t, 0x882, InstName::Mov, AEmit::AUMov, 0, true, true);
     x(t, 0x883, InstName::P2r, AEmit::AUp2ur, 0, true, true);
     x(t, 0xc82, InstName::Mov, AEmit::AUMov, 0, true, true);
     x(t, 0x805, InstName::Cs2r, AEmit::ACs2r, 0, false, true);
+    x(
+        t,
+        0x925,
+        InstName::Pixld,
+        AEmit::APixelCovered,
+        0,
+        false,
+        true,
+    );
     x(t, 0x919, InstName::S2r, AEmit::AS2r, 0, false, true);
     x(t, 0x9c3, InstName::S2r, AEmit::AS2r, 0, true, true);
     x(t, 0x3c2, InstName::Mov, AEmit::AR2ur, 0, false, true);

@@ -33,8 +33,23 @@ pub const AEXIT: (u64, u64) = (0x94d | APT | 1 << 23, 0);
 
 /// The `emit` dump of an Ampere compute program (`lo`, `hi` of every instruction), `EXIT` appended.
 pub fn ampere_cs_text(ops: &[(u64, u64)]) -> Result<String, String> {
-    let jobs = parse_jobs(r#"[{"key": "t", "stage": "cs", "local": [1, 1, 1], "arch": "sm86"}]"#)?;
-    let mut code = Vec::new();
+    ampere_text("cs", ops)
+}
+
+/// The same for a pixel shader (a header that only names the stage in front of the code).
+pub fn ampere_ps_text(ops: &[(u64, u64)]) -> Result<String, String> {
+    ampere_text("ps", ops)
+}
+
+fn ampere_text(stage: &str, ops: &[(u64, u64)]) -> Result<String, String> {
+    let jobs = parse_jobs(&format!(
+        r#"[{{"key": "t", "stage": "{stage}", "local": [1, 1, 1], "arch": "sm86"}}]"#
+    ))?;
+    let mut code = vec![0u8; if stage == "cs" { 0 } else { 0x80 }];
+    if stage == "ps" {
+        // header word 0: the shader type 5 in bits 10..14
+        code[..4].copy_from_slice(&(5u32 << 10).to_le_bytes());
+    }
     for (lo, hi) in ops.iter().chain([AEXIT].iter()) {
         code.extend(lo.to_le_bytes());
         code.extend(hi.to_le_bytes());
