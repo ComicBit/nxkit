@@ -68,7 +68,7 @@ A key that the translator does not do is a `ShaderError` of that key. The build 
 The translation store key has the translator identity, the job, the code, V, the source, the paired shader, the answer-table flag, the dual-source and fetch-outputs-only flags and the partner varyings.
 The identity is V, which covers the sources of `nxb-xlate`. A store that was written by another translator version is not used. A failure is not stored.
 
-The output is not byte-identical to the output of the former C# translator and `spirv-cross`. GPU tests validate it (D20).
+The output is not byte-identical to the output of the former C# translator and `spirv-cross`. No game ran with it yet (D20). Unit tests and Metal compile tests on built samples cover it.
 
 ## Versions and keys
 
@@ -210,6 +210,6 @@ The JSON writer and the guard tables follow the reference build scripts (measure
 | JSON writer | 16,269 JSON files | all byte-identical |
 | guard tables | 16,268 shaders | byte-identical |
 
-The libraries and `_b.json` come from the Rust translator. They are not compared byte for byte with the reference build scripts. GPU tests validate them (D20).
+The libraries and `_b.json` come from the Rust translator. They are not compared byte for byte with the reference build scripts. No game ran with them yet (D20).
 The side library cut and the compile conventions are the same as in the reference build scripts. The raw tier is not byte-identical to Apple's libraries.
 The full iOS target and `_b_cas.txt` are not ported at this time.

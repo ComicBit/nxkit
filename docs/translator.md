@@ -103,7 +103,7 @@ The passes `opt/double_to_float.rs` and `xform/softfloat.rs` then lower them to 
 
 ## Output
 
-The MSL is not byte-identical to the output of the former C# translator and `spirv-cross`. GPU tests validate it.
+The MSL is not byte-identical to the output of the former C# translator and `spirv-cross`. No game ran with it yet. Unit tests and Metal compile tests on built samples cover it.
 The own front end and the Apple tools compile the MSL as before.
 
 ## Geometry, task and mesh shaders

@@ -13,15 +13,15 @@ A switch turns it off: `NXB_OWN_RAW=0`. If the front end rejects a shader, Apple
 
 ## Status
 
-Version 0.5.1 is the seventh public release. It is early software. Read this section before you use it.
+Version 0.6.0 is the eighth public release. It is early software. Read this section before you use it.
 
 - Mac only for the build tools. The tools run on macOS on Apple silicon. Other systems are not supported.
 - The tools need Apple tools (`metal`, `metallib`, `air-opt`, `metal-tt`, `codesign`, `xcrun`) from your own Xcode.
-- Changed in this release: the chain value in each `_b.json` file is the computed value. The rewrite step follows the current engine.
-  `nxb build` takes more inputs and options. A game without a profile gets a provisional profile.
+- Changed in this release: the Rust translator writes MSL directly and is the only translator. The C# translator, `spirv-cross` and the MSL text passes are gone.
+  The options `--xlate*`, `--dotnet-root` and `--spirv-cross` and the command `nxb shaders recompile` are removed.
   Refer to [CHANGELOG.md](CHANGELOG.md).
 - One Rust translator writes MSL directly. It runs in the process of the shader step. The tools need no .NET runtime and no `spirv-cross`.
-  Its output is not byte-identical to the output of the reference build scripts. GPU tests validate it.
+  Its output is not byte-identical to the output of the reference build scripts. No game ran with it yet. Unit tests and Metal compile tests on built samples cover it.
 - `nxb build --platform ios` runs the iOS flow. Each stage was checked alone. Nobody ran the stages in one run. There is no device test.
 - A full build in one run with these defaults was not timed. Each stage was compared alone. A full run on one title had an archive error that 0.5.1 fixes. Nobody ran the full build again.
 - **The raw path is on by default.** Its libraries are not byte-identical to Apple's libraries. In a GPU test of 3,625 shaders (about 15 % of the corpus),
@@ -48,14 +48,14 @@ more titles.
 | App settings file | 142 profiles, 425 outputs | byte-identical. The header of the multi-program profile is ported. The headers of all profiles are identical to `game.py header` |
 | Mac host | one title | reuse key and decoder inputs are identical. The binary is not byte-identical, also not between two runs of the reference script |
 | Extract | two more titles (one with an update, `--updates-only`) | `RomFS.img`, ExeFS, control data and icon are byte-identical |
-| Shader step, Mac | one full run | 74,421 of 74,422 files are byte-identical. The listing `_b_cas.txt` differs by design |
+| Shader step, Mac (0.5.1, C# translator) | one full run | 74,421 of 74,422 files are byte-identical. The listing `_b_cas.txt` differs by design. Since 0.6.0 the Rust translator writes the MSL, refer to the translator row |
 | Shader step, iOS | 787 sample shaders | 2,889 of 2,889 iOS files are byte-identical |
 | App stage and signer | tested bundles | app tree, `Info.plist` and `CodeResources` are byte-identical. The signer matches `codesign` |
 | Pipeline archive planning | 18,301 pairs | the plan files are byte-identical. `metal-tt` output is not deterministic, so archives are compared by content |
 | IPA writer | a 59-entry sample and a bundle with a 300 MB file | byte-identical. A full game IPA was not built |
 | iOS stages (`nxb ios`) | generators and workspace writer on real and synthetic inputs, one title for the IPA | the generators are byte-identical. 75 of 75 IPA entries are equal in name, method, sizes, CRC and attributes. Two entries are equal in part only: the executable (only `__LINKEDIT` differs) and the font file |
 | Overlap in `nxb build` | one title, extract, split and shaders reused | the event streams are the same, except the times. 58,211 of 58,211 paths exist in both outputs. All files are byte-identical, except two rebuilt Mach-O files and their lines in `CodeResources` |
-| Shader step translator | MSL written by the Rust translator | not compared byte for byte with the reference build scripts. GPU tests validate it |
+| Shader step translator | MSL written by the Rust translator | not compared byte for byte with the reference build scripts. No game ran with it yet |
 | Rewrite (`nxb rewrite`), current engine (0.5.1) | 111 modules: 9 real, 4 synthetic and 98 NRO modules | `.patched.bin`, the six tables and `build_src.sha256` are byte-identical in 111 of 111. |
 | Rewrite (`nxb rewrite`), earlier script | 25 real modules, with ZBIC, NRO and frame step stubs | all tables, `.patched.bin` and the fixups are byte-identical. 98 of 98 NRO modules also. The script changed after this comparison |
 | Profile files, survey and `nxb profile` (0.5.1) | 1,115 tables of 145 profiles, 11 extractions, 6 surveys | read and write of the tables: 1,115 of 1,115. Guess: 11 of 11. Survey and provisional profile: 6 of 6. Registered profile check: 10 of 10 |
