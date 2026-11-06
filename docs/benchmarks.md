@@ -133,4 +133,9 @@ the 0.6.4 output by a SHA-256 manifest of all 90,442 files. All outputs are byte
 | TBAA node cache, hash index for writer constants, work-list DCE, borrowed tokens | 170 s | 1,115 |
 
 Peak memory went from 1.5 GB to 0.6 GB. In 0.6.4, 1,079 of 23,601 libraries came from Apple's `metal -c`.
+
+0.6.5 also closes front end gaps. The same run with 0.6.5 took 879 s of CPU user time and 1.2 GB of peak memory
+(measured on 2026-11-06). Apple's `metal -c` made 35 libraries. This run wrote to an external USB SSD, so its wall time
+of 214 s does not compare with the table. The outputs differ from 0.6.4 only in the libraries that Apple made before
+and in 2 libraries with a fixed call attribute.
 The shader step of a second title is in [research/second-title-shader-step.md](research/second-title-shader-step.md).
