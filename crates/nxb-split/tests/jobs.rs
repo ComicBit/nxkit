@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use nxb_model::sha256;
 use nxb_split::SplitError;
-use nxb_split::jobs::{Ctx, File, deferred, plan};
+use nxb_split::jobs::{Ctx, File, NroSet, deferred, plan_with};
 use nxb_split::scanfile::finish;
 use nxb_split::shaders::Profile;
 use nxb_split::src::{Mem, Src};
@@ -28,6 +28,16 @@ fn run(dir: &str) -> String {
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
         .collect();
     names.sort_by_key(|n| n.replace("__", "/"));
+    // `*.nro` files are the game's NROs (`DM_NRO_DIR`), not part of the tree
+    let nros = NroSet {
+        dir: "DM_NRO_DIR".into(),
+        files: names
+            .iter()
+            .filter(|n| n.ends_with(".nro"))
+            .map(|n| Arc::new(std::fs::read(format!("{dir}/{n}")).unwrap()))
+            .collect(),
+    };
+    names.retain(|n| !n.ends_with(".nro"));
     let files: Vec<File> = names
         .iter()
         .map(|n| {
@@ -66,7 +76,7 @@ fn run(dir: &str) -> String {
         }
         return out;
     }
-    let p = match plan(&files) {
+    let p = match plan_with(&files, &nros) {
         Ok(p) => p,
         Err(SplitError::Unsupported(_)) => return "UNSUP\n".into(),
         Err(_) => return "PLAN\n".into(),
@@ -130,4 +140,36 @@ fn archive_jobs_match_the_reference() {
         }
     }
     assert!(bad.is_empty(), "{}", bad.join("\n"));
+}
+
+#[test]
+fn a_cra_archive_without_an_nro_table_fails_the_plan() {
+    let arc = std::fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/data/jb_cra_nonro/42"
+    ))
+    .unwrap();
+    let files = [File {
+        rel: "42".into(),
+        src: Arc::new(Own(arc)),
+        live: true,
+    }];
+    let Err(SplitError::Red(m)) = plan_with(&files, &NroSet::default()) else {
+        panic!("the plan must fail");
+    };
+    assert_eq!(
+        m,
+        "/42: a CRA archive, and no NRO in DM_NRO_DIR (None) holds its file table"
+    );
+    // a file that the hook did not keep back is not an archive
+    let files = [File {
+        live: false,
+        ..files.into_iter().next().unwrap()
+    }];
+    assert!(
+        plan_with(&files, &NroSet::default())
+            .unwrap()
+            .jobs
+            .is_empty()
+    );
 }

@@ -135,7 +135,7 @@ fn stage_long(s: &str) -> &'static str {
     }
 }
 
-/// Folders and variables the reference split also reads (`DM_NRO_DIR`, `glslc_capture`, `ue_shaders`): present with
+/// Folders the reference split also reads (`glslc_capture`, `ue_shaders`): present with
 /// content, they are `Unsupported`, as this port does not read what they hold.
 pub fn env_guards(version_dirs: &[std::path::PathBuf]) -> Result<()> {
     let has = |dir: &std::path::Path, ext: &str| {
@@ -151,11 +151,6 @@ pub fn env_guards(version_dirs: &[std::path::PathBuf]) -> Result<()> {
             .filter(|v| !v.is_empty())
             .map(std::path::PathBuf::from)
     };
-    if let Some(d) = env("DM_NRO_DIR")
-        && has(&d, ".nro")
-    {
-        return Err(ExtractError::Unsupported("NROs named by DM_NRO_DIR".into()));
-    }
     for v in version_dirs {
         let cap = env("DM_GLSLC_CAPTURE").unwrap_or_else(|| v.join("glslc_capture"));
         if has(&cap, ".glslc") {
@@ -173,4 +168,45 @@ pub fn env_guards(version_dirs: &[std::path::PathBuf]) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// The NROs of `DM_NRO_DIR` (`*.nro`, hidden files left out, sorted by name): the file table of a CRA archive is in
+/// one of them, and every NRO is scanned like main's image.
+#[derive(Default)]
+pub(crate) struct Nros {
+    /// The variable's text, `None` when it is unset (the reference names it in a message).
+    pub dir: String,
+    /// File name and bytes.
+    pub files: Vec<(String, std::sync::Arc<Vec<u8>>)>,
+}
+
+pub(crate) fn read_nros() -> Result<Nros> {
+    let Some(dir) = std::env::var_os("DM_NRO_DIR") else {
+        return Ok(Nros {
+            dir: "None".into(),
+            files: Vec::new(),
+        });
+    };
+    let path = std::path::Path::new(&dir);
+    let mut names: Vec<String> = std::fs::read_dir(path)
+        .map(|rd| {
+            rd.flatten()
+                .filter(|e| e.path().is_file())
+                .filter_map(|e| e.file_name().into_string().ok())
+                .filter(|n| n.ends_with(".nro") && !n.starts_with('.'))
+                .collect()
+        })
+        .unwrap_or_default();
+    names.sort();
+    let mut files = Vec::new();
+    for n in names {
+        let p = path.join(&n);
+        let d =
+            std::fs::read(&p).map_err(|e| ExtractError::io(format!("read {}", p.display()), e))?;
+        files.push((n, std::sync::Arc::new(d)));
+    }
+    Ok(Nros {
+        dir: dir.to_string_lossy().into_owned(),
+        files,
+    })
 }

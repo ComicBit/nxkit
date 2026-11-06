@@ -102,6 +102,8 @@ pub struct Templates {
     pub(crate) held: AtomicUsize,
     pub(crate) by_label: Mutex<HashMap<String, Outcome>>,
     pub(crate) jobs: Mutex<(Vec<Outcome>, HashSet<String>)>,
+    /// The NROs of `DM_NRO_DIR`.
+    pub(crate) nros: crate::split_out::Nros,
 }
 
 /// A held-back file: label, digest, bytes when the images are not kept.
@@ -154,6 +156,7 @@ impl Templates {
             held: AtomicUsize::new(0),
             by_label: Mutex::new(HashMap::new()),
             jobs: Mutex::new((Vec::new(), HashSet::new())),
+            nros: crate::split_out::read_nros()?,
         })
     }
 
@@ -271,7 +274,7 @@ impl Templates {
             }
         }
         let mut results = Vec::new();
-        for v in versions {
+        for (n, v) in versions.iter().enumerate() {
             let img = nxb_split::nso::image(&v.main).map_err(split_err)?;
             let label = if v.tag.is_empty() {
                 "main".to_string()
@@ -283,6 +286,13 @@ impl Templates {
             scan_blob(&img, &label, &mut found, &mut var, 0).map_err(split_err)?;
             let more = nxb_split::misc::main_extras(&img, &label, &found).map_err(split_err)?;
             found.extend(more);
+            // the NROs the game decodes at run time hold shaders no RomFS file has: scanned like main
+            if n == 0 {
+                for (name, nro) in &self.nros.files {
+                    scan_blob(nro, &format!("main/{name}"), &mut found, &mut var, 0)
+                        .map_err(split_err)?;
+                }
+            }
             let pairs = var_pairs(prof, &found, &var);
             results.push(FileResult {
                 keys: uniq(prof, found, true).map_err(split_err)?,
