@@ -106,6 +106,10 @@ pub(crate) fn fatal(what: &str, e: impl std::fmt::Display) -> Fatal {
 pub fn build(mut cfg: BuildConfig) -> Result<BuildReport, Fatal> {
     let t0 = Instant::now();
     let out = cfg.out.join(format!("b-{}", cfg.chain));
+    let ios_out = cfg
+        .ios_out
+        .as_ref()
+        .map(|d| d.join(format!("b-{}", cfg.chain)));
     let tmp = cfg.scratch.join("tmp");
     for d in [&out, &tmp, &cfg.work.join("pch")] {
         fs::create_dir_all(d).map_err(|e| fatal("create folder", e))?;
@@ -131,15 +135,25 @@ pub fn build(mut cfg: BuildConfig) -> Result<BuildReport, Fatal> {
         }
         k.into_iter().collect()
     };
-    // A full build starts from no shader outputs (dmsh_build.py removes them first).
-    if let Ok(rd) = fs::read_dir(&out) {
-        for e in rd.flatten() {
-            let n = e.file_name().to_string_lossy().into_owned();
+    // Clear both targets before writing any shader. An interrupted build must not certify old iOS libraries.
+    for dir in std::iter::once(&out).chain(ios_out.iter()) {
+        fs::create_dir_all(dir).map_err(|e| fatal("output folder", e))?;
+        if cfg.keys.is_empty() || ios_out.as_ref() == Some(dir) {
+            match fs::remove_file(dir.join("inputs.tsv")) {
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                    return Err(fatal("inputs.tsv", e));
+                }
+                _ => {}
+            }
+        }
+        for entry in fs::read_dir(dir).map_err(|e| fatal("shader outputs", e))? {
+            let entry = entry.map_err(|e| fatal("shader output", e))?;
+            let n = entry.file_name().to_string_lossy().into_owned();
             let is_out = n.len() > 18
                 && n.as_bytes()[..16].iter().all(|c| c.is_ascii_hexdigit())
                 && n[16..].starts_with("_b");
             if is_out && (cfg.keys.is_empty() || keys.iter().any(|k| n.starts_with(k.as_str()))) {
-                let _ = fs::remove_file(e.path());
+                fs::remove_file(entry.path()).map_err(|e| fatal("old shader output", e))?;
             }
         }
     }
@@ -186,7 +200,7 @@ pub fn build(mut cfg: BuildConfig) -> Result<BuildReport, Fatal> {
             &cfg.work.join("pch"),
         )
         .map_err(|e| fatal("header", e))?;
-    let ios = match &cfg.ios_out {
+    let ios = match &ios_out {
         Some(d) => Some(crate::build_shared::ios_side(
             &cfg, d, &resolver, &registry, &home, &tmp,
         )?),
@@ -311,7 +325,7 @@ pub fn build(mut cfg: BuildConfig) -> Result<BuildReport, Fatal> {
             "# the game and the profile inputs this library was built from (dm/gfx/tools/dmsh_chain.py inputs)\ngame\t{}\ninputs\t{}\n",
             cfg.game, cfg.inputs
         );
-        fs::write(out.join("inputs.tsv"), stamp).map_err(|e| fatal("inputs.tsv", e))?;
+        fs::write(out.join("inputs.tsv"), &stamp).map_err(|e| fatal("inputs.tsv", e))?;
         // `_b_cas.txt`: the cache entries this full build used, one per line, sorted. Python lists its CAS digests there
         // (its pruner keeps those), ours are store keys, so a Python pruner sees none of its entries in use, which is
         // true for a library built here.
@@ -320,6 +334,9 @@ pub fn build(mut cfg: BuildConfig) -> Result<BuildReport, Fatal> {
         fs::write(out.join("_b_cas.txt"), text).map_err(|e| fatal("_b_cas.txt", e))?;
         crate::guard_tables::write(&out, &cfg.work.join("tables"), cfg.jobs)
             .map_err(|e| fatal("guard tables", e))?;
+        if let Some(dir) = ios_out {
+            fs::write(dir.join("inputs.tsv"), stamp).map_err(|e| fatal("iOS inputs.tsv", e))?;
+        }
     }
     crate::build_partial::mark(&cfg, &out, &results, total)?;
     let _ = fs::remove_dir_all(cfg.scratch.join("tmp"));

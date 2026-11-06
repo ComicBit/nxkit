@@ -146,6 +146,7 @@ fn inputs(a: &Args, b: &Build) -> Result<ipa::Inputs, String> {
         patched: p(w.join(format!("patched_{}", b.package))),
         romfs: p(romfs),
         msl_ios: p(w.join("shader/ios")),
+        guard_tables: a.shaders.is_none().then(|| w.join("shader/work/tables")),
         gfxapi: Some("nvn".into()),
         display_name: name,
         bundle_id: a.bundle_id.clone(),

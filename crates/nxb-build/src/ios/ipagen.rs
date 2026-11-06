@@ -106,7 +106,7 @@ pub fn modules(g: &Game, patched: &str) -> Result<Vec<String>, String> {
 
 /// The checks of the program's inputs (`check_program`), returning the modules and the graphics API.
 pub(crate) fn check_program(
-    _r: &Runner,
+    guards: &Path,
     (gfxapi, game): (Option<&str>, &str),
     g: &Game,
     [patched, romfs, msl]: [&str; 3],
@@ -185,7 +185,7 @@ pub(crate) fn check_program(
                 "the iOS shader libraries {msl}/b-{v} are not a full build from this profile's current tables (inputs {inp}; their stamp: {st}): build them again (IOSOUT={msl} dmsh_build.py ...)"
             )));
         }
-        let c1 = std::fs::read_to_string(g.dir.join("c1_full.tsv")).unwrap_or_default();
+        let c1 = std::fs::read_to_string(guards.join("c1_full.tsv")).unwrap_or_default();
         if !c1
             .split('\n')
             .next()
@@ -193,7 +193,8 @@ pub(crate) fn check_program(
             .starts_with(&format!("# chain b-{v} inputs {inp} "))
         {
             return Err(die(format!(
-                "{gd}/c1_full.tsv is missing or not made from these libraries (chain {v}, inputs {inp}): a full dmsh_build.py run makes it and cb_extent.tsv"
+                "{}/c1_full.tsv is missing or not made from these libraries (chain {v}, inputs {inp}): a full dmsh_build.py run makes it and cb_extent.tsv",
+                guards.display()
             )));
         }
     }

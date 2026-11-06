@@ -31,6 +31,8 @@ pub struct Inputs {
     pub patched: Option<String>,
     pub romfs: Option<String>,
     pub msl_ios: Option<String>,
+    /// Guard tables from this build's shader stage. Standalone packaging reads the profile's tables.
+    pub guard_tables: Option<PathBuf>,
     pub aoc: Option<String>,
     pub gfxapi: Option<String>,
     pub font_py: Option<String>,
@@ -318,8 +320,9 @@ pub fn generate(
         i.v.clone()
             .filter(|x| !x.is_empty())
             .unwrap_or_else(|| chain_version(&dm.join("gfx/nvn/dmsh_chain.h")));
+    let guards = i.guard_tables.as_deref().unwrap_or(&g.dir);
     let (mods, gfx) = check_program(
-        &r,
+        guards,
         (i.gfxapi.as_deref(), &i.game),
         &g,
         [&patched, &romfs, &msl],
@@ -338,7 +341,7 @@ pub fn generate(
                     p.gfx
                 ));
                 check_program(
-                    &r,
+                    &p.g.dir,
                     (Some(p.gfx.as_str()), &p.game),
                     &p.g,
                     [&p.patched, &p.romfs, &p.msl],
@@ -419,6 +422,7 @@ pub fn generate(
             let pin = ProgIn {
                 game: &i.game,
                 g: &g,
+                guards,
                 patched: &patched,
                 gfx: &gfx,
                 vnacp: &vnacp,
@@ -441,6 +445,7 @@ pub fn generate(
                 let pin = ProgIn {
                     game: &p.game,
                     g: &p.g,
+                    guards: &p.g.dir,
                     patched: &p.patched,
                     gfx: &p.gfx,
                     vnacp: &nacp,
