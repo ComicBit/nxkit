@@ -70,6 +70,12 @@ pub struct DrvReads {
 pub struct Shared {
     /// `(declaration, argument)` pairs.
     pub params: Vec<(String, String)>,
+    /// The shared memories live in the device buffer of the threadgroup spill (see `spill`).
+    pub spill: bool,
+    /// Blocks of the main function the emitter leaves out (see `first_store`).
+    pub skip: BTreeSet<A>,
+    /// The loads that are lanes of a wide load (see `wide`).
+    pub wide: std::collections::BTreeMap<A, super::wide::Lane>,
 }
 
 /// The emitter state.
@@ -88,6 +94,8 @@ pub struct Em<'a> {
     pub(super) func: usize,
     pub(super) cur: Option<A>,
     pub(super) may_return: bool,
+    /// The loops being emitted. A loop that evaluates its condition with statements has a flag that its breaks set.
+    pub(super) loops: Vec<Option<String>>,
     /// The driver bank reads of the program.
     pub drv: DrvReads,
     /// The notes of the emitter.
@@ -133,6 +141,7 @@ impl<'a> Em<'a> {
             func: 0,
             cur: None,
             may_return: false,
+            loops: Vec::new(),
             drv: DrvReads::default(),
             notes: Vec::new(),
             helpers: BTreeSet::new(),
@@ -234,6 +243,9 @@ impl<'a> Em<'a> {
 
     /// The node `a` with its own type.
     pub(super) fn eval(&mut self, a: A) -> R<Val> {
+        if let Some(v) = self.wide_lane(a)? {
+            return Ok(v);
+        }
         match self.info.ast.kind(a).clone() {
             Kind::Operation(o) => self
                 .operation(&o)?

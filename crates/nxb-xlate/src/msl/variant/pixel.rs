@@ -7,7 +7,7 @@ use super::side;
 use crate::msl::Side;
 use crate::msl::args::Res;
 use crate::msl::emit::{R, Shader};
-use crate::msl::entry::{EntryName, Form, Param, entry_text, params, params_decl};
+use crate::msl::entry::{EntryName, Form, Param, early_tests, entry_text, params, params_decl};
 use crate::msl::io::{FragOut, Plan};
 use crate::translation::msl_entry::Structured;
 use nxb_pyjson::Value;
@@ -105,7 +105,7 @@ pub fn assemble(
     body: &str,
     derived: &[Derived],
 ) -> R<Built> {
-    let early = s.props.definitions.early_z_force;
+    let early = early_tests(s, res);
     let ps = params(res, plan);
     let owned: Vec<Vec<FragOut>> = derived
         .iter()

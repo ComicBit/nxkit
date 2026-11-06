@@ -9,18 +9,18 @@ use crate::driver::TexInfo;
 
 /// The decoded handle of a descriptor.
 #[derive(Clone, Copy, Debug)]
-struct Handle {
+pub(super) struct Handle {
     /// Texture (or image) buffer slot, sampler buffer slot.
-    tb: i64,
-    sb: i64,
-    o0: i64,
-    o1: i64,
-    ty: i64,
+    pub tb: i64,
+    pub sb: i64,
+    pub o0: i64,
+    pub o1: i64,
+    pub ty: i64,
     /// The slots field was not set (`tcb`).
-    tcb: bool,
+    pub tcb: bool,
 }
 
-fn handle(t: &TexInfo) -> Handle {
+pub(super) fn handle(t: &TexInfo) -> Handle {
     let tcb = t.cbuf_slot < 0;
     let slots = t.cbuf_slot.max(0);
     let tb = if tcb { 2 } else { slots & 0xffff };
@@ -89,8 +89,17 @@ fn c2_slots(h: &Handle, image: bool) -> (Option<i64>, Option<i64>) {
     (t, s)
 }
 
-fn in_ubo(slot: i64) -> bool {
+pub(super) fn in_ubo(slot: i64) -> bool {
     (3..=16).contains(&slot)
+}
+
+/// The handle sits in a guest uniform buffer. A type 1 handle takes its sampler word from another uniform buffer or
+/// from the driver table (slot 2).
+pub(super) fn ubo_handle(h: &Handle) -> bool {
+    !h.tcb
+        && in_ubo(h.tb)
+        && [0, 1, 3].contains(&h.ty)
+        && !(h.ty == 1 && !in_ubo(h.sb) && h.sb != 2)
 }
 
 /// What kind of member a texture, image or sampler is, and the facts of the kind.
@@ -133,8 +142,7 @@ impl Decoded {
 /// `buffer` is a buffer texture, `array` is an array of handles, `dynamic` is a handle traced to no slot.
 pub fn decode(t: &TexInfo, image: bool, sampler: bool, buffer: bool, array: bool) -> Decoded {
     let h = handle(t);
-    let ubo_ok =
-        !h.tcb && in_ubo(h.tb) && [0, 1, 3].contains(&h.ty) && !(h.ty == 1 && !in_ubo(h.sb));
+    let ubo_ok = ubo_handle(&h);
     if image {
         if ubo_ok && !array {
             let mut d = Decoded::of(Kind::ImgUbo, Some(h.tb - 3));
@@ -145,13 +153,21 @@ pub fn decode(t: &TexInfo, image: bool, sampler: bool, buffer: bool, array: bool
     }
     if ubo_ok && !array {
         let tex = (h.tb - 3, (h.o0 * 4) as u32);
+        let c2 = h.ty == 1 && h.sb == 2;
         let other = match h.ty {
-            1 => Some((h.sb - 3, (h.o1 * 4) as u32)),
+            1 if !c2 => Some((h.sb - 3, (h.o1 * 4) as u32)),
             _ => None,
         };
         if sampler {
             if h.ty == 3 {
                 return Decoded::of(Kind::SampId, Some(h.o1));
+            }
+            if c2 {
+                let mut d = Decoded::of(Kind::SampUbo, Some(tex.0));
+                d.off = Some(tex.1);
+                d.soff = Some((h.o1 * 4) as u32);
+                d.sreg = Some(abi::SREG_C2);
+                return d;
             }
             let (r, o) = other.unwrap_or(tex);
             let mut d = Decoded::of(Kind::SampUbo, Some(r));
@@ -225,6 +241,20 @@ mod tests {
     fn guest_ubo_handle_is_bindless() {
         let d = decode(&info(4, 7), false, false, false, false);
         assert_eq!((d.kind, d.reg, d.off), (Kind::TexUbo, Some(1), Some(28)));
+    }
+
+    #[test]
+    fn guest_handle_with_a_driver_table_sampler() {
+        let h = (1i64 << 28) | (0x5c << 14) | 7;
+        let slots = 6 | (3 << 16);
+        let t = decode(&info(slots, h), false, false, false, false);
+        assert_eq!(
+            (t.kind, t.reg, t.off, t.soff),
+            (Kind::TexUbo, Some(3), Some(28), None)
+        );
+        let s = decode(&info(slots, h), false, true, false, false);
+        assert_eq!((s.kind, s.reg, s.off), (Kind::SampUbo, Some(3), Some(28)));
+        assert_eq!((s.soff, s.sreg), (Some(0x170), Some(abi::SREG_C2)));
     }
 
     #[test]

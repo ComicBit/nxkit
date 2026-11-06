@@ -10,7 +10,7 @@ use super::fetch_origin::{How, Tracer};
 use crate::msl::abi::Kind;
 use crate::msl::args::Res;
 use crate::msl::emit::{Em, Options, R, Shader, Shared};
-use crate::msl::entry::{EntryName, Form, Param, entry_text, params, params_decl};
+use crate::msl::entry::{EntryName, Form, Param, early_tests, entry_text, params, params_decl};
 use crate::msl::inst_tex::{
     DERIVATIVES, GATHER, INT_COORDS, LOD_BIAS, LOD_LEVEL, OFFSET, OFFSETS, Tref,
 };
@@ -315,7 +315,7 @@ pub fn build(
     msl.push_str(&entry_text(s, &name, Shader::Fragment, res, plan, main)?);
     let mut ps = params(res, plan);
     ps.extend(extra);
-    msl.push_str(&entry(&outs, &ps, s.props.definitions.early_z_force));
+    msl.push_str(&entry(&outs, &ps, early_tests(s, res)));
     let meta = Value::obj([
         (
             "calls",

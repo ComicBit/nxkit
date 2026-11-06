@@ -15,7 +15,7 @@ use crate::translation::msl_entry::Structured;
 use crate::types::SamplerType;
 
 pub(super) const F4: AggType = AggType(AggType::VECTOR4.0 | AggType::FP32.0);
-const ONE: i32 = 0x3f80_0000;
+pub(super) const ONE: i32 = 0x3f80_0000;
 
 /// A program of one function under construction.
 pub(super) struct B {
@@ -232,7 +232,7 @@ pub(super) fn fragment() -> B {
     b
 }
 
-fn compute() -> B {
+pub(super) fn compute() -> B {
     let mut b = B::new(Stage::Compute, "cs");
     b.s.props.definitions.compute_local_size = [8, 1, 1];
     b.io(StorageKind::Input, IoVariable::ThreadId, 0);
@@ -395,7 +395,7 @@ fn fp(i: Inst) -> Inst {
 }
 
 /// Subgroup, fence, conversion and builtin constructs.
-fn compute_subgroup() -> B {
+pub(super) fn compute_subgroup() -> B {
     let mut b = compute();
     b.io(StorageKind::Input, IoVariable::SubgroupLaneId, 0);
     let t = b.load_scalar(IoVariable::SubgroupLaneId, AggType::U32);
@@ -426,7 +426,7 @@ fn compute_subgroup() -> B {
     b
 }
 
-fn fragment_builtins() -> B {
+pub(super) fn fragment_builtins() -> B {
     let mut b = fragment();
     for v in [
         IoVariable::PrimitiveId,

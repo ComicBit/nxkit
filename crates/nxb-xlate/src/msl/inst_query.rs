@@ -70,6 +70,9 @@ impl Em<'_> {
         let f = *names
             .get(o.index as usize)
             .ok_or("size component out of range")?;
+        if f == "get_array_size" && ty.0 & SamplerType::MASK == 4 {
+            return Ok(Val::new("1", AggType::S32));
+        }
         let arg = if has_lod && f != "get_array_size" {
             let l = self.tsrc(o, &mut i, AggType::S32)?;
             format!("uint({})", l.s)
