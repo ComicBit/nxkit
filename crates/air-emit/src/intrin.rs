@@ -1,11 +1,11 @@
 //! metal_stdlib builtins and texture methods as AIR intrinsic calls. Every name and signature
 //! here was read from Apple's front end output for the same MSL (`tools/probe/probe.py`).
 
-use msl_sema::hir::{Expr, Query, SampleOpt, TexOp};
+use msl_sema::hir::{Expr, ExprKind, PlaceKind, Query, SampleOpt, TexOp};
 use msl_sema::types::{is_float, is_signed, Scalar, Tex, TexKind, Type};
 use msl_sema::Error;
 
-use crate::func::{FnGen, FM, V};
+use crate::func::{Addr, FnGen, FM, V};
 use crate::ir::suffix;
 use crate::Attrs;
 
@@ -52,6 +52,9 @@ fn ops(g: &FnGen<'_>, vals: &[V]) -> Vec<(String, String)> {
 
 /// Lowers a builtin call.
 pub fn builtin(g: &mut FnGen<'_>, name: &str, args: Vec<V>, ret: &Type) -> R<V> {
+    if let Some(v) = crate::atomic::builtin(g, name, &args, ret)? {
+        return Ok(v);
+    }
     let s = ret.elem();
     let fl = s.is_some_and(is_float);
     let rt = lt(g, ret);
@@ -221,7 +224,23 @@ fn zero_offset(dim: u8) -> String {
 /// The texture handle, loaded after the call's other arguments and without a TBAA tag (clang
 /// loads it inside the method wrapper through `this`).
 fn tex_value(g: &mut FnGen<'_>, tex: &Expr) -> R<V> {
-    g.load_texture_this(tex)
+    match g.tex_pre.last().cloned().flatten() {
+        Some(a) => g.load_texture_at(&a),
+        None => g.load_texture_this(tex),
+    }
+}
+
+/// The address of a texture reached through a pointer index (`(&pool->e[0])[i]`). clang
+/// evaluates the object expression of a method call before its arguments, which is observable
+/// when the index has side effects (`dm_pool_mark`).
+fn tex_pre_addr(g: &mut FnGen<'_>, tex: &Expr) -> R<Option<Addr>> {
+    let ExprKind::Load(p) = &tex.kind else {
+        return Ok(None);
+    };
+    match &p.kind {
+        PlaceKind::Deref(e) if matches!(e.kind, ExprKind::PtrOffset(..)) => g.addr(p),
+        _ => Ok(None),
+    }
 }
 
 /// Lowers a texture operation.`slot` is its reserved place in the deferred list.
@@ -235,7 +254,13 @@ pub fn texture(
 ) -> R<V> {
     // texture methods are members of class templates: clang instantiates them at the end
     g.cx.in_template += 1;
-    let r = texture_op(g, tex, tx, op, ret);
+    let r = tex_pre_addr(g, tex).and_then(|pre| {
+        g.tex_pre.push(pre);
+        let depth = g.tex_pre.len();
+        let r = texture_op(g, tex, tx, op, ret);
+        g.tex_pre.truncate(depth - 1);
+        r
+    });
     g.cx.in_template -= 1;
     r
 }

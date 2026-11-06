@@ -8,7 +8,7 @@
 use msl_lex::Token;
 
 /// hash -> helper name, the content of the prototype's `prelude.json`.
-pub const PRELUDE: [(&str, &str); 19] = [
+pub const PRELUDE: [(&str, &str); 20] = [
     ("5320f275455261ce", "dm_bs"),
     ("41926c7574d941ba", "spvFAdd"),
     ("001ab26fd933eecb", "mod"),
@@ -28,10 +28,17 @@ pub const PRELUDE: [(&str, &str); 19] = [
     ("00a964ba6150992d", "spvSubgroupShuffle"),
     ("39d7fef78d7770be", "spvSubgroupShuffle"),
     ("5bf10a85e0d35b52", "spvSubgroupShuffle"),
+    ("d0b72973eeaa2916", "dm_pool_mark"),
 ];
 
 /// Helpers with a type rule (`PRELUDE_ALLOWED`).
-pub const ALLOWED: [&str; 4] = ["dm_bs", "spvDepthCast", "spvFAdd", "spvUnsafeArray"];
+pub const ALLOWED: [&str; 5] = [
+    "dm_bs",
+    "dm_pool_mark",
+    "spvDepthCast",
+    "spvFAdd",
+    "spvUnsafeArray",
+];
 
 /// The helper name for a hash in the built-in table.
 pub fn lookup(hash: &str) -> Option<&'static str> {
@@ -226,6 +233,8 @@ mod tests {
     #[test]
     fn table() {
         assert_eq!(lookup("5320f275455261ce"), Some("dm_bs"));
+        assert_eq!(lookup("d0b72973eeaa2916"), Some("dm_pool_mark"));
+        assert!(is_allowed("dm_pool_mark"));
         assert_eq!(lookup("0000000000000000"), None);
         assert!(is_allowed("spvFAdd"));
         assert!(!is_allowed("mod"));

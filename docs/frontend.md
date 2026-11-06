@@ -49,8 +49,16 @@ All crates use only the standard library and forbid `unsafe` code. `nxb shaders`
 The 33 inputs that do not compile are parser rejects: threadgroup address-space values, some templates, `<metal_atomic>`.
 
 The own front end does not support these constructs at this time. They go to the Apple front end: texture `write` other than 2D, `read` and `gather`
-other than 2D, `get_width` other than 2D, half builtins, matrices, `simd_*`, barriers, sample gradients, arrays of
-resources in argument buffers.
+other than 2D, `get_width` other than 2D, half builtins, matrices, `simd_*`, barriers, sample gradients, `array<T, N>`
+outside an argument buffer.
+
+The own front end compiles texture pools. A pool is an argument buffer with an `array<texture2d<float>, N>` or
+`array<sampler, N>` member. The shader indexes the pool through a pointer to its first element. The prelude finds the
+translator's helper `dm_pool_mark` by the hash of its tokens, as it finds the other helpers. Each pool type gives one
+instantiation `dm_pool_mark<P>`. Its relaxed device atomics become `air.atomic.global.load.i32` and
+`air.atomic.global.or.u.i32`. The own front end compiles `reinterpret_cast` from pointer to pointer and from integer to
+pointer. Apple's IR wraps arrays and atomics in the struct types `metal::array` and `metal::_atomic`. Thus pool libraries
+pass `air-validate`, but they are not byte-identical to Apple's libraries.
 
 ## Verdicts
 

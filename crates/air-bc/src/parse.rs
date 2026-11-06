@@ -520,7 +520,8 @@ impl<'a> P<'a> {
                 }
                 Op::Gep(ib, t, p, idx)
             }
-            "bitcast" | "zext" | "sext" | "trunc" | "fpext" | "fptrunc" | "addrspacecast" => {
+            "bitcast" | "zext" | "sext" | "trunc" | "fpext" | "fptrunc" | "addrspacecast"
+            | "inttoptr" => {
                 let v = self.typed()?;
                 if self.word()? != "to" {
                     return Err("cast to".into());
