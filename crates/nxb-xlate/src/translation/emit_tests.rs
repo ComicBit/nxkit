@@ -104,3 +104,21 @@ fn pixld_is_refused_outside_a_pixel_shader() {
     let r = ampere_cs_text(&[pixld()]);
     assert!(r.is_err_and(|e| e.contains("0x925 form 1")));
 }
+
+/// `UP2UR UR4, URZ, mask`.
+fn up2ur(mask: u64) -> (u64, u64) {
+    (0x883 | APT | 4 << 16 | 63 << 24 | mask << 32, 0)
+}
+
+#[test]
+fn up2ur_packs_the_masked_uniform_predicates() {
+    let t = ampere_cs_text(&[up2ur(0x41)]).expect("emit");
+    assert_eq!(count(&t, "2a"), 2, "{t}");
+    assert!(t.contains("R4:0") && t.contains("#40"), "{t}");
+}
+
+#[test]
+fn up2ur_refuses_a_mask_past_the_predicates() {
+    let r = ampere_cs_text(&[up2ur(0x100)]);
+    assert!(r.is_err_and(|e| e.contains("mask past the predicates")));
+}
