@@ -197,7 +197,50 @@ mod tests {
         assert!(strs("{").is_empty());
     }
 
-    /// Oracle: `NXB_ORACLE_ENGINE`, `NXB_ORACLE_PYTHON`, `NXB_ORACLE_GAMES` (a profile with `programs`): `game.py header`
+    /// Oracle: `NXB_ORACLE_ENGINE` and `NXB_ORACLE_PYTHON`. `game.py header` of every profile that the engine lists,
+    /// against [`header`] (the profiles with `programs` give the table of their programs).
+    #[test]
+    fn every_header_equals_the_reference_script() {
+        let (Some(e), Some(py)) = (
+            std::env::var_os("NXB_ORACLE_ENGINE"),
+            std::env::var_os("NXB_ORACLE_PYTHON"),
+        ) else {
+            return;
+        };
+        let game_py = std::path::Path::new(&e).join("dm/games/game.py");
+        let list = std::process::Command::new(&py)
+            .arg(&game_py)
+            .arg("list")
+            .output()
+            .unwrap();
+        let p = Profiles::new(std::path::Path::new(&e), &|_| None);
+        let out = std::env::temp_dir().join(format!("nxb-header-all-{}.h", std::process::id()));
+        let mut n = 0;
+        for id in String::from_utf8_lossy(&list.stdout)
+            .lines()
+            .filter_map(|l| l.split('\t').next())
+        {
+            let _ = std::fs::remove_file(&out);
+            let st = std::process::Command::new(&py)
+                .arg(&game_py)
+                .args(["header", id])
+                .arg(&out)
+                .output()
+                .unwrap();
+            let got = header(&p.load(id).unwrap(), &p);
+            if !st.status.success() {
+                assert!(got.is_err(), "{id}: the reference refused the header");
+                continue;
+            }
+            assert_eq!(got.unwrap(), std::fs::read_to_string(&out).unwrap(), "{id}");
+            n += 1;
+        }
+        let _ = std::fs::remove_file(&out);
+        eprintln!("{n} headers identical");
+        assert!(n > 100);
+    }
+
+    /// Oracle: `NXB_ORACLE_ENGINE`, `NXB_ORACLE_PYTHON`, `NXB_ORACLE_MULTI` (a profile with `programs`): `game.py header`
     /// of it against [`header`].
     #[test]
     fn multi_program_header_equals_the_reference_script() {
