@@ -59,8 +59,6 @@ and refuses to run (exit code 4) when they differ. The same notice is in `data/r
 
 | tool | licence | use |
 |---|---|---|
-| Shader translator (a build of the Ryujinx translator) | MIT | started as an external process. No code is in this tree |
-| spirv-cross | Apache-2.0 | started as an external program. No code is in this tree |
 | Apple tools (`metal`, `metallib`, `air-opt`, `air-as`, `codesign`, `metal-tt`, `metal-pack`, `xcrun`) | Apple licence | started from your own Xcode. Not redistributed |
 
 ## If code is ported later
