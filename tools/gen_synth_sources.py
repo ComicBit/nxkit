@@ -84,7 +84,7 @@ put('u/oodle.bin', ue3(b'\x8c')); put('u/zlib.bin', ue3(b'\x01'))
 put('u/tag_only.bin', TAG + struct.pack('<H', 0x9000) + bytes(40))
 
 put('t/a.trpfs', b'ONEPACK\0' + bytes(8)); put('t/b.trpfs', b'ONEPACK!' + bytes(8)); put('t/c.bin', b'ONEPACK\0')
-put('s/a.spv', bytes.fromhex('03022307') + bytes(8)); put('s/b.spv', bytes.fromhex('03022308')); put('s/c.bin', bytes.fromhex('0302'))
+put('s/a.dat', bytes.fromhex('03022307') + bytes(8)); put('s/b.dat', bytes.fromhex('03022308')); put('s/c.bin', bytes.fromhex('0302'))
 put('g/ok.frag', b'#version 450\nvoid main() {}\n'); put('g/ok.VERT', b'void main() {}'); put('g/bin.vert', bytes([0, 1, 2, 3]))
 put('g/empty.frag', b''); put('g/x.mvgl', b'abc'); put('g/y.glsl', b'abc')
 put('Data/layout.toc', bytes.fromhex('00d1ce01') + bytes(8))
