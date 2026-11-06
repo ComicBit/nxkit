@@ -30,6 +30,9 @@ pub mod inst_misc;
 pub mod inst_query;
 pub mod inst_tex;
 pub mod io;
+pub mod pool;
+#[cfg(test)]
+mod pool_tests;
 pub mod prelude;
 pub mod refl;
 pub mod spill;

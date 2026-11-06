@@ -2,6 +2,7 @@
 
 use super::args::SET_NAME;
 use super::emit::{Em, R, Shader, Val};
+use super::pool;
 use super::types::scalar;
 use super::usage::is_plain_sample;
 use crate::structured::ast::{AstTex, OpData};
@@ -88,32 +89,35 @@ impl Em<'_> {
             .texs
             .get(&(t.set, t.binding))
             .ok_or("texture is not in the argument buffer")?;
-        let (name, smp_name, twin, array) = (
+        let (name, smp_name, twin, array, pooled) = (
             tx.name.clone(),
             tx.sampler.clone(),
             tx.twin.clone(),
             tx.def.array_length != 1,
+            tx.pool,
         );
         let idx = if array {
             Some(self.tsrc(o, i, AggType::S32)?.s)
         } else {
             None
         };
-        let at = |n: &str, idx: &Option<String>| match idx {
+        let at = |n: &str, idx: &Option<String>, pool: bool, mark: bool| match idx {
+            Some(x) if pool => pool::element(n, x, mark),
             Some(x) => format!("{SET_NAME}.{n}[{x}]"),
             None => format!("{SET_NAME}.{n}"),
         };
-        let tex = at(&name, &idx);
+        let tex = at(&name, &idx, pooled, true);
         if !t.is_separate() {
             return Ok(Tref {
                 tex,
-                smp: smp_name.map(|n| at(&n, &idx)),
+                smp: smp_name.map(|n| at(&n, &idx, pooled, false)),
                 border: twin,
                 array,
             });
         }
         let key = (t.sampler_set, t.sampler_binding);
         let sampler = self.res.texs.get(&key);
+        let spool = sampler.is_some_and(|s| s.pool);
         let sarray = match sampler {
             Some(s) => s.def.array_length != 1,
             None => self
@@ -130,7 +134,7 @@ impl Em<'_> {
         };
         Ok(Tref {
             tex,
-            smp: sampler.map(|s| at(&s.name, &sidx)),
+            smp: sampler.map(|s| at(&s.name, &sidx, spool, false)),
             border: sampler.and_then(|s| s.twin.clone()),
             array,
         })

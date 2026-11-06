@@ -85,7 +85,7 @@ fn entry_text(
     body: &str,
     spill: Option<&Spill>,
 ) -> R<String> {
-    let early = shader == Shader::Fragment && s.props.definitions.early_z_force;
+    let early = shader == Shader::Fragment && (s.props.definitions.early_z_force || res.early);
     let has_out = shader != Shader::Compute && !plan.out_members.is_empty();
     let ret = if has_out { "main0_out" } else { "void" };
     let mut params = Vec::new();
