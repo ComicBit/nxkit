@@ -88,6 +88,8 @@ pub struct Em<'a> {
     pub(super) func: usize,
     pub(super) cur: Option<A>,
     pub(super) may_return: bool,
+    /// The loops being emitted. A loop that evaluates its condition with statements has a flag that its breaks set.
+    pub(super) loops: Vec<Option<String>>,
     /// The driver bank reads of the program.
     pub drv: DrvReads,
     /// The notes of the emitter.
@@ -123,6 +125,7 @@ impl<'a> Em<'a> {
             func: 0,
             cur: None,
             may_return: false,
+            loops: Vec::new(),
             drv: DrvReads::default(),
             notes: Vec::new(),
             helpers: BTreeSet::new(),

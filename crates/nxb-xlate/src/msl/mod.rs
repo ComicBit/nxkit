@@ -37,6 +37,8 @@ pub mod io;
 pub mod ioidx;
 #[cfg(test)]
 mod ioidx_tests;
+#[cfg(test)]
+mod loop_tests;
 pub mod pool;
 #[cfg(test)]
 mod pool_tests;

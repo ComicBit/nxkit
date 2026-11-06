@@ -282,6 +282,24 @@ fn gaps_metal_compiles_the_samples() {
             "ps_pool_sep",
             super::pool_tests::pool_sample(64, 7, 0x2a, true, false),
         ),
+        (
+            "cs_img_or",
+            super::bind_tests::image_atomic(SamplerType::TEXTURE_2D, 11, 6 << 16, 2),
+        ),
+        (
+            "cs_img_cas",
+            super::bind_tests::image_atomic(SamplerType::TEXTURE_BUFFER, 12, 9 << 16, 1),
+        ),
+        (
+            "cs_img_arr",
+            super::bind_tests::image_atomic(
+                SamplerType(SamplerType::TEXTURE_2D.0 | SamplerType::ARRAY),
+                11,
+                1 << 16,
+                3,
+            ),
+        ),
+        ("cs_spin", super::loop_tests::spin(true)),
         ("cs_gmem", super::gmem_tests::raw_sample()),
         ("ps_ia", super::ioidx_tests::indexed_pixel(None, 2)),
         ("ps_ia_const", super::ioidx_tests::indexed_pixel(Some(2), 1)),
@@ -309,7 +327,7 @@ fn gaps_metal_compiles_the_samples() {
                 "-c",
                 "-O1",
                 "-fpreserve-invariance",
-                "-std=metal3.0",
+                "-std=metal3.1",
             ])
             .arg(&src)
             .arg("-o")

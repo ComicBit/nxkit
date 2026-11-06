@@ -115,15 +115,55 @@ impl Em<'_> {
 
     fn loop_block(&mut self, b: A, cond: Option<A>) -> R<()> {
         let c = cond.ok_or("loop without condition")?;
+        self.cur = Some(b);
+        let (tmp, notes) = (self.tmp, self.notes.len());
+        self.get(AggType::BOOL, c)?;
+        let statements = !std::mem::take(&mut self.pre).is_empty();
+        self.tmp = tmp;
+        self.notes.truncate(notes);
+        if statements {
+            return self.statement_loop(b, c);
+        }
         self.line("do");
         self.raw("{");
-        self.scope(b)?;
+        self.loops.push(None);
+        let r = self.scope(b);
+        self.loops.pop();
+        r?;
         self.cur = Some(b);
         let v = self.get(AggType::BOOL, c)?;
-        if !self.pre.is_empty() {
-            return Err("unported: loop condition with statements".into());
-        }
         self.raw(&format!("}} while ({});", v.s));
+        Ok(())
+    }
+
+    /// A loop whose condition needs statements. They cannot sit in the `while` of a `do` loop, so the body runs once
+    /// in an inner loop that a `continue` leaves, a `break` sets the flag and leaves, and the condition follows it.
+    fn statement_loop(&mut self, b: A, c: A) -> R<()> {
+        let flag = format!("lb{}", self.tmp);
+        self.tmp += 1;
+        self.line("while (true)");
+        self.raw("{");
+        self.ind += 1;
+        self.raw(&format!("bool {flag} = false;"));
+        self.raw("do");
+        self.raw("{");
+        self.loops.push(Some(flag.clone()));
+        let r = self.scope(b);
+        self.loops.pop();
+        r?;
+        self.raw("} while (false);");
+        self.raw(&format!("if ({flag})"));
+        self.raw("{");
+        self.raw("    break;");
+        self.raw("}");
+        self.cur = Some(b);
+        let v = self.get(AggType::BOOL, c)?;
+        self.line(&format!("if (!({}))", v.s));
+        self.raw("{");
+        self.raw("    break;");
+        self.raw("}");
+        self.ind -= 1;
+        self.raw("}");
         Ok(())
     }
 

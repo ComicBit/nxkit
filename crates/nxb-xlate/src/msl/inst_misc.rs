@@ -136,7 +136,10 @@ impl Em<'_> {
                 self.line("discard_fragment();");
                 self.return_default()?;
             }
-            Inst::LoopBreak => self.line("break;"),
+            Inst::LoopBreak => match self.loops.last().cloned().flatten() {
+                Some(flag) => self.line(&format!("{{ {flag} = true; break; }}")),
+                None => self.line("break;"),
+            },
             Inst::LoopContinue => self.line("continue;"),
             Inst::FSIBegin | Inst::FSIEnd => {
                 if self.props.host.supports_fragment_shader_interlock {
