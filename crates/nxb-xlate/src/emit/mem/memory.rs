@@ -1,6 +1,8 @@
 //! `InstEmitMemory.cs`: LDC, LDG, LDL, LDS, STG, STL, STS, ATOM, ATOMS, RED.
 
 use super::hlp::{REGISTER_ZERO_INDEX, get_dest, get_src_reg};
+pub(crate) use super::memory_bits::{extract_small_int, get_bit_offset};
+use super::memory_bits::{get_40_bits_address, insert_small_int};
 use crate::attr::Stage;
 use crate::ir::emitter::EmitterContext;
 use crate::ir::inst::StorageKind;
@@ -536,92 +538,6 @@ fn emit_stg(
         ctx.store_o3(kind, addr_low_offset, addr_high, value);
     }
     Ok(())
-}
-
-fn get_40_bits_address(
-    ctx: &mut EmitterContext<'_, '_>,
-    ra: i32,
-    extended: bool,
-    offset: i32,
-) -> (Opd, Opd) {
-    let mut addr_low = ctx.ir.register(ra, regtype::GPR);
-    let mut addr_high = if extended && ra != REGISTER_ZERO_INDEX {
-        ctx.ir.register(ra + 1, regtype::GPR)
-    } else {
-        ctx.ir.const_(0)
-    };
-    let offs = ctx.ir.const_(offset);
-    addr_low = ctx.i_add(addr_low, offs);
-    if extended {
-        let carry = ctx.i_compare_less_unsigned(addr_low, offs);
-        let one = ctx.ir.const_(1);
-        let zero = ctx.ir.const_(0);
-        let sel = ctx.conditional_select(carry, one, zero);
-        addr_high = ctx.i_add(addr_high, sel);
-    }
-    (addr_low, addr_high)
-}
-
-pub(crate) fn get_bit_offset(ctx: &mut EmitterContext<'_, '_>, base_offset: Opd) -> Opd {
-    let c3 = ctx.ir.const_(3);
-    let m = ctx.bitwise_and(base_offset, c3);
-    let c3b = ctx.ir.const_(3);
-    ctx.shift_left(m, c3b)
-}
-
-pub(crate) fn extract_small_int(
-    ctx: &mut EmitterContext<'_, '_>,
-    size: i32,
-    bit_offset: Opd,
-    value: Opd,
-) -> Opd {
-    let mut value = ctx.shift_right_u32(value, bit_offset);
-    match LsSize(size) {
-        LsSize::U8 => value = zero_extend_to_32(ctx, value, 8),
-        LsSize::U16 => value = zero_extend_to_32(ctx, value, 16),
-        LsSize::S8 => value = sign_extend_to_32(ctx, value, 8),
-        LsSize::S16 => value = sign_extend_to_32(ctx, value, 16),
-        _ => {}
-    }
-    value
-}
-
-fn zero_extend_to_32(ctx: &mut EmitterContext<'_, '_>, src: Opd, bits: i32) -> Opd {
-    let mask = (u32::MAX >> (32 - bits)) as i32;
-    let m = ctx.ir.const_(mask);
-    ctx.bitwise_and(src, m)
-}
-
-fn sign_extend_to_32(ctx: &mut EmitterContext<'_, '_>, src: Opd, bits: i32) -> Opd {
-    let z = ctx.ir.const_(0);
-    let b = ctx.ir.const_(bits);
-    ctx.bitfield_extract_s32(src, z, b)
-}
-
-fn insert_small_int(
-    ctx: &mut EmitterContext<'_, '_>,
-    size: i32,
-    bit_offset: Opd,
-    word: Opd,
-    value: Opd,
-) -> Opd {
-    let mut value = value;
-    match LsSize(size) {
-        LsSize::U8 | LsSize::S8 => {
-            let m = ctx.ir.const_(0xff);
-            value = ctx.bitwise_and(value, m);
-            let w = ctx.ir.const_(8);
-            value = ctx.bitfield_insert(word, value, bit_offset, w);
-        }
-        LsSize::U16 | LsSize::S16 => {
-            let m = ctx.ir.const_(0xffff);
-            value = ctx.bitwise_and(value, m);
-            let w = ctx.ir.const_(16);
-            value = ctx.bitfield_insert(word, value, bit_offset, w);
-        }
-        _ => {}
-    }
-    value
 }
 
 /// The instructions `InstEmit.cs` leaves unimplemented: a log line only.

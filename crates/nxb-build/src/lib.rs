@@ -11,9 +11,9 @@
 //! step with the extract (it reads the split's packages when they are all written) and the staging of the app's
 //! non-shader files with the shader step. `--dry-run` prints the graph and the keys.
 //!
-//! `--platform mac` has the same nodes without the app and ends with the command that runs the game ([`mac_run`]).
+//! `--platform mac` has the same nodes without the app and ends with the command that runs the game (`mac_run`).
 //! `--program N` builds one program of a multi-program application as a game of its own. For `mac-app` and `mac`, the
-//! profile's other programs are built that way first ([`programs`]).
+//! profile's other programs are built that way first (`programs`).
 //!
 //! The rewrite (`patch_nso.py`) is made by [`rewrite`] when the work folder has no `patched_<package>` and the engine
 //! is the one the port was checked against (otherwise the build stops at the rewrite with the message of `nxb rewrite`, which exits with code 4: there is no fallback to a later stage without the patched modules). Not ported yet,
