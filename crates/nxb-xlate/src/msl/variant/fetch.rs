@@ -299,12 +299,7 @@ pub fn build(
     msl.push_str(&plan.in_struct());
     msl.push_str(&plan.out_struct());
     msl.push_str(&result_struct(&outs));
-    for i in 1..bodies.len() {
-        let _ = writeln!(msl, "{};", em.signature(i)?);
-    }
-    for (i, b) in bodies.iter().enumerate().skip(1) {
-        let _ = write!(msl, "{}\n{{\n{b}}}\n", em.signature(i)?);
-    }
+    msl.push_str(&crate::msl::library::helper_functions(&em, &bodies)?);
     let main = bodies.first().ok_or("program without a main function")?;
     let extra = attachments();
     let name = EntryName {
