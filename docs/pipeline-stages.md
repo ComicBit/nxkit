@@ -68,7 +68,7 @@ Without `--version`, it takes the newest update. When the package has no base ga
 - **Merged packages.** A package can hold more than one game. `--app <id>` gives the application id in hexadecimal.
   The stage then uses only the contents of that application.
 
-Not ported at this time: the `--html` output of some titles. A sparse NCA stops with exit code 4, because no sample was available.
+Not ported at this time: the `--html` output of some titles. The base game of a sparse program stops with exit code 4 unless its update NSP is read in the same run.
 
 ### Tests on real data
 
