@@ -138,7 +138,13 @@ fn every_input_of_the_key_translates_again() {
     let mut c = ctx(&[]);
     c.no_facts = true;
     x.translate(&job(b"code"), &c).unwrap();
-    assert_eq!(runs.load(Ordering::Relaxed), 6);
+    let mut c = ctx(&[]);
+    c.dual_source = true;
+    x.translate(&job(b"code"), &c).unwrap();
+    let mut c = ctx(&[]);
+    c.fetch_outputs_only = true;
+    x.translate(&job(b"code"), &c).unwrap();
+    assert_eq!(runs.load(Ordering::Relaxed), 8);
     assert_eq!(x.hits.load(Ordering::Relaxed), 0);
 }
 
@@ -226,4 +232,43 @@ fn the_partners_reach_the_translator_in_order() {
 fn a_damaged_entry_is_translated_again() {
     assert!(Translation::from_text("{\"stage\": 1}").is_none());
     assert!(Translation::from_text("not json").is_none());
+}
+
+/// A Maxwell geometry shader that only returns: the 0x50 byte header and one `EXIT`.
+fn geometry_code() -> Vec<u8> {
+    let mut h = [0u32; 20];
+    h[0] = 4 << 10;
+    h[2] = 1 << 24;
+    h[3] = 7 << 24;
+    h[4] = 6;
+    let exit: u64 = 0xe300_0000_0000_0000 | 0x70000 | 0xf;
+    let mut c: Vec<u8> = h.iter().flat_map(|w| w.to_le_bytes()).collect();
+    for w in [0u64, exit, 0, 0] {
+        c.extend(w.to_le_bytes());
+    }
+    c
+}
+
+#[test]
+fn a_geometry_job_without_a_topology_keeps_all_its_libraries() {
+    let x = Xlate::open(&dir(), "v1").unwrap();
+    let mut j = job(&geometry_code());
+    j.json.set("stage", Value::str("gs"));
+    let t = x.translate(&j, &ctx(&[])).unwrap();
+    assert_eq!(t.stage, "gs");
+    let names: Vec<&str> = t.libs.iter().map(|l| l.suffix.as_str()).collect();
+    assert_eq!(
+        names,
+        ["_b", "_bg0", "_bg1", "_bg2", "_bg3", "_bg4", "_bgv"]
+    );
+    for l in &t.libs {
+        let key = l.json.as_ref().and_then(|j| j.get("key"));
+        assert_eq!(
+            key,
+            Some(&Value::str(format!("0123456789abcdef{}", l.suffix)))
+        );
+    }
+    let again = x.translate(&j, &ctx(&[])).unwrap();
+    assert_eq!(again, t);
+    assert_eq!(x.hits.load(Ordering::Relaxed), 1);
 }
