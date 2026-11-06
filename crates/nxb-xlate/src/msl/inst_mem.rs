@@ -32,10 +32,20 @@ pub(super) struct Place {
     pub skip: bool,
 }
 
-fn is_atomic(inst: Inst) -> bool {
-    (Inst::AtomicAdd.0..=Inst::AtomicXor.0).contains(&inst.0)
-        && inst != Inst::Load
-        && inst != Inst::Store
+pub(super) fn is_atomic(inst: Inst) -> bool {
+    matches!(
+        inst,
+        Inst::AtomicAdd
+            | Inst::AtomicAnd
+            | Inst::AtomicCompareAndSwap
+            | Inst::AtomicMaxS32
+            | Inst::AtomicMaxU32
+            | Inst::AtomicMinS32
+            | Inst::AtomicMinU32
+            | Inst::AtomicOr
+            | Inst::AtomicSwap
+            | Inst::AtomicXor
+    )
 }
 
 fn swizzle_or_index(base: String, vector: bool, index: &str, c: Option<i32>) -> String {

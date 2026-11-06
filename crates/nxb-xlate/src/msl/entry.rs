@@ -124,6 +124,11 @@ fn entry_text(
         let _ = writeln!(t, "    threadgroup {ty} sm{}[{n}];", m.id);
     }
     t.push_str(body);
+    let last = body.trim_end().lines().last().map(str::trim);
+    if matches!(last, Some("return out;" | "return;")) {
+        t.push_str("}\n");
+        return Ok(t);
+    }
     if shader == Shader::Vertex {
         t.push_str(
             "    out.gl_Position.z = fma(out.gl_Position.z, 0.5, out.gl_Position.w * 0.5);\n",

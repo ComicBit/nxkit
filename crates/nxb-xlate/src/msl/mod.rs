@@ -22,6 +22,8 @@ pub mod inst_tex;
 pub mod io;
 pub mod prelude;
 pub mod refl;
+#[cfg(test)]
+mod tests;
 pub mod types;
 pub mod usage;
 pub mod variant;

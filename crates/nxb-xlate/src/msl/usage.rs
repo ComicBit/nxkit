@@ -74,8 +74,7 @@ pub fn collect(info: &StructInfo) -> Usage {
     for_each_node(info, &mut |_, k| {
         let Kind::Operation(o) = k else { return };
         let inst = Inst(o.inst.0 & Inst::MASK);
-        let store_like =
-            inst == Inst::Store || (Inst::AtomicAdd.0..=Inst::AtomicXor.0).contains(&inst.0);
+        let store_like = inst == Inst::Store || super::inst_mem::is_atomic(inst);
         match o.storage_kind {
             StorageKind::ConstantBuffer => {
                 if let Some(b) = o.sources.first().and_then(|s| const_of(ast, *s)) {
