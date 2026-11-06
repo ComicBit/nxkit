@@ -48,6 +48,12 @@ impl Val {
 pub struct Options {
     /// The vertex shader is the visibility counter: lane reads are 0 and ballots are one lane.
     pub visibility_counter: bool,
+    /// Pixel shaders: write `main0_d` for a shader that writes exactly the colours 0 and 1 (the profile's dual source
+    /// list says so).
+    pub dual_source: bool,
+    /// Pixel shaders: write the `_bf` library of a shader without a rewritable sample too (the profile's fetch list
+    /// says so).
+    pub fetch_outputs_only: bool,
 }
 
 /// The reads of the driver constant banks.

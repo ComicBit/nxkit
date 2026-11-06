@@ -102,25 +102,28 @@ fn the_side_entries_are_entry_functions() {
     }
 }
 
-#[test]
-#[ignore]
-fn metal_builds_the_side_entries() {
+/// Compile a translation with metal and make a library of it. The bytes of the library.
+fn metal_library(name: &str, t: &Translated) -> Vec<u8> {
+    use std::ffi::OsStr;
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scratch");
     std::fs::create_dir_all(&dir).expect("scratch");
-    let (_, t) = side_sample();
-    let src = dir.join("side_ps.metal");
-    let air = dir.join("side_ps.air");
-    let lib = dir.join("side_ps.metallib");
+    let src = dir.join(format!("{name}.metal"));
+    let air = dir.join(format!("{name}.air"));
+    let lib = dir.join(format!("{name}.metallib"));
     std::fs::write(&src, &t.libraries[0].msl).expect("write");
-    let run = |args: &[&std::ffi::OsStr]| {
+    let run = |args: &[&OsStr]| {
         let o = std::process::Command::new("xcrun")
             .args(["-sdk", "macosx"])
             .args(args)
             .output()
             .expect("run");
-        assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+        assert!(
+            o.status.success(),
+            "{name}: {}\n{}",
+            String::from_utf8_lossy(&o.stderr),
+            t.libraries[0].msl
+        );
     };
-    use std::ffi::OsStr;
     run(&[
         OsStr::new("metal"),
         OsStr::new("-c"),
@@ -136,11 +139,165 @@ fn metal_builds_the_side_entries() {
         OsStr::new("-o"),
         lib.as_os_str(),
     ]);
+    std::fs::read(&lib).expect("lib")
+}
+
+#[test]
+#[ignore]
+fn metal_builds_the_side_entries() {
+    let (_, t) = side_sample();
     // `nxb-shader` (the cut) is not a dependency of this crate: the library keeps every entry name for it.
-    let bytes = std::fs::read(&lib).expect("lib");
+    let bytes = metal_library("side_ps", &t);
     let side = t.side.expect("side");
     for n in side.alpha.iter().chain(&side.logic) {
         let at = |w: &[u8]| bytes.windows(w.len()).any(|x| x == w);
         assert!(at(n.as_bytes()), "{n} is a function of the library");
+    }
+}
+
+use super::tests::F4;
+use crate::attr::Stage;
+use crate::ir::{Inst, IoVariable, StorageKind};
+use crate::structured::types::AggType;
+
+/// A pixel shader with `n` float colours and no stores.
+fn colors(n: usize) -> B {
+    let mut b = B::new(Stage::Fragment, "ps");
+    b.s.props.definitions.imap_types = vec![[2, 2, 2, 2]];
+    b.s.props.definitions.fragment_output_types = vec![F4; n];
+    for l in 0..n {
+        b.io(
+            StorageKind::Output,
+            IoVariable::FragmentOutputColor,
+            l as i32,
+        );
+    }
+    b
+}
+
+fn float_in(b: &mut B) -> crate::structured::ast::A {
+    b.io(StorageKind::Input, IoVariable::UserDefined, 0);
+    b.load_io(
+        StorageKind::Input,
+        IoVariable::UserDefined,
+        Some(0),
+        0,
+        AggType::FP32,
+    )
+}
+
+/// An integer value computed from the primitive id.
+fn int_value(b: &mut B) -> crate::structured::ast::A {
+    b.io(StorageKind::Input, IoVariable::PrimitiveId, 0);
+    let id = b.load_scalar(IoVariable::PrimitiveId, AggType::S32);
+    let one = b.k(1);
+    let add = b.op(Inst::Add, StorageKind::None, 0, vec![id, one]);
+    b.def(AggType::S32, add)
+}
+
+fn entry_of(t: &Translated, key: &str) -> Option<Value> {
+    reflection(t).get(key).cloned()
+}
+
+#[test]
+fn a_plain_float_shader_has_no_derived_entry() {
+    let mut b = colors(1);
+    let f = float_in(&mut b);
+    b.store_io(IoVariable::FragmentOutputColor, Some(0), 0, f);
+    let t = b.translate();
+    assert!(!t.libraries[0].msl.contains("main0_u"));
+    assert!(entry_of(&t, "entry_u").is_none());
+}
+
+#[test]
+fn integer_bits_give_the_integer_entry() {
+    let mut b = colors(1);
+    let v = int_value(&mut b);
+    b.store_io(IoVariable::FragmentOutputColor, Some(0), 0, v);
+    let t = b.translate();
+    let msl = &t.libraries[0].msl;
+    assert!(msl.contains("struct main0_out_u"), "{msl}");
+    assert!(msl.contains("uint4 c0 [[color(0)]];"));
+    assert!(msl.contains("out.c0 = as_type<uint4>(dm_r.c0);"));
+    assert!(msl.contains("fragment main0_out_u main0_u("));
+    assert!(msl.contains("fragment main0_out_u main0_u_a("));
+    assert_eq!(entry_of(&t, "entry_u"), Some(Value::str("main0_u")));
+    assert!(entry_of(&t, "entry_m").is_none());
+    let side = t.side.expect("side");
+    assert!(side.alpha.contains(&"main0_u_a".to_string()));
+    assert!(msl.contains("as_type<float>(dm_r.c0.w)"));
+}
+
+#[test]
+fn a_mixed_shader_gets_the_mixed_entry_and_its_mask() {
+    let mut b = colors(2);
+    let f = float_in(&mut b);
+    b.store_io(IoVariable::FragmentOutputColor, Some(0), 0, f);
+    let v = int_value(&mut b);
+    b.store_io(IoVariable::FragmentOutputColor, Some(1), 0, v);
+    let t = b.translate();
+    let msl = &t.libraries[0].msl;
+    assert!(msl.contains("struct main0_out_m"), "{msl}");
+    assert_eq!(entry_of(&t, "entry_m"), Some(Value::str("main0_m")));
+    assert_eq!(entry_of(&t, "uint_mask_m"), Some(Value::Int(2)));
+    let logic = names(&reflection(&t), "logic");
+    assert!(logic.contains(&"main0_m_l".to_string()));
+    assert!(!logic.iter().any(|n| n == "main0_d_l"));
+}
+
+#[test]
+fn constant_colours_give_the_integer_entry() {
+    let mut b = colors(1);
+    let k = b.k(0x3f80_0000);
+    b.store_io(IoVariable::FragmentOutputColor, Some(0), 0, k);
+    let t = b.translate();
+    assert!(t.libraries[0].msl.contains("main0_u"));
+    assert!(entry_of(&t, "entry_m").is_none());
+}
+
+#[test]
+fn the_dual_entry_follows_the_option() {
+    let mut b = colors(2);
+    let f = float_in(&mut b);
+    b.store_io(IoVariable::FragmentOutputColor, Some(0), 0, f);
+    b.store_io(IoVariable::FragmentOutputColor, Some(1), 0, f);
+    assert!(!b.msl().contains("main0_d"));
+    let ctx = super::Context::default();
+    let opt = super::Options {
+        dual_source: true,
+        ..super::Options::default()
+    };
+    let t = super::entry::build(&b.s, &ctx, &opt).expect("build");
+    let msl = &t.libraries[0].msl;
+    assert!(msl.contains("float4 c1 [[color(0), index(1)]];"), "{msl}");
+    assert!(msl.contains("fragment main0_out_d main0_d("));
+    let r = t.libraries[0].reflection.as_ref().expect("r").to_value();
+    assert_eq!(r.get("entry_d"), Some(&Value::str("main0_d")));
+    assert!(
+        t.side
+            .expect("side")
+            .alpha
+            .contains(&"main0_d_a".to_string())
+    );
+}
+
+#[test]
+#[ignore]
+fn metal_builds_the_derived_entries() {
+    let mut b = colors(2);
+    let f = float_in(&mut b);
+    b.store_io(IoVariable::FragmentOutputColor, Some(0), 0, f);
+    let v = int_value(&mut b);
+    b.store_io(IoVariable::FragmentOutputColor, Some(1), 0, v);
+    b.s.props.definitions.early_z_force = true;
+    let opt = super::Options {
+        dual_source: true,
+        ..super::Options::default()
+    };
+    let t = super::entry::build(&b.s, &super::Context::default(), &opt).expect("build");
+    let bytes = metal_library("derived_ps", &t);
+    for n in ["main0_u", "main0_m", "main0_d", "main0_m_a", "main0_u_l"] {
+        let at = |w: &[u8]| bytes.windows(w.len()).any(|x| x == w);
+        assert!(at(n.as_bytes()), "{n}");
     }
 }
