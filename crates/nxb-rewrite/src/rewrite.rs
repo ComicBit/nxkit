@@ -23,6 +23,10 @@ pub struct Options {
     pub profile: String,
     /// `(SHA-256, path relative to dm/tools)` of the rewriter and patch files, for `build_src.sha256`.
     pub source_hashes: Vec<(String, String)>,
+    /// The profile's `snowdrop_pools` words (the large, 512 KB and 64 KB ranges in MB), empty for the default.
+    pub snowdrop_words: Vec<String>,
+    /// Where the pool sizes come from, as the script's log says (`profile`, or `default, ...`), empty is `default, no DM_GAME`.
+    pub snowdrop_from: String,
 }
 
 /// The files a rewrite produces: `(file name, bytes)`.
@@ -72,13 +76,28 @@ fn layout(nso: &[u8], opts: &Options, front_env: Option<u64>) -> R<Layout> {
     let big_text = far && text_end + front > 0x800_0000 - 0x1_0000;
     let two = big_text && text_end > 0x800_0000 - 0x1_0000;
     let env = front_env.filter(|v| *v != 0).map(|v| v as i64);
+    // TWO: the lowest site the back area reaches with the margin (BACK_OFF less the reach, plus 1 MB)
+    let back_min = if two {
+        let b = ((((m.image.len() + bss + 0x3fff) & !0x3fff) + 0x8000 + 0xffff) & !0xffff) as i64
+            - 0x800_0000
+            + 0x10_0000;
+        if b >= 0x800_0000 - 0x20_0000 {
+            return fail(format!(
+                "assertion failed: no split reaches: the back patch area reaches no site below {b:#x}, too close to the front area's reach"
+            ));
+        }
+        b
+    } else {
+        0
+    };
     if two {
-        front = env.unwrap_or(0x100_0000);
+        front =
+            env.unwrap_or_else(|| 0x100_0000.min((0x800_0000 - 0x10_0000 - back_min) & !0xffff));
     } else if big_text {
         front = env.unwrap_or((0x800_0000 - 0x1_0000 - text_end) & !0xffff);
     }
     let split = if two {
-        0x800_0000 - front - 0x10_0000
+        (0x800_0000 - front - 0x10_0000).max(back_min)
     } else {
         0
     };
@@ -149,11 +168,54 @@ fn run(
     }
 }
 
+/// `changed_runs()`: the text words that no longer run as the file has them (changed words, windows, spin waits' own
+/// instructions) as runs of (offset, length).
+fn changed_runs(
+    img: &[u8],
+    orig: &[u8],
+    windows: &[Vec<nxb_a64::Insn>],
+    regions: &[crate::spin::Region],
+) -> Vec<(i64, i64)> {
+    let mut words = std::collections::BTreeSet::new();
+    let end = orig.len();
+    for (i, (a, b)) in img[..end].chunks(4).zip(orig.chunks(4)).enumerate() {
+        if a != b {
+            words.insert((i * 4) as i64);
+        }
+    }
+    for w in windows {
+        if let (Some(f), Some(l)) = (w.first(), w.last()) {
+            let mut a = f.addr as i64;
+            while a < l.addr as i64 + 4 {
+                words.insert(a);
+                a += 4;
+            }
+        }
+    }
+    for g in regions {
+        for a in &g.r {
+            if let Some(n) = g.nodes.get(a) {
+                for i in 0..n.ins.len() as i64 {
+                    words.insert(a + 4 * (i - n.pre as i64));
+                }
+            }
+        }
+    }
+    let mut runs: Vec<(i64, i64)> = Vec::new();
+    for w in words {
+        match runs.last_mut() {
+            Some(r) if r.0 + r.1 == w => r.1 += 4,
+            _ => runs.push((w, 4)),
+        }
+    }
+    runs
+}
+
 fn bad(m: impl Into<String>) -> Step {
     Step::Err(RewriteError::Failed(m.into()))
 }
 
-enum Step {
+pub(crate) enum Step {
     Rerun(u64),
     Err(RewriteError),
 }
@@ -171,6 +233,7 @@ fn run_inner(
     front_env: Option<u64>,
 ) -> Result<Output, Step> {
     let Layout { mut rw, build_id } = layout(nso, opts, front_env)?;
+    let orig_text = rw.img[..rw.text_end as usize].to_vec();
     let mut log: Vec<String> = Vec::new();
     let mut extra: Vec<(String, Vec<u8>)> = Vec::new();
     let mut cuts = cuts_for(&rw, opts, patches, &build_id, &mut log, &mut extra)?;
@@ -186,6 +249,8 @@ fn run_inner(
         }
         rw.img[c.off..c.off + nb.len()].copy_from_slice(&nb);
     }
+    let ue = crate::engine::engine_finders(&mut rw, opts, &mut cuts, &mut log)?;
+    rw.lock_rewrites(&mut log)?;
     let scan = rw.scan()?;
     let analysis = analyse(&rw, &scan)?;
     let Analysis {
@@ -287,10 +352,14 @@ fn run_inner(
         };
         rw.put_branch(a, st)?;
     }
-    let starts = &scan.starts;
     let reg_obs = patches.obs.get(&build_id).cloned().unwrap_or_default();
-    rw.apply_obs(&reg_obs, starts, &scan.kinds, &windows)?;
-    let sym_obs = rw.symbol_gates(starts, &scan.kinds, &windows, &mut log)?;
+    rw.apply_obs(&reg_obs, &scan.kinds, &windows)?;
+    let sym_obs = rw.symbol_gates(
+        &scan.kinds,
+        &windows,
+        &mut log,
+        ue.malloc.as_ref().map(|m| m.call),
+    )?;
     let (mut fs_state, mut render_scale) = (0i64, false);
     if patches.frame.contains(&build_id) && opts.name == "main" {
         let Some(ops) = patches.frame_ops.get(&build_id) else {
@@ -332,6 +401,7 @@ fn run_inner(
     for g in &regions {
         rw.spin_emit(g)?;
     }
+    let changed = changed_runs(&rw.img, &orig_text, &windows, &regions);
     // layout of the output
     let back_len = (rw.back_area.len() + 0x3fff) & !0x3fff;
     let mut patch = rw.front_area.clone();
@@ -406,6 +476,19 @@ fn run_inner(
     if fs_state != 0 {
         let _ = writeln!(f, "# FPS_STATE_OFF\t{fs_state:#x}");
     }
+    if let Some(m) = &ue.malloc {
+        let _ = writeln!(
+            f,
+            "# UE_MALLOC_VT\t{:#x}\n# UE_MALLOC_SLOT\t{:#x}",
+            m.vt, m.slot
+        );
+    }
+    if let Some((g, fld)) = ue.fps {
+        let _ = writeln!(f, "# FPS_TARGET_PTR\t{g:#x}\n# FPS_TARGET_FIELD\t{fld:#x}");
+    }
+    for (n, o) in &ue.cvars {
+        let _ = writeln!(f, "# UE_CVAR:{n}\t{o:#x}");
+    }
     if render_scale {
         f.push_str("# RENDER_SCALE\t1\n");
     }
@@ -473,6 +556,11 @@ fn run_inner(
         let _ = writeln!(o, "{:#x}\t{}\t{}\t{}", x.off, x.id, x.word, x.why);
     }
     files.push((format!("{name}.obs.tsv"), o.into_bytes()));
+    let mut ch = format!("# BUILD_ID\t{build_id}\n");
+    for (off, n) in &changed {
+        let _ = writeln!(ch, "{off:#x}\t{n:#x}");
+    }
+    files.push((format!("{name}.changed.tsv"), ch.into_bytes()));
     files.extend(extra);
     let stats: Vec<String> = rw
         .stats

@@ -5,11 +5,15 @@
 
 mod analyse;
 mod cuts;
+mod engine;
 mod error;
+mod finders;
+mod finders2;
 mod frame;
 mod jumps;
 mod jumps2;
 mod jumps3;
+mod locks;
 mod matchfn;
 /// NSO and NRO parsing.
 pub mod nso;
@@ -23,11 +27,12 @@ pub mod rules;
 mod rw;
 mod scan;
 mod sites;
+mod snowdrop;
 mod spin;
 mod spin2;
 mod spinreg;
+mod tailcall;
 mod windows;
-mod zbic;
 
 pub use error::RewriteError;
 pub use rewrite::{Options, Output, rewrite};

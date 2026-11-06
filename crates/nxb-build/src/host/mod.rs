@@ -5,16 +5,31 @@
 pub mod app;
 pub mod companion;
 pub mod fingerprint;
+pub mod gpu;
+pub mod guess;
+pub mod guess_check;
+pub mod guess_dump;
+pub mod guess_facts;
+pub mod guess_src;
+#[cfg(test)]
+mod guess_tests;
 pub mod header;
 pub mod header_multi;
 pub mod icon;
 pub mod machost;
+pub mod nsofacts;
 pub mod profile;
+pub mod profile_cli;
 pub mod profile_tsv;
 pub mod pyfmt;
 pub mod settings;
 #[cfg(test)]
 mod settings_tests;
+pub mod survey;
+pub mod survey_extract;
+pub mod survey_profile;
+#[cfg(test)]
+mod survey_tests;
 
 use nxb_tool::{Completed, EnvPolicy, Invocation, ProcessRegistry, ProcessTool, Tool, ToolId};
 use std::ffi::OsString;
@@ -37,6 +52,20 @@ pub struct Runner {
     reg: Arc<ProcessRegistry>,
     env: EnvPolicy,
     path: String,
+}
+
+static GAMES: std::sync::OnceLock<(PathBuf, bool)> = std::sync::OnceLock::new();
+
+/// The folder holding a provisional profile and whether it goes before the engine's own: every [`Runner::from_parent`]
+/// after this passes them on as `DM_GAMES_DIR` and `DM_GAMES_FIRST` (the process environment is left alone: the
+/// rewrite refuses an environment that names profiles outside the engine).
+pub fn set_games(dir: PathBuf, first: bool) {
+    let _ = GAMES.set((dir, first));
+}
+
+/// What [`set_games`] set.
+pub(crate) fn games() -> Option<&'static (PathBuf, bool)> {
+    GAMES.get()
 }
 
 impl Runner {
@@ -79,6 +108,12 @@ impl Runner {
         ] {
             if let Some(v) = std::env::var_os(name) {
                 env = env.set(name, v).map_err(|e| e.to_string())?;
+            }
+        }
+        if let Some((dir, first)) = GAMES.get() {
+            env = env.set("DM_GAMES_DIR", dir).map_err(|e| e.to_string())?;
+            if *first {
+                env = env.set("DM_GAMES_FIRST", "1").map_err(|e| e.to_string())?;
             }
         }
         Ok(Runner::new(env))

@@ -4,53 +4,70 @@
 use std::fs;
 use std::path::Path;
 
-/// The files V covers, relative to `dm/gfx` (`dmsh_chain.FILES`, same order).
-const FILES: &[&str] = &[
-    "tools/dmsh_chain.py",
-    "tools/dmsh_build.py",
-    "tools/dmsh_atomic.py",
-    "tools/dmsh_wide.py",
-    "tools/dmsh_fetch.py",
-    "tools/dmsh_vin.py",
-    "tools/dmsh_pull.py",
-    "tools/dmsh_pull.metal",
-    "tools/dmsh_alpha.py",
-    "tools/dmsh_logic.py",
-    "tools/dmsh_side.py",
-    "tools/dmsh_geometry.py",
-    "tools/dmsh_mesh.py",
-    "tools/dmsh_meshstage.py",
-    "tools/dmsh_facts.py",
-    "tools/dmsh_ampere.py",
-    "nvn/dmsh_abi.h",
-    "tools/dmsh_abi.py",
-    "tools/dmsh_xlate/Program.cs",
-    "tools/dmsh_xlate/dmsh_xlate.csproj",
-    "../ios/tools/ios_metal.py",
-    "tools/dmsh_chain.lock",
-];
+/// The quoted strings of one Python statement starting at `start` (up to the line where its brackets balance).
+fn statement_strings(text: &str, start: usize) -> Vec<String> {
+    let (mut out, mut depth, mut quote) = (Vec::new(), 0i32, None::<char>);
+    let mut cur = String::new();
+    for c in text[start..].chars() {
+        match quote {
+            Some(q) if c == q => {
+                out.push(std::mem::take(&mut cur));
+                quote = None;
+            }
+            Some(_) => cur.push(c),
+            None => match c {
+                '\'' | '"' => quote = Some(c),
+                '[' | '(' => depth += 1,
+                ']' | ')' => depth -= 1,
+                _ => {}
+            },
+        }
+        if quote.is_none() && depth <= 0 && c == ']' {
+            break;
+        }
+    }
+    out
+}
 
-/// The vendored translator sources V also covers, relative to `third_party/ryujinx/src/Ryujinx.Graphics.Shader/`.
-const RYUJINX: &[&str] = &[
-    "Instructions/InstEmitSurface.cs",
-    "IntermediateRepresentation/TextureFlags.cs",
-    "Translation/TranslationFlags.cs",
-    "Translation/HostCapabilities.cs",
-    "Translation/Transforms/GeometryToCompute.cs",
-    "Translation/TranslatorContext.cs",
-    "Translation/Translator.cs",
-    "Translation/EmitterContext.cs",
-    "Translation/ShaderDefinitions.cs",
-    "CodeGen/Spirv/Instructions.cs",
-    "StructuredIr/ShaderProperties.cs",
-    "Translation/Optimizations/BindlessElimination.cs",
-    "Translation/Optimizations/Optimizer.cs",
-    "Translation/Optimizations/GlobalToStorage.cs",
-    "CodeGen/Spirv/SpirvGenerator.cs",
-];
+/// The value of a list assignment `NAME = [...]` plus every `NAME += [...]` of the Python source, as the strings in
+/// order. A `NAME += ['<prefix>' + f for f in (...)]` statement gives `<prefix><item>` per item.
+fn list_of(text: &str, name: &str) -> Result<Vec<String>, String> {
+    let mut all = Vec::new();
+    let mut off = 0;
+    for line in text.split_inclusive('\n') {
+        for op in [" = [", " += ["] {
+            let head = format!("{name}{op}");
+            if line.starts_with(&head) {
+                let st = statement_strings(text, off + head.len() - 1);
+                if line.contains(" for f in (") {
+                    let (prefix, items) = st.split_first().ok_or("empty prefix statement")?;
+                    all.extend(items.iter().map(|f| format!("{prefix}{f}")));
+                } else {
+                    all.extend(st);
+                }
+            }
+        }
+        off += line.len();
+    }
+    if all.is_empty() {
+        return Err(format!("dmsh_chain.py: no list {name} found"));
+    }
+    Ok(all)
+}
 
-/// The profile tables of the inputs digest (`dmsh_chain.INPUT_TABLES`, same order).
-const INPUT_TABLES: &[&str] = &[
+fn chain_source(engine: &Path) -> Result<String, String> {
+    let p = engine.join("dm/gfx/tools/dmsh_chain.py");
+    fs::read_to_string(&p).map_err(|e| format!("{}: {e}", p.display()))
+}
+
+/// The files V covers, relative to `dm/gfx`, as the engine's `dmsh_chain.FILES` names them, same order.
+pub fn files(engine: &Path) -> Result<Vec<String>, String> {
+    list_of(&chain_source(engine)?, "FILES")
+}
+
+/// The profile tables of the inputs digest of the engine this was written against, for callers without an engine
+/// folder (`inputs`). `inputs_of` reads the engine's own list.
+const DEFAULT_TABLES: &[&str] = &[
     "shader_facts.tsv",
     "shader_map.tsv",
     "shader_map.tsv.conflicts.tsv",
@@ -61,6 +78,11 @@ const INPUT_TABLES: &[&str] = &[
     "dual_want.tsv",
 ];
 
+/// The profile tables of the inputs digest, as the engine's `dmsh_chain.INPUT_TABLES` names them, same order.
+pub fn input_tables(engine: &Path) -> Result<Vec<String>, String> {
+    list_of(&chain_source(engine)?, "INPUT_TABLES")
+}
+
 /// The translation options at their defaults (`XLATE_DEBUG=1`, `XLATE_REDUCED=1`): the only ones the host loads.
 const OPTIONS: &str = "debug=True reduced=True";
 
@@ -68,16 +90,11 @@ const OPTIONS: &str = "debug=True reduced=True";
 pub fn version(engine: &Path) -> Result<String, String> {
     let gfx = engine.join("dm/gfx");
     let mut h = nxb_model::Sha256::new();
-    let rel: Vec<String> = FILES
-        .iter()
-        .map(|f| (*f).to_string())
-        .chain(
-            RYUJINX
-                .iter()
-                .map(|f| format!("../third_party/ryujinx/src/Ryujinx.Graphics.Shader/{f}")),
-        )
-        .collect();
-    for f in &rel {
+    let src = chain_source(engine)?;
+    if !src.contains("'debug=%s reduced=%s'") {
+        return Err("dmsh_chain.py: the options string changed, update nxb_shader::chain".into());
+    }
+    for f in &files(engine)? {
         let p = gfx.join(f);
         let body = fs::read(&p).map_err(|e| format!("{}: {e}", p.display()))?;
         h.update(f.as_bytes());
@@ -110,10 +127,20 @@ pub fn profile_rows(game_tsv: &str) -> String {
     s
 }
 
-/// `dmsh_chain.inputs`: the digest of a game profile folder's inputs to its shader library.
+/// `dmsh_chain.inputs` with the table list of the engine at `engine`.
+pub fn inputs_of(engine: &Path, profile: &Path) -> Result<String, String> {
+    inputs_with(&input_tables(engine)?, profile)
+}
+
+/// `dmsh_chain.inputs` with the table list of the engine this was written against.
 pub fn inputs(profile: &Path) -> Result<String, String> {
+    let t: Vec<String> = DEFAULT_TABLES.iter().map(|s| (*s).to_string()).collect();
+    inputs_with(&t, profile)
+}
+
+fn inputs_with(tables: &[String], profile: &Path) -> Result<String, String> {
     let mut h = nxb_model::Sha256::new();
-    for t in INPUT_TABLES {
+    for t in tables {
         let body = fs::read(profile.join(t)).unwrap_or_else(|_| b"missing".to_vec());
         h.update(format!("game/{t}").as_bytes());
         h.update(&[0]);
@@ -134,6 +161,24 @@ mod tests {
     fn rows_take_build_keys_only() {
         let t = "# c\nname\tTitleA\nshader_versions\t v0 \tv1\nnvn_x\t1\n\nother\t2\n";
         assert_eq!(profile_rows(t), "shader_versions\tv0\tv1\nnvn_x\t1\n");
+    }
+
+    #[test]
+    fn lists_are_read_from_the_python_source() {
+        let d = std::env::temp_dir().join(format!("nxb-chain-{}", std::process::id()));
+        let t = d.join("dm/gfx/tools");
+        fs::create_dir_all(&t).unwrap();
+        fs::write(
+            t.join("dmsh_chain.py"),
+            "FILES = ['a.py', 'b/c.h']  # x\n# FILES += ['no']\nFILES += ['../tp/' + f for f in (\n    'x.cs', 'y/z.cs')]\nINPUT_TABLES = ['t.tsv']\n",
+        )
+        .unwrap();
+        assert_eq!(
+            files(&d).unwrap(),
+            ["a.py", "b/c.h", "../tp/x.cs", "../tp/y/z.cs"]
+        );
+        assert_eq!(input_tables(&d).unwrap(), ["t.tsv"]);
+        fs::remove_dir_all(&d).unwrap();
     }
 
     #[test]

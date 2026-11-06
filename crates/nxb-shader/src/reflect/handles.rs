@@ -142,6 +142,40 @@ pub(super) fn decode_ubo_tex(name: &str) -> Option<UboTex> {
     Some(((tb - 3, o0 * 4), s))
 }
 
+/// `decode_ubo_img(name)`: an image whose handle is in the game's own uniform buffer
+/// (`<stage>_i<..>_cb<n>_<hex word>`) → (uniform slot, byte offset). `re.match(r'[a-z]+_i\w*?_cb(\d+)_([0-9A-F]+)')`.
+pub(super) fn decode_ubo_img(name: &str) -> Option<(i64, i64)> {
+    let low = name.bytes().take_while(u8::is_ascii_lowercase).count();
+    if low == 0 || !name[low..].starts_with("_i") {
+        return None;
+    }
+    let from = low + 2;
+    // the lazy `\w*?` tries every `_cb` start from the left, as long as only word characters lie between
+    let mut k = from - 1;
+    loop {
+        let rest = name.get(k + 1..)?;
+        let at = k + 1 + rest.find("_cb")?;
+        if !name[from..at].chars().all(is_word) {
+            return None;
+        }
+        let r = &name[at + 3..];
+        let nd = r.bytes().take_while(u8::is_ascii_digit).count();
+        if nd > 0 && r[nd..].starts_with('_') {
+            let h = &r[nd + 1..];
+            let nh = h
+                .bytes()
+                .take_while(|b| b.is_ascii_digit() || (b'A'..=b'F').contains(b))
+                .count();
+            if nh > 0 {
+                let n: i64 = r[..nd].parse().ok()?;
+                let w = i64::from_str_radix(&h[..nh], 16).ok()?;
+                return (3..=16).contains(&n).then_some((n - 3, w * 4));
+            }
+        }
+        k = at;
+    }
+}
+
 /// `c2_array(name, ty)` → (offset, sampler word offset).
 pub(super) fn c2_array(name: &str, ty: &str) -> Option<(i64, Option<i64>)> {
     let n = name.strip_suffix("Smplr").unwrap_or(name);

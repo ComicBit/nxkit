@@ -25,3 +25,6 @@ pub mod zstd {}
 
 /// zlib inflate and deflate through the system library.
 pub mod zlib {}
+
+/// ZBIC, Nintendo's zstd variant (NSO flag bit 7).
+pub mod zbic;

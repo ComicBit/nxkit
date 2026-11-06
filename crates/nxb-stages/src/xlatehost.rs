@@ -88,13 +88,14 @@ pub fn resolve(explicit: Option<&str>, xlate: &Path) -> Option<Vec<String>> {
     found.map(|p| vec![p.to_string_lossy().into_owned()])
 }
 
-/// The Rust translator switch: `--xlate-rust on|off`, else env `NXB_XLATE_RUST` (`0`, `off` or `false` turn it off).
-/// On by default: the output tree equals the C# path and each key the Rust core refuses goes to the C# bridge.
+/// The Rust translator switch: `--xlate-rust on|off`, else env `NXB_XLATE_RUST` (`1`, `on` or `true` turn it on).
+/// Off by default: the Rust core does not yet follow the current engine translator (for example its Maxwell denormal flush),
+/// so its output differs from the C# translator's on the current engine. Each key the Rust core refuses goes to the C# bridge.
 pub fn resolve_rust(explicit: Option<&str>) -> bool {
     let env = std::env::var(nxb_tool::XLATE_RUST_ENV).ok();
-    !matches!(
+    matches!(
         explicit.or(env.as_deref()).map(str::trim),
-        Some("0" | "off" | "false")
+        Some("1" | "on" | "true")
     )
 }
 
