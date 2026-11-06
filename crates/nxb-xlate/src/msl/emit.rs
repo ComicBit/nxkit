@@ -68,6 +68,8 @@ pub struct Shared {
     pub spill: bool,
     /// Blocks of the main function the emitter leaves out (see `first_store`).
     pub skip: BTreeSet<A>,
+    /// The loads that are lanes of a wide load (see `wide`).
+    pub wide: std::collections::BTreeMap<A, super::wide::Lane>,
 }
 
 /// The emitter state.
@@ -207,6 +209,9 @@ impl<'a> Em<'a> {
 
     /// The node `a` with its own type.
     pub(super) fn eval(&mut self, a: A) -> R<Val> {
+        if let Some(v) = self.wide_lane(a)? {
+            return Ok(v);
+        }
         match self.info.ast.kind(a).clone() {
             Kind::Operation(o) => self
                 .operation(&o)?
