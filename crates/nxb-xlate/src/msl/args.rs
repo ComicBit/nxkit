@@ -103,10 +103,8 @@ pub fn texture_type(ty: SamplerType, comp: &str, access: Option<&str>) -> R<Stri
     if ms {
         n.push_str("_ms");
     }
-    if arr {
-        if dim == 4 {
-            return Err("unported: 3D texture array".into());
-        }
+    // Metal has no 3D texture array. The layer is dropped where the texture is used.
+    if arr && dim != 4 {
         n.push_str("_array");
     }
     Ok(format!("{n}<{comp}{acc}>"))
