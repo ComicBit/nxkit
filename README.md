@@ -13,11 +13,12 @@ A switch turns it off: `NXB_OWN_RAW=0`. If the front end rejects a shader, Apple
 
 ## Status
 
-Version 0.6.2 is the tenth public release. It is early software. Read this section before you use it.
+Version 0.6.3 is the eleventh public release. It is early software. Read this section before you use it.
 
 - Mac only for the build tools. The tools run on macOS on Apple silicon. Other systems are not supported.
 - The tools need Apple tools (`metal`, `metallib`, `air-opt`, `metal-tt`, `codesign`, `xcrun`) from your own Xcode.
-- Changed in this release: the rewrite step follows the engine `88c7e03f`, and the extract stage reports the bytes it writes.
+- Fixed in this release: the Mac shader step runs without the own-identical allow list, with the raw path on. Before, it stopped with a missing `data/own-front` folder.
+- Changed in 0.6.2: the rewrite step follows the engine `88c7e03f`, and the extract stage reports the bytes it writes.
 - Changed in 0.6.0: the Rust translator writes MSL directly and is the only translator. The C# translator, `spirv-cross` and the MSL text passes are gone.
   The options `--xlate*`, `--dotnet-root` and `--spirv-cross` and the command `nxb shaders recompile` are removed.
   Refer to [CHANGELOG.md](CHANGELOG.md).
@@ -101,7 +102,7 @@ limits it. The own front end is not byte-identical in the validated mode.
 - The Ampere path is checked on one package. Its jobs come from a new Rust job writer. Nobody compared them with the job writer of the reference scripts.
 - The raw path is not byte-identical to Apple. A GPU test covered 3,625 shaders, and 220 differed (about 6 %). The check in the process looks at the container only.
   The raw path is not wired for iOS. After a change of the front end, an old raw cache entry can stay in the store.
-- The own-identical allow list is not in this repository. Without it, only the raw path runs. A new Metal toolchain version has no verdicts, and it turns the own tiers off.
+- The own-identical allow list is not in this repository. Without it, only the raw path runs. A new Metal toolchain version has no verdicts, and then only the raw path runs.
 - The pipeline archive uses Apple tools. "Equal" means that the loader finds each base library.
 - The app stage puts about 58,000 loose library files in the app. The reference script packs one image file. The host reads the two forms. `DMSH_IOS_PULL=0` is not ported.
 - The rewrite step is checked against the current script on 111 modules.
