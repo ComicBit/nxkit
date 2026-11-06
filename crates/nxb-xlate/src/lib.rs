@@ -15,6 +15,7 @@ pub mod iface;
 pub mod ir;
 pub mod job;
 pub mod lowering;
+pub mod msl;
 pub mod opt;
 pub mod res;
 pub mod structured;

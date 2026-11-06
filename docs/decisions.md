@@ -62,6 +62,7 @@ and shared APIs. The designs set the behavior.
 | D17 | No own optimizer and no own `metallib` writer. | No pass subset in the test gave Apple's machine code (0 of 15). |
 | D18 | The own front end uses the allow list by default: only shaders with the verdict `own-identical` in the shipped verdict file. | With a deny list, a shader that is not in the corpus goes through the own path without a check. |
 | D19 | Since 0.4.0, the raw path is on by default for each Mac shader that the own front end accepts. It has a check in the process and a fallback to Apple. `NXB_OWN_RAW=0` turns it off. It supersedes D18 for the raw path only. | The path is faster and needs no Apple tool. The cost is that its output is not byte-identical to Apple's output, and a GPU test covered only about 15 % of the corpus. D17 stays for the identical path. |
+| D20 | One Rust translator writes MSL directly. `nxb-xlate::msl` emits each library from the structured program and fills a typed `Reflection` for `_b.json`. The C# translator, the SPIR-V generator, `spirv-cross` and the MSL text passes are removed. The host contract stays as it is: argument buffer IDs, `main0` and its extra entries, the library suffixes and the `_b.json` fields. | One code path for all stages, no .NET and no external translator binary. Facts come from the emitter and not from parsing MSL text. The contract changes later, one step at a time and only after a profile of the host shows a gain. Output is not byte-identical to the C# path. |
 
 ### Other stages
 
