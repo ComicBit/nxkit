@@ -4,8 +4,8 @@
 //! with the tool: `rewrite-rules` next to the executable (the release archive), or `data/rewrite-rules` of a checkout.
 //! `NXB_REWRITE_RULES` (a folder of rule files) and `NXB_REWRITE_PATCHES` (the snapshot they come from, made by
 //! `tools/gen_rewrite_patches.py`) override them, and a `rewrite_patches.tsv` beside `patch_nso.py` is the last
-//! resort. The port refuses (exit code 4, the caller runs the reference script, and `nxb build` stops at the rewrite with
-//! the same message) when the engine is not the one this port was checked against: the rewriter's Python files, the patch files and `game.tsv` must hash as the snapshot says,
+//! resort. The port refuses (`nxb rewrite` gives exit code 4 so that the caller runs the reference script, and `nxb build`
+//! stops at the rewrite with the same message and exit code 1) when the engine is not the one this port was checked against: the rewriter's Python files, the patch files and `game.tsv` must hash as the snapshot says,
 //! `DM_GAMES_DIR` must be empty, and an unreplayable frame step stub is
 //! unsupported. A game with `.nrr` files gets its collected NROs rewritten too (see [`ensure`]).
 
@@ -15,14 +15,14 @@ use nxb_model::sha256;
 use nxb_rewrite::{Options, RewriteError, patches::PatchTable, rewrite};
 
 /// The SHA-256 of the engine files (`dm/tools`) this port was checked against: the engine at its pinned commit
-/// (nxnative `e5ab7c5d`). The first `SOURCES` of them are the ones `build_src.sha256` lists, in the script's order.
+/// (nxnative `88c7e03f`). The first `SOURCES` of them are the ones `build_src.sha256` lists, in the script's order.
 /// When one differs, `nxb rewrite` stops with exit code 4 naming the file and both hashes, and `nxb build` stops at
-/// the rewrite with the same message: the rewriter is checked against the new engine files (diff them, port what
+/// the rewrite with the same message and exit code 1: the rewriter is checked against the new engine files (diff them, port what
 /// changed, run the oracle on real modules) and these pins are updated with it, never skipped.
-const PINNED: [(&str, &str); 12] = [
+const PINNED: [(&str, &str); 13] = [
     (
         "patch_nso.py",
-        "fcc8e43c055c2edb8288d8e32686fdc875711638f3290e8207bc2c59f2b54b84",
+        "6ca3aeeda9cb608f2298926f546b7ab3488afba9dcd23ebcce0077fe2b84f009",
     ),
     (
         "nso.py",
@@ -53,6 +53,10 @@ const PINNED: [(&str, &str); 12] = [
         "3b2a12e97839a3505e68614ede5faf3f411f262fe527675f87c8c1a43105b675",
     ),
     (
+        "ue_ring.py",
+        "01835663846cff75a6bb287bb7724e842323b79b74c19d818f7dbf7873cea082",
+    ),
+    (
         "snowdrop_pools.py",
         "3c1cca822fbe3f0b3614489d3a50da23dd5dace6a00c4d639a9a0e4fc2095b0c",
     ),
@@ -62,7 +66,7 @@ const PINNED: [(&str, &str); 12] = [
     ),
     (
         "nso_match.py",
-        "e0fe79a5bda7d587f53a4b262b9ca6ec3c0e1df69edcb38e4bfc11af948be829",
+        "abf5d48242650455dd87ce9f57c777084c869f2fabb243350fac3ec86cfb2496",
     ),
     (
         "nso_syms.py",
@@ -71,7 +75,7 @@ const PINNED: [(&str, &str); 12] = [
 ];
 
 /// How many of [`PINNED`] go into `build_src.sha256`.
-const SOURCES: usize = 10;
+const SOURCES: usize = 11;
 
 /// Exit code of a rewrite outside this port's contract (the script runs instead).
 pub const UNSUPPORTED: i32 = 4;

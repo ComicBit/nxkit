@@ -1,5 +1,5 @@
 //! The engine finders of `patch_nso.py` that run on any module without a build ID, wired into the rewrite
-//! (`ue_cvar`, `fps_target`, `ue_malloc`, `snowdrop_pools`, `ue_region`).
+//! (`ue_cvar`, `fps_target`, `ue_malloc`, `snowdrop_pools`, `ue_region`, `ue_ring`).
 
 use crate::error::RewriteError;
 use crate::rewrite::{Options, Step};
@@ -14,7 +14,7 @@ pub(crate) struct Finds {
 }
 
 /// The finders that run on any module without a build ID (`ue_cvar`, `fps_target`, `ue_malloc`, `snowdrop_pools`,
-/// `ue_region`): their cuts go on the cut list and into the image, in the order of the script.
+/// `ue_region`, `ue_ring`): their cuts go on the cut list and into the image, in the order of the script.
 pub(crate) fn engine_finders(
     rw: &mut Rw,
     opts: &Options,
@@ -128,6 +128,28 @@ pub(crate) fn engine_finders(
                 if let Some(r) = why.strip_prefix("[RED] ") {
                     log.push(format!(
                         "[RED] {name}: {r}: the engine asks for its whole default region"
+                    ));
+                }
+            }
+        }
+        match crate::ring::ue_ring_find(&rw.img, text_end, ro_off, data_off).map_err(fail_)? {
+            Ok(r) => {
+                let hex = |w: u32| -> String {
+                    w.to_le_bytes().iter().map(|b| format!("{b:02x}")).collect()
+                };
+                cuts.push(crate::patches::Cut {
+                    off: r.off,
+                    old: hex(r.old),
+                    new: hex(r.new),
+                    why: format!("{} (ue_ring.py)", r.why),
+                });
+                rw.img[r.off..r.off + 4].copy_from_slice(&r.new.to_le_bytes());
+                log.push(format!("{name}: {}", r.why));
+            }
+            Err(why) => {
+                if let Some(r) = why.strip_prefix("[RED] ") {
+                    log.push(format!(
+                        "[RED] {name}: {r}: its dynamic buffers keep 3 copies"
                     ));
                 }
             }
