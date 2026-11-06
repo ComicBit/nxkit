@@ -152,6 +152,12 @@ impl Em<'_> {
     /// A return without a value of the current function.
     pub(super) fn return_default(&mut self) -> R<()> {
         if self.func == 0 {
+            if let (Shader::Vertex, Some(exit)) = (self.shader, self.exit.clone()) {
+                for l in &exit {
+                    self.line(l);
+                }
+                return Ok(());
+            }
             match self.shader {
                 Shader::Compute => self.line("return;"),
                 Shader::Fragment if self.plan.out_members.is_empty() => self.line("return;"),

@@ -154,7 +154,12 @@ fn vertex() -> B {
         AggType::FP32,
     );
     let one = b.k(ONE);
-    let add = b.op(Inst::Add, StorageKind::None, 0, vec![x, one]);
+    let add = b.op(
+        Inst(Inst::Add.0 | Inst::FP32),
+        StorageKind::None,
+        0,
+        vec![x, one],
+    );
     let y = b.def(AggType::FP32, add);
     b.store_io(IoVariable::Position, None, 0, y);
     b.store_io(IoVariable::UserDefined, Some(1), 2, y);
