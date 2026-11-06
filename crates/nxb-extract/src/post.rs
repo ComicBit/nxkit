@@ -104,7 +104,11 @@ impl Templates {
                 live: live.contains(&f.label),
             })
             .collect();
-        let plan = jobs::plan(&jfiles).map_err(split_err)?;
+        let nros = jobs::NroSet {
+            dir: self.nros.dir.clone(),
+            files: self.nros.files.iter().map(|(_, d)| d.clone()).collect(),
+        };
+        let plan = jobs::plan_with(&jfiles, &nros).map_err(split_err)?;
         self.add_notes(plan.notes.iter().cloned());
         let mut taken_labels = std::collections::HashSet::new();
         for (i, f) in files.iter().enumerate() {

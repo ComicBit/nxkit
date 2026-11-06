@@ -101,7 +101,7 @@ Since version 0.4.0, the split reads many more container families. A format that
 | Unity bundles and serialized files (LZMA, LZ4, stored blocks, format 17 to 22, type trees) | ported. Compared on synthetic files only, because no real Unity title was available |
 | Needle, Sumo, Phyre, MGFX, XNB, SLCT, Monolith, Snowdrop, SDF, MT Framework and some more | ported. Compared on synthetic files |
 | formats that need Oodle (some packs, Frostbite roots, some Unreal blocks) | not ported. Exit code 4 |
-| the CRA family | not ported. Exit code 4 |
+| the CRA family | ported. `nxb-split::cra` unscrambles each file and checks its checksum. The file table is read from the NROs of `DM_NRO_DIR`, and a missing table stops the plan. Each NRO is also scanned like main. Compared with the reference script on a synthetic NRO and archive made by `tools/gen_cra_fixture.py` |
 | zip members (stored, Deflate, bzip2, lzma) | ported. The decoders are `nxb-split::bzip2` and `nxb-split::unity::lzma`. Compared with vectors from Python's `zipfile`, `bzip2` and `xz` |
 | BND3 entry names in Shift JIS | ported. `nxb-split::sjis` decodes ASCII, half-width katakana and JIS X 0208 like Python's `shift-jis` codec with `replace`. A test compares all 65536 byte pairs with the codec. The table is made by `tools/gen_sjis_table.py` |
 | encrypted Unreal indexes, LZ5 packages | not ported. Exit code 4 or a note |
