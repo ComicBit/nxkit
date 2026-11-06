@@ -170,7 +170,16 @@ mod imp {
     }
 
     pub(super) fn memory_used() -> Option<u64> {
-        let page = read_u64(c"hw.pagesize")?;
+        memory_used_sysctl().or_else(memory_used_vm_info)
+    }
+
+    fn page_size() -> Option<u64> {
+        // SAFETY: `getpagesize` takes no arguments.
+        read_u64(c"hw.pagesize").or_else(|| u64::try_from(unsafe { getpagesize() }).ok())
+    }
+
+    pub(super) fn memory_used_sysctl() -> Option<u64> {
+        let page = page_size()?;
         let internal = read_u64(c"vm.page_pageable_internal_count")?;
         let purgeable = read_u64(c"vm.page_purgeable_count").unwrap_or(0);
         let wired = read_u64(c"vm.page_wired_count")?;
@@ -190,9 +199,40 @@ mod imp {
     const HOST_CPU_LOAD_INFO: i32 = 3;
     const CPU_STATE_MAX: usize = 4;
 
+    /// `HOST_VM_INFO64` and the size of `vm_statistics64` in `integer_t`.
+    const HOST_VM_INFO64: i32 = 4;
+    const VM_INFO64_COUNT: usize = 38;
+    /// `integer_t` positions in `vm_statistics64`.
+    const WIRE: usize = 3;
+    const PURGEABLE: usize = 22;
+    const COMPRESSOR: usize = 32;
+    const INTERNAL: usize = 35;
+
     unsafe extern "C" {
         fn mach_host_self() -> u32;
         fn host_statistics(host: u32, flavor: i32, info: *mut u32, count: *mut u32) -> i32;
+        fn host_statistics64(host: u32, flavor: i32, info: *mut u32, count: *mut u32) -> i32;
+        fn getpagesize() -> i32;
+    }
+
+    /// The counters `vm_stat` shows, for machines without the `vm.page_*` sysctls (the CI's virtual machines).
+    pub(super) fn memory_used_vm_info() -> Option<u64> {
+        // `vm_statistics64` is 8-byte aligned
+        let mut s = [0u64; VM_INFO64_COUNT / 2];
+        let mut count = VM_INFO64_COUNT as u32;
+        // SAFETY: `s` is writable for `count` integer_t values, the kernel writes at most `count` and updates it.
+        let rc =
+            unsafe { host_statistics64(host(), HOST_VM_INFO64, s.as_mut_ptr().cast(), &mut count) };
+        if rc != 0 || (count as usize) <= INTERNAL {
+            return None;
+        }
+        let word = |i: usize| -> u64 {
+            let b = s[i / 2].to_ne_bytes();
+            let o = (i % 2) * 4;
+            u64::from(u32::from_ne_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]]))
+        };
+        let pages = word(INTERNAL).saturating_sub(word(PURGEABLE)) + word(WIRE) + word(COMPRESSOR);
+        Some(pages.saturating_mul(page_size()?))
     }
 
     /// The host port, taken once (every `mach_host_self` call adds a send right).
@@ -281,6 +321,18 @@ mod tests {
         let used = memory_used().unwrap();
         assert!(used > 0 && used < memsize().unwrap());
         assert!(memory_pressure().unwrap() >= 1);
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn vm_info_agrees_with_the_sysctls() {
+        let gib = 1u64 << 30;
+        let a = imp::memory_used_vm_info().unwrap();
+        assert!(a > 0 && a < memsize().unwrap());
+        if let Some(b) = imp::memory_used_sysctl() {
+            // the compressor's pages and its byte count differ a little, the rest moves between the two reads
+            assert!(a.abs_diff(b) < 2 * gib, "{a} vs {b}");
+        }
     }
 
     #[test]
