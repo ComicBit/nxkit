@@ -7,6 +7,7 @@
 use super::abi::{self, Kind};
 use super::buffers;
 use super::emit::R;
+use super::geom;
 use super::handles::decode;
 use super::refl::Binding;
 use super::usage::Usage;
@@ -151,6 +152,8 @@ impl Builder<'_> {
         let name = d.name.clone();
         let (kind, reg, bank) = if name == "support_buffer" {
             (Kind::Support, None, None)
+        } else if let Some(slot) = geom::helper_slot(&name) {
+            (Kind::Geometry, Some(slot), None)
         } else if let Some(n) = bank_name(&name, 'c') {
             match n {
                 3..=16 => (Kind::Cbuf, Some(n - 3), None),
@@ -188,6 +191,20 @@ impl Builder<'_> {
         let used_write = self.usage.sb.get(&d.binding).copied().unwrap_or(false);
         let rw = used_write || info.is_some_and(|b| b.flags & 1 != 0);
         self.res.text.push_str(&buffers::block(&name, d)?);
+        if let Some(slot) = geom::helper_slot(&name) {
+            let ty = geom::helper_type(&name, rw);
+            let b = self.member(&ty, &name, 1, Kind::Geometry);
+            b.reg = Some(slot);
+            self.res.sbs.insert(
+                d.binding,
+                Buf {
+                    name,
+                    def: d.clone(),
+                    write: rw,
+                },
+            );
+            return Ok(());
+        }
         let ty = format!("{}device {name}_block*", if rw { "" } else { "const " });
         let off = info.filter(|_| cb_slot == 0).map(|_| cb_off * 4);
         let stage = self.stage;
@@ -235,6 +252,20 @@ impl Builder<'_> {
     }
 
     fn texture(&mut self, d: &TextureDef) -> R<()> {
+        if let Some(slot) = geom::helper_slot(&d.name) {
+            let b = self.member(geom::TOPOLOGY_TYPE, &d.name, 1, Kind::Geometry);
+            b.reg = Some(slot);
+            self.res.texs.insert(
+                (d.set, d.binding),
+                Tx {
+                    name: d.name.clone(),
+                    def: d.clone(),
+                    sampler: None,
+                    twin: None,
+                },
+            );
+            return Ok(());
+        }
         let info = find_info(&self.program.textures, d)?.clone();
         let key = (d.set, d.binding);
         let array = d.array_length != 1;

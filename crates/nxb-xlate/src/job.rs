@@ -21,6 +21,8 @@ pub struct Job {
     pub nvn2_cs: Option<Vec<i32>>,
     pub stage_memory: Option<Vec<i32>>,
     pub geometry_topology: Option<i32>,
+    /// The vertex or geometry shader captures transform feedback (the job has a `tf` layout).
+    pub tf: bool,
     pub early_fragment_tests: bool,
     pub reduced: bool,
     /// `debug` is on unless the job says `false`.
@@ -98,6 +100,10 @@ impl Job {
                 .get("geometry_topology")
                 .and_then(Value::as_i64)
                 .map(|x| x as i32),
+            tf: !matches!(v.get("tf"), None | Some(Value::Null))
+                && v.get("tf")
+                    .and_then(Value::as_list)
+                    .is_none_or(|l| !l.is_empty()),
             early_fragment_tests: truthy(v.get("early_fragment_tests")),
             reduced: truthy(v.get("reduced")),
             debug: !matches!(v.get("debug"), Some(Value::Bool(false))),

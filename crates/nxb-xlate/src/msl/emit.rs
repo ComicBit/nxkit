@@ -48,6 +48,11 @@ impl Val {
 pub struct Options {
     /// The vertex shader is the visibility counter: lane reads are 0 and ballots are one lane.
     pub visibility_counter: bool,
+    /// The vertex entry keeps the depth range of the source (`main0_z`: near is 0) and omits the conversion of
+    /// `z` to the Metal range.
+    pub no_depth_fix: bool,
+    /// Write `main0_z` beside `main0` in a vertex library and name it as `entry_z` in the reflection.
+    pub entry_z: bool,
 }
 
 /// The reads of the driver constant banks.
