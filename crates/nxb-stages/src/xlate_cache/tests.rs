@@ -8,14 +8,20 @@ static DIR_N: AtomicU32 = AtomicU32::new(0);
 
 /// A fresh folder under the build target.
 fn dir() -> PathBuf {
-    let d: PathBuf = [env!("CARGO_MANIFEST_DIR"), "..", "..", "target", "nxb-stages-test"]
-        .iter()
-        .collect::<PathBuf>()
-        .join(format!(
-            "xlate-{}-{}",
-            std::process::id(),
-            DIR_N.fetch_add(1, Ordering::Relaxed)
-        ));
+    let d: PathBuf = [
+        env!("CARGO_MANIFEST_DIR"),
+        "..",
+        "..",
+        "target",
+        "nxb-stages-test",
+    ]
+    .iter()
+    .collect::<PathBuf>()
+    .join(format!(
+        "xlate-{}-{}",
+        std::process::id(),
+        DIR_N.fetch_add(1, Ordering::Relaxed)
+    ));
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
     d

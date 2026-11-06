@@ -43,13 +43,6 @@ pub struct Args {
     pub companion: Option<PathBuf>,
     /// Worker threads.
     pub threads: usize,
-    /// `--xlate`: the shader translator (default the engine's `dmsh_xlate_bin/dmsh_xlate`).
-    pub xlate: Option<PathBuf>,
-    /// `--xlate-host`: the translator host program and arguments, or `off` (default: found next to `--xlate`, or
-    /// env `NXB_XLATE_HOST`).
-    pub xlate_host: Option<String>,
-    /// `--dotnet-root` (default `DOTNET_ROOT`, else `dotnet --list-runtimes`).
-    pub dotnet_root: Option<PathBuf>,
     /// `--own-front on|off|<verdicts>`: the own front end (default on: the shipped own-identical verdicts.
     /// `NXB_OWN_FRONT=0` turns it off).
     pub own_front: String,
@@ -131,9 +124,6 @@ const VALUE: &[&str] = &[
     "--companion-app",
     COMPAT_ALIAS,
     "--threads",
-    "--xlate",
-    "--xlate-host",
-    "--dotnet-root",
     "--own-front",
     "--shader-manifest",
     "--nup",
@@ -317,9 +307,6 @@ pub fn parse(argv: &[String]) -> Result<Args, (i32, String)> {
                 "--progress" => a.progress = v,
                 "--engine" => a.engine = Some(v.into()),
                 "--shaders" => a.shaders = Some(v.into()),
-                "--xlate" => a.xlate = Some(v.into()),
-                "--xlate-host" => a.xlate_host = Some(v),
-                "--dotnet-root" => a.dotnet_root = Some(v.into()),
                 "--own-front" => a.own_front = v,
                 "--shader-manifest" => a.manifest = Some(v.into()),
                 _ if k == "--companion-app" || k == COMPAT_ALIAS => a.companion = Some(v.into()),
