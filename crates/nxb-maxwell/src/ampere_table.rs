@@ -85,6 +85,7 @@ pub enum AEmit {
     ATxq,
     ASurface,
     ASuatom,
+    ASured,
     ABar,
     AHmma,
     ALdsm,
@@ -446,6 +447,7 @@ fn build() -> Tables {
     x(t, 0xb9b, InstName::Sust, AEmit::ASurface, 0, false, false);
     x(t, 0xb9d, InstName::Sust, AEmit::ASurface, 0, false, false);
     x(t, 0x593, InstName::Suatom, AEmit::ASuatom, 0, false, true);
+    x(t, 0x59f, InstName::Sured, AEmit::ASured, 0, false, false);
     x(t, 0xb1d, InstName::Bar, AEmit::ABar, 0, false, false);
     x(t, 0x23c, InstName::Hfma2, AEmit::AHmma, 0, false, true);
     x(t, 0x83b, InstName::Lds, AEmit::ALdsm, 0, false, true);

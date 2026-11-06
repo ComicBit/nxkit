@@ -48,6 +48,16 @@ pub(super) fn atom_format(s: SuatomSize) -> usize {
     }
 }
 
+/// `UniformHandleAtomicFormat`: an image whose handle is in the game's own uniform buffer has no descriptor to ask,
+/// so the instruction's size names the format (Metal's atomics take only R32Uint and R32Sint).
+fn uniform_handle_atomic_format(size: SuatomSize) -> usize {
+    if matches!(size, SuatomSize::S32 | SuatomSize::Sd32) {
+        fmt("R32Sint")
+    } else {
+        fmt("R32Uint")
+    }
+}
+
 pub(super) fn atomic_op_flags(op: SuatomOp) -> u32 {
     match op {
         SuatomOp::Add => texflags::ADD,
@@ -173,6 +183,7 @@ macro_rules! suatom {
                 $bindless,
                 $cas,
                 has_pred,
+                DEFAULT_CBUF_SLOT,
             )
         }
     };
@@ -245,6 +256,7 @@ pub(crate) fn emit_suatom(
     is_bindless: bool,
     compare_and_swap: bool,
     has_predicate_result: bool,
+    cbuf_slot: i32,
 ) -> Result<(), String> {
     if METAL_ATOMICS
         && !(size == SuatomSize::U32 || size == SuatomSize::S32 || size == SuatomSize::Sd32)
@@ -274,6 +286,8 @@ pub(crate) fn emit_suatom(
     let format = if size == SuatomSize::Sd32 || size == SuatomSize::Sd64 {
         if is_bindless {
             0
+        } else if cbuf_slot != DEFAULT_CBUF_SLOT {
+            uniform_handle_atomic_format(size)
         } else {
             ShaderProperties::get_texture_format_atomic(ctx.acc, imm, -1, METAL_ATOMICS)?
         }
@@ -310,7 +324,7 @@ pub(crate) fn emit_suatom(
         ty,
         format,
         flags,
-        DEFAULT_CBUF_SLOT,
+        cbuf_slot,
         imm,
     )?;
     let res = ctx.image_atomic(ty, format, flags, sb, &sources);
@@ -332,6 +346,7 @@ pub(super) fn sured_b(ctx: &mut EmitterContext<'_, '_>) -> Result<(), String> {
         op.src_c(),
         op.ba(),
         true,
+        DEFAULT_CBUF_SLOT,
     )
 }
 
@@ -349,11 +364,12 @@ pub(super) fn sured(ctx: &mut EmitterContext<'_, '_>) -> Result<(), String> {
         0,
         op.ba(),
         false,
+        DEFAULT_CBUF_SLOT,
     )
 }
 
 #[allow(clippy::too_many_arguments)]
-fn emit_sured(
+pub(crate) fn emit_sured(
     ctx: &mut EmitterContext<'_, '_>,
     dims: SuDim,
     clamp: i32,
@@ -365,6 +381,7 @@ fn emit_sured(
     src_c: i32,
     byte_address: bool,
     is_bindless: bool,
+    cbuf_slot: i32,
 ) -> Result<(), String> {
     if METAL_ATOMICS
         && !(size == SuatomSize::U32 || size == SuatomSize::S32 || size == SuatomSize::Sd32)
@@ -393,6 +410,8 @@ fn emit_sured(
     let format = if size == SuatomSize::Sd32 || size == SuatomSize::Sd64 {
         if is_bindless {
             0
+        } else if cbuf_slot != DEFAULT_CBUF_SLOT {
+            uniform_handle_atomic_format(size)
         } else {
             ShaderProperties::get_texture_format_atomic(ctx.acc, imm, -1, METAL_ATOMICS)?
         }
@@ -416,7 +435,7 @@ fn emit_sured(
         ty,
         format,
         flags,
-        DEFAULT_CBUF_SLOT,
+        cbuf_slot,
         imm,
     )?;
     ctx.image_atomic(ty, format, flags, sb, &sources);

@@ -99,6 +99,7 @@ pub fn dispatch(ctx: &mut EmitterContext<'_, '_>, e: AEmit) -> Result<(), String
         ATxq => tex::txq(ctx),
         ASurface => surface::surface(ctx),
         ASuatom => surface::suatom(ctx),
+        ASured => surface::sured(ctx),
         ARedux => tensor::redux(ctx),
         AMatch => tensor::match_(ctx),
         AHsetp2 => tensor::hsetp2(ctx),
