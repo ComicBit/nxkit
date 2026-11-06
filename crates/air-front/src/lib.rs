@@ -36,7 +36,7 @@ pub fn id() -> String {
 }
 
 /// Generation of the emitted IR.
-pub const FORMAT: u32 = 6;
+pub const FORMAT: u32 = 7;
 
 /// The module handed to the back half.
 #[derive(Clone, Debug, PartialEq, Eq)]

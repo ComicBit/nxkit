@@ -36,6 +36,9 @@ pub const PY_BASE_DEPTH: u32 = 8;
 /// `sys.getrecursionlimit()` in the worker.
 pub const PY_RECURSION_LIMIT: u32 = 1000;
 
+/// The pragma that turns off `a*b + c` contraction, at file scope or at the start of a block.
+pub const FP_CONTRACT_OFF: &str = "#pragma clang fp contract(off)";
+
 fn reject<T>(key: impl Into<String>) -> PResult<T> {
     Err(Fail::Reject(Box::new(Reject {
         key: key.into(),
@@ -607,6 +610,7 @@ impl<'a> Parser<'a> {
             if v == "#include <metal_stdlib>"
                 || v == "#include <simd/simd.h>"
                 || v.starts_with("#pragma clang diagnostic ignored")
+                || v == FP_CONTRACT_OFF
             {
                 self.stat("pp")?;
                 return Ok(Some(Item::Preprocessor {
@@ -1135,6 +1139,11 @@ impl<'a> Parser<'a> {
             let start = p.i;
             p.expect("{")?;
             p.scopes.push(FxHashMap::default());
+            let contract_off = p.kind()? == TokKind::Pp && p.peek()? == FP_CONTRACT_OFF;
+            if contract_off {
+                p.next()?;
+                p.stat("pp:fp-contract")?;
+            }
             let mut stmts = Vec::new();
             while !p.accept("}")? {
                 stmts.push(p.stmt()?);
@@ -1142,6 +1151,7 @@ impl<'a> Parser<'a> {
             p.scopes.pop();
             Ok(Block {
                 stmts,
+                contract_off,
                 span: p.span_from(start),
             })
         })

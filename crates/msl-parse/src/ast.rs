@@ -133,6 +133,8 @@ pub struct Function {
 #[derive(Clone, Debug, Default)]
 pub struct Block {
     pub stmts: Vec<Stmt>,
+    /// The block starts with `#pragma clang fp contract(off)`.
+    pub contract_off: bool,
     pub span: Span,
 }
 

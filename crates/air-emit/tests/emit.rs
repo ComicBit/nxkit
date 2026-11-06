@@ -69,3 +69,28 @@ fn ios_convention() {
     let mac = compile_source(&src, &Target::macos(), "-").expect("emits");
     assert!(mac.contains("air.get_read_sampler") && mac.contains("nnan ninf"));
 }
+
+#[test]
+fn the_fp_contract_pragma_stops_fmuladd() {
+    let frag = |head: &str, body: &str| {
+        emit(&format!(
+            "{head}struct O {{ float4 c [[color(0)]]; }};\n\
+             struct I {{ float4 u [[user(locn0)]]; }};\n\
+             fragment O main0(I in [[stage_in]]) {{ O o; {body} return o; }}\n"
+        ))
+    };
+    let mixed = frag(
+        "",
+        "float4 t; { \n#pragma clang fp contract(off)\n t = in.u * in.u + in.u; } o.c = t * in.u + in.u;",
+    );
+    assert_eq!(
+        mixed.matches("@llvm.fmuladd.v4f32(<4 x float> %").count(),
+        1,
+        "{mixed}"
+    );
+    let file = frag(
+        "#pragma clang fp contract(off)\n",
+        "o.c = in.u * in.u + in.u; o.c += in.u * in.u;",
+    );
+    assert!(!file.contains("fmuladd"), "{file}");
+}
