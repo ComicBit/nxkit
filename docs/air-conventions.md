@@ -69,6 +69,9 @@ The samples did not show the value 5 or values more than 7.
 - Conversions: `air.convert.<destination kind>.<destination type>.<source kind>.<source type>`, kinds `f`, `s` or `u`.
 - Texture operations: `air.sample_texture_2d.v4f32` returns a vector and a status byte. Also `read_texture_*`, `write_texture_*`, `gather_*`.
 - Synchronization: `air.wg.barrier` for `threadgroup_barrier`. SIMD: `air.simd_shuffle`, `air.simd_ballot`. Discard: `air.discard_fragment`.
+- `simd_shuffle` is `air.simd_shuffle.<sign>.<type>` with `s` or `u` for integers and no sign for floats. The lane is an `i16`.
+  Apple's front end writes a `freeze` of the data operand before the call. The operand and the result of `simd_any` and `simd_all` are `i1`.
+- `mulhi` is `air.mul_hi.s.<type>` or `air.mul_hi.u.<type>`.
 - The declaration attributes are important: `convergent` for barriers and for sample operations with implicit derivatives, `readnone` for math. Copy them from Apple output for each intrinsic.
 
 ## Function attributes
