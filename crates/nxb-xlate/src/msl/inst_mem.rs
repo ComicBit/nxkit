@@ -283,6 +283,7 @@ impl Em<'_> {
     fn atomic(&mut self, inst: Inst, o: &OpData, p: Place) -> R<Val> {
         let space = match p.space {
             Space::Device => "device",
+            Space::Threadgroup if self.shared.spill => "device",
             Space::Threadgroup => "threadgroup",
             _ => return Err("unported: atomic on memory that is not shared".into()),
         };

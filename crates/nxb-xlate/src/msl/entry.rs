@@ -3,6 +3,7 @@
 use super::args::{self, SET_NAME, SET_TYPE};
 use super::emit::{Em, Options, R, Shader, Shared};
 use super::refl::Reflection;
+use super::spill::{self, Spill};
 use super::types::{msl_type, scalar};
 use super::usage::{self, Usage};
 use super::{Context, Library, Translated, facts, io, prelude};
@@ -30,8 +31,17 @@ fn memory(m: &MemoryDef) -> R<(String, i32)> {
     Ok((msl_type(scalar(m.ty))?, m.array_length.max(1)))
 }
 
-fn shared_params(s: &Structured, res: &args::Res, plan: &io::Plan, shader: Shader) -> R<Shared> {
-    let mut p = Shared::default();
+fn shared_params(
+    s: &Structured,
+    res: &args::Res,
+    plan: &io::Plan,
+    shader: Shader,
+    spill: Option<&Spill>,
+) -> R<Shared> {
+    let mut p = Shared {
+        spill: spill.is_some(),
+        ..Shared::default()
+    };
     let d = |a: &str, b: &str| (a.to_string(), b.to_string());
     if res.has_args {
         p.params
@@ -55,21 +65,14 @@ fn shared_params(s: &Structured, res: &args::Res, plan: &io::Plan, shader: Shade
     }
     for m in &s.props.properties.shared_memories {
         let (t, n) = memory(m)?;
-        p.params.push(d(
-            &format!("threadgroup {t} (&sm{})[{n}]", m.id),
-            &format!("sm{}", m.id),
-        ));
+        let decl = if spill.is_some() {
+            Spill::param(m)?
+        } else {
+            format!("threadgroup {t} (&sm{})[{n}]", m.id)
+        };
+        p.params.push(d(&decl, &format!("sm{}", m.id)));
     }
     Ok(p)
-}
-
-fn tg_bytes(s: &Structured) -> i64 {
-    s.props
-        .properties
-        .shared_memories
-        .iter()
-        .map(|m| i64::from(m.ty.size_in_bytes()) * i64::from(m.array_length.max(1)))
-        .sum()
 }
 
 /// The text of one entry function around a body.
@@ -80,6 +83,7 @@ fn entry_text(
     res: &args::Res,
     plan: &io::Plan,
     body: &str,
+    spill: Option<&Spill>,
 ) -> R<String> {
     let early = shader == Shader::Fragment && s.props.definitions.early_z_force;
     let has_out = shader != Shader::Compute && !plan.out_members.is_empty();
@@ -93,6 +97,10 @@ fn entry_text(
     }
     for b in &plan.builtins {
         params.push(format!("{} {} [[{}]]", b.ty, b.name, b.attr));
+    }
+    let builtins: Vec<_> = plan.builtins.iter().copied().collect();
+    if let Some(sp) = spill {
+        params.extend(sp.entry_params(&builtins));
     }
     let mut t = String::new();
     let attr = if early {
@@ -119,9 +127,13 @@ fn entry_text(
         let (ty, n) = memory(m)?;
         let _ = writeln!(t, "    {ty} lm{}[{n}];", m.id);
     }
-    for m in &s.props.properties.shared_memories {
-        let (ty, n) = memory(m)?;
-        let _ = writeln!(t, "    threadgroup {ty} sm{}[{n}];", m.id);
+    if let Some(sp) = spill {
+        t.push_str(&sp.decls(&s.props.properties.shared_memories, &builtins)?);
+    } else {
+        for m in &s.props.properties.shared_memories {
+            let (ty, n) = memory(m)?;
+            let _ = writeln!(t, "    threadgroup {ty} sm{}[{n}];", m.id);
+        }
     }
     t.push_str(body);
     let last = body.trim_end().lines().last().map(str::trim);
@@ -153,9 +165,11 @@ pub fn build(s: &Structured, ctx: &Context<'_>, opt: &Options) -> R<Translated> 
     if s.props.definitions.transform_feedback_enabled {
         return Err("unported: transform feedback".into());
     }
-    if shader == Shader::Compute && tg_bytes(s) > i64::from(super::abi::TG_MAX) {
-        return Err("unported: threadgroup memory past 32 KB (tg_spill)".into());
-    }
+    let spill = if shader == Shader::Compute {
+        spill::plan(&s.props.properties.shared_memories)
+    } else {
+        None
+    };
     let usage: Usage = usage::collect(&s.info);
     let res = args::build(
         &s.props, &s.program, &usage, &job.stage, &s.notes, &s.fetch1d,
@@ -174,7 +188,7 @@ pub fn build(s: &Structured, ctx: &Context<'_>, opt: &Options) -> R<Translated> 
         base_instance,
         lane_zero,
     )?;
-    let shared = shared_params(s, &res, &plan, shader)?;
+    let shared = shared_params(s, &res, &plan, shader, spill.as_ref())?;
     let mut em = Em::new(&s.info, &s.props, &res, opt, &shared, &plan, shader);
     let mut bodies = Vec::new();
     for i in 0..s.info.functions.len() {
@@ -205,6 +219,7 @@ pub fn build(s: &Structured, ctx: &Context<'_>, opt: &Options) -> R<Translated> 
         &res,
         &plan,
         main,
+        spill.as_ref(),
     )?);
 
     let mut notes = s.notes.clone();
@@ -231,6 +246,9 @@ pub fn build(s: &Structured, ctx: &Context<'_>, opt: &Options) -> R<Translated> 
         vertex_inputs: facts::vertex_inputs(&plan),
         ..Reflection::default()
     };
+    if let Some(sp) = &spill {
+        r.set_extra("tg_spill", nxb_pyjson::Value::Int(sp.total));
+    }
     r.raster = facts::raster(shader, &plan, usage.discard, &r.bindings);
     let mut varyings = plan.varyings.clone();
     varyings.sort_by_key(|v| v.location);

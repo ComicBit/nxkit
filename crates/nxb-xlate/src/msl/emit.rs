@@ -64,6 +64,8 @@ pub struct DrvReads {
 pub struct Shared {
     /// `(declaration, argument)` pairs.
     pub params: Vec<(String, String)>,
+    /// The shared memories live in the device buffer of the threadgroup spill (see `spill`).
+    pub spill: bool,
 }
 
 /// The emitter state.
