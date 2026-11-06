@@ -273,20 +273,32 @@ pub fn escape(s: &str) -> String {
 /// [`escape`] appended to `out`.
 pub fn escape_into(out: &mut String, s: &str) {
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
-    for b in s.bytes() {
+    let mut start = 0;
+    for (k, b) in s.bytes().enumerate() {
         if b == b'"' || b == b'\\' || !(0x20..0x7f).contains(&b) {
+            if start < k {
+                out.push_str(s.get(start..k).unwrap_or_default());
+            }
             out.push('\\');
             out.push(HEX[usize::from(b >> 4)] as char);
             out.push(HEX[usize::from(b & 15)] as char);
-        } else {
-            out.push(b as char);
+            start = k + 1;
         }
     }
+    out.push_str(s.get(start..).unwrap_or_default());
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn escape_runs_and_multibyte() {
+        assert_eq!(escape("plain"), "plain");
+        assert_eq!(escape("aé\"b\\\n"), "a\\C3\\A9\\22b\\5C\\0A");
+        assert_eq!(escape("éé"), "\\C3\\A9\\C3\\A9");
+        assert_eq!(escape(""), "");
+    }
 
     #[test]
     fn half_conversion() {

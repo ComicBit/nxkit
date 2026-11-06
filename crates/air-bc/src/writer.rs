@@ -1,7 +1,8 @@
 //! LLVM 14 era bitcode writer (typed pointers, relative value ids, string table) for the parsed
 //! module. Records are written unabbreviated, local values and blocks have no names.
 
-use crate::fx::HashMap;
+use crate::fx::{FxHasher, HashMap};
+use std::hash::{Hash, Hasher};
 
 use crate::ast::*;
 use crate::bits::{signed, Bits};
@@ -191,16 +192,64 @@ impl Types {
     }
 }
 
+/// Positions of list entries by hash, for first-match lookups without a linear scan.
+#[derive(Default)]
+struct Lookup(HashMap<u64, Vec<usize>>);
+
+impl Lookup {
+    fn hash<K: Hash + ?Sized>(k: &K) -> u64 {
+        let mut h = FxHasher::default();
+        k.hash(&mut h);
+        h.finish()
+    }
+
+    fn of<K: Hash>(list: &[K]) -> Self {
+        let mut l = Lookup::default();
+        for (k, x) in list.iter().enumerate() {
+            l.add(Self::hash(x), k);
+        }
+        l
+    }
+
+    fn add(&mut self, h: u64, k: usize) {
+        self.0.entry(h).or_default().push(k);
+    }
+
+    fn find(&self, h: u64, mut eq: impl FnMut(usize) -> bool) -> Option<usize> {
+        self.0.get(&h)?.iter().copied().find(|&k| eq(k))
+    }
+
+    /// First position of `(t, v)` in `list`.
+    fn pair(&self, list: &[(Ty, Val)], t: &Ty, v: &Val) -> Option<usize> {
+        self.find(Self::hash(&(t, v)), |k| list[k].0 == *t && list[k].1 == *v)
+    }
+}
+
 /// Value table of a function (or the module): constants interned with ids.
 struct Consts {
     base: u64,
     list: Vec<(Ty, Val)>,
+    index: Lookup,
 }
 
 impl Consts {
+    fn new(base: u64) -> Self {
+        Consts {
+            base,
+            list: Vec::new(),
+            index: Lookup::default(),
+        }
+    }
+
+    fn get(&self, t: &Ty, v: &Val) -> Option<u64> {
+        self.index
+            .pair(&self.list, t, v)
+            .map(|k| self.base + k as u64)
+    }
+
     fn id(&mut self, t: &Ty, v: &Val) -> u64 {
-        if let Some(k) = self.list.iter().position(|(a, b)| a == t && b == v) {
-            return self.base + k as u64;
+        if let Some(k) = self.get(t, v) {
+            return k;
         }
         // elements of aggregates and cast operands first
         match v {
@@ -216,9 +265,10 @@ impl Consts {
             }
             _ => {}
         }
-        if let Some(k) = self.list.iter().position(|(a, b)| a == t && b == v) {
-            return self.base + k as u64;
+        if let Some(k) = self.get(t, v) {
+            return k;
         }
+        self.index.add(Lookup::hash(&(t, v)), self.list.len());
         self.list.push((t.clone(), v.clone()));
         self.base + self.list.len() as u64 - 1
     }
@@ -256,10 +306,7 @@ pub fn write(m: &Module) -> R<Vec<u8>> {
         gtys.insert(f.name.clone(), Ty::Ptr(Box::new(ft), 0));
     }
     let nglobals = gids.len() as u64;
-    let mut mconsts = Consts {
-        base: nglobals,
-        list: Vec::new(),
-    };
+    let mut mconsts = Consts::new(nglobals);
     let groups: HashMap<u32, Vec<String>> = m.attr_groups.iter().cloned().collect();
 
     // attribute groups and lists
@@ -412,16 +459,21 @@ pub fn write(m: &Module) -> R<Vec<u8>> {
     // metadata: strings, values, nodes
     let mut md_strings: Vec<Vec<u8>> = Vec::new();
     let mut md_values: Vec<(Ty, Val)> = Vec::new();
+    let mut str_index = Lookup::default();
+    let mut val_index = Lookup::default();
     for (_, _, ops) in &m.md {
         for o in ops {
             match o {
                 MdOp::Str(s) => {
-                    if !md_strings.contains(s) {
+                    let h = Lookup::hash(s);
+                    if str_index.find(h, |k| md_strings[k] == *s).is_none() {
+                        str_index.add(h, md_strings.len());
                         md_strings.push(s.clone());
                     }
                 }
                 MdOp::Value(t, v) => {
-                    if !md_values.iter().any(|(a, b)| a == t && b == v) {
+                    if val_index.pair(&md_values, t, v).is_none() {
+                        val_index.add(Lookup::hash(&(t, v)), md_values.len());
                         md_values.push((t.clone(), v.clone()));
                     }
                 }
@@ -447,13 +499,14 @@ pub fn write(m: &Module) -> R<Vec<u8>> {
         let mut r = Vec::new();
         for o in ops {
             r.push(match o {
-                MdOp::Str(s) => md_strings.iter().position(|x| x == s).unwrap_or(0) as u64 + 1,
-                MdOp::Value(t, v) => {
-                    nstr + md_values
-                        .iter()
-                        .position(|(a, b)| a == t && b == v)
+                MdOp::Str(s) => {
+                    str_index
+                        .find(Lookup::hash(s), |k| md_strings[k] == *s)
                         .unwrap_or(0) as u64
                         + 1
+                }
+                MdOp::Value(t, v) => {
+                    nstr + val_index.pair(&md_values, t, v).unwrap_or(0) as u64 + 1
                 }
                 MdOp::Node(n) => {
                     node_index
@@ -633,12 +686,13 @@ fn write_consts(
     if list.is_empty() {
         return Ok(());
     }
+    let index = Lookup::of(list);
     let find = |t: &Ty, v: &Val| -> R<u64> {
         if let Val::Global(g) = v {
             return gids.get(g).copied().ok_or_else(|| format!("@{g}"));
         }
-        list.iter()
-            .position(|(a, x)| a == t && x == v)
+        index
+            .pair(list, t, v)
             .map(|k| base + k as u64)
             .ok_or_else(|| "constant id".to_string())
     };
@@ -735,10 +789,7 @@ fn function_code(
         .map(|(k, (l, _))| (l.clone(), k as u64))
         .collect();
     // first pass: collect constants used by instructions
-    let mut consts = Consts {
-        base: module_vals + nargs,
-        list: Vec::new(),
-    };
+    let mut consts = Consts::new(module_vals + nargs);
     let visit = |t: &Ty, v: &Val, consts: &mut Consts| {
         if is_const(v) {
             consts.id(t, v);
@@ -777,12 +828,7 @@ fn function_code(
                 .map(|x| x.0)
                 .ok_or_else(|| format!("unknown %{n}")),
             Val::Global(g) => gids.get(g).copied().ok_or_else(|| format!("unknown @{g}")),
-            v => consts
-                .list
-                .iter()
-                .position(|(a, b)| a == t && b == v)
-                .map(|k| consts.base + k as u64)
-                .ok_or_else(|| "const".to_string()),
+            v => consts.get(t, v).ok_or_else(|| "const".to_string()),
         }
     };
     let mut recs = Vec::new();
