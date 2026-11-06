@@ -51,6 +51,7 @@ fn ctx<'a>(partners: &'a [StageInputs]) -> Context<'a> {
         pc_paired: "",
         partners,
         no_facts: false,
+        ..Context::default()
     }
 }
 

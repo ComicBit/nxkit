@@ -28,7 +28,7 @@ the answer table (`shader_facts.tsv`) and the options. The job writer is `nxb_sh
 
 The call is `nxb_xlate::msl::translate(&job, &code, &ctx)`. It returns `Translated` or `Failure`.
 
-- `Context` has the chain version V, the source (`<package>#<index>`), the paired shader of the game's program (`pc_paired`), the answer-table flag `no_facts` and the `partners`.
+- `Context` has the chain version V, the source (`<package>#<index>`), the paired shader of the game's program (`pc_paired`), the answer-table flag `no_facts`, the flags `dual_source` and `fetch_outputs_only` and the `partners`.
 - `partners` is used by vertex shaders. It holds the `StageInputs` (the user varyings) of the paired pixel shaders. The translator pads the vertex outputs from them.
 - `Translated` has the libraries, the `StageInputs` of a pixel shader and the optional `Side`.
 - A `Library` has a suffix (`_b`, `_bf`, `_bp`, `_bv`, `_bg*`, `_bl*`, `_bgv`, `_bx`), the MSL text and an optional `Reflection`. The first library is `_b`.
@@ -74,8 +74,8 @@ A pixel shader gets extra entries around one static body function `dm_body_main0
 The library `_bf` is a second build of the pixel shader for framebuffer fetch. A sample of a 2D colour texture is replaced by the attachment `fbK` when its function constant `FX_i` selects it.
 The coordinate must be a varying (optionally divided by `w`) or a pixel position times uniforms.
 `_b.json` gets the field `fetch` with `calls` (`fc`, `tex_reg`, `varying_locn`, `proj` or `frag_pos`), `mixed_regs` and `outputs`.
-Only samples in the main function are replaced. A shader without such a sample gets `_bf` only when the step sets `Options.fetch_outputs_only`.
-The step sets `Options.dual_source` for the shaders that need `main0_d`.
+Only samples in the main function are replaced. A shader without such a sample gets `_bf` only when `Context.fetch_outputs_only` is set. The step sets it for the keys in the profile list `bf_want.tsv`.
+`Context.dual_source` makes the translator build `main0_d`. The step sets it for the keys in the profile list `dual_want.tsv`.
 
 A discard in a helper function sets the flag `dm_kill`. Every caller returns at once after the call, as the main function does after its own discard.
 A fragment shader interlock (`FSIBegin`, `FSIEnd`) has no statements. The images and storage buffers that the shader writes carry `raster_order_group(0)` in the argument buffer.
@@ -84,7 +84,7 @@ A fragment shader interlock (`FSIBegin`, `FSIEnd`) has no statements. The images
 ## Identity and the cache
 
 The step stores each translation in the store. The key has the translator identity, the job, the code, the chain version V, the source, the paired shader,
-the answer-table flag and the varyings of the partners. The identity is the chain version V, which covers the sources of `nxb-xlate` (refer to [shader-step.md](shader-step.md)).
+the answer-table flag, the dual-source and fetch-outputs-only flags and the varyings of the partners. The identity is the chain version V, which covers the sources of `nxb-xlate` (refer to [shader-step.md](shader-step.md)).
 `NXB_TEST_XLATE_SALT` changes it. A failure is not stored.
 
 ## 64 bit floats

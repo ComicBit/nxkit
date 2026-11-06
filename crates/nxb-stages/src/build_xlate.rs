@@ -44,6 +44,8 @@ pub(crate) fn translate_one(s: &Shared, key: &str, job: &Job) -> Result<Translat
         pc_paired: &pc,
         partners: &partners,
         no_facts: job.json.get("no_facts") == Some(&Value::Bool(true)),
+        dual_source: s.inputs.dual_want.contains(key),
+        fetch_outputs_only: s.inputs.bf_want.contains(key),
     };
     let r = s.xlate.translate(job, &ctx);
     s.span("translate", key, t);

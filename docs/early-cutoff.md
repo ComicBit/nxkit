@@ -20,7 +20,7 @@ This is early cutoff, as in the build systems Shake, Bazel and Salsa.
 
 | stage | store domain | version part | content part |
 |---|---|---|---|
-| translator | `nxb.xlate.v2` | translator identity: the chain version V, which covers the sources of `nxb-xlate`, and `NXB_TEST_XLATE_SALT` | job JSON, SHA-256 of the code bytes, V, source, paired shader, answer-table flag, partner varyings |
+| translator | `nxb.xlate.v2` | translator identity: the chain version V, which covers the sources of `nxb-xlate`, and `NXB_TEST_XLATE_SALT` | job JSON, SHA-256 of the code bytes, V, source, paired shader, answer-table flag, dual-source and fetch-outputs-only flags, partner varyings |
 | Metal compile and link | `nxb.metallib.v2` | target record (flags), compiler identity (`metal` and `metallib` versions, SDK), own front-end tag | the last MSL text |
 | pipeline archive batch | `nxb-archive batch 1` | architecture, platform, minimum OS, `metal-tt` version | library bytes and the entries of the bases of the batch |
 

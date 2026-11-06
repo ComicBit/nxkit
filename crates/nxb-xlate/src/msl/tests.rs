@@ -377,6 +377,19 @@ fn unported_stages_are_reported() {
     assert_eq!(e.reason, "not ported");
 }
 
+#[test]
+fn the_context_sets_the_pixel_options() {
+    let ctx = Context {
+        dual_source: true,
+        fetch_outputs_only: true,
+        ..Context::default()
+    };
+    let o = crate::msl::options("ps", &[], &ctx);
+    assert!(o.dual_source && o.fetch_outputs_only && !o.visibility_counter);
+    let o = crate::msl::options("ps", &[], &Context::default());
+    assert!(!o.dual_source && !o.fetch_outputs_only);
+}
+
 fn fp(i: Inst) -> Inst {
     Inst(i.0 | Inst::FP32)
 }

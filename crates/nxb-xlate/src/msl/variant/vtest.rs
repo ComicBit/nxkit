@@ -230,6 +230,7 @@ impl V {
             pc_paired: "",
             partners,
             no_facts: false,
+            ..Context::default()
         };
         build(&self.s, &ctx, &Options::default()).expect("build")
     }

@@ -65,6 +65,10 @@ pub struct Context<'a> {
     pub partners: &'a [StageInputs],
     /// The key is not in the answer table, so the queries use defaults.
     pub no_facts: bool,
+    /// Pixel shaders: the profile's `dual_want.tsv` lists the key, so the library gets `main0_d`.
+    pub dual_source: bool,
+    /// Pixel shaders: the profile's `bf_want.tsv` lists the key, so a shader without a rewritable sample gets `_bf`.
+    pub fetch_outputs_only: bool,
 }
 
 /// One user varying a pixel shader reads.
@@ -152,6 +156,15 @@ fn failure(e: String) -> Failure {
     }
 }
 
+/// The options of one translation: what the shader is and what the stage step knows about it.
+fn options(stage: &str, code: &[u8], ctx: &Context<'_>) -> Options {
+    Options {
+        visibility_counter: stage == "vs" && nxb_model::sha256(code).to_hex() == VISIBILITY_COUNTER,
+        dual_source: ctx.dual_source,
+        fetch_outputs_only: ctx.fetch_outputs_only,
+    }
+}
+
 /// Translate one shader from its job and machine code to its libraries.
 pub fn translate(job: &Job, code: &[u8], ctx: &Context<'_>) -> Result<Translated, Failure> {
     let stage = job.stage.as_str();
@@ -183,10 +196,7 @@ pub fn translate(job: &Job, code: &[u8], ctx: &Context<'_>) -> Result<Translated
     if stage == "cs" {
         mesh::check(job, code).map_err(failure)?;
     }
-    let opt = Options {
-        visibility_counter: stage == "vs" && nxb_model::sha256(code).to_hex() == VISIBILITY_COUNTER,
-        ..Options::default()
-    };
+    let opt = options(stage, code, ctx);
     if stage == "gs" {
         return geom::translate(job, code, ctx, &opt).map_err(failure);
     }
