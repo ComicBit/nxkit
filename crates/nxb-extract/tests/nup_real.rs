@@ -35,6 +35,7 @@ fn real_nup_matches_the_engine() {
         discard_images: true,
         digests: None,
         skip_images: false,
+        progress: None,
     };
     let images = nxb_extract::nup::extract_nup(&r).unwrap();
     let out = work.join("extract").join(reference.file_name().unwrap());

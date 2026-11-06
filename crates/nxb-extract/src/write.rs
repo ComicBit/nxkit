@@ -148,6 +148,28 @@ fn open_part(dst: &Path, size: u64, discard: bool) -> Result<(PathBuf, File)> {
 /// from the bytes in memory (design-pipeline-rest 9.3).
 pub type FileHook<'a> = dyn Fn(usize, &[u8], &[u8], &Digest) + Sync + 'a;
 
+/// [`write_images`] that counts the images' file bytes into `progress`: `total` before the first write, `done` as each
+/// file is written (the caller's progress display).
+pub fn write_images_counted(
+    images: Vec<ImageJob>,
+    threads: usize,
+    mem_limit: u64,
+    progress: Option<&crate::run::Counter>,
+) -> Result<(Vec<ImageResult>, Closing)> {
+    let Some(c) = progress else {
+        return write_images(images, threads, mem_limit, None);
+    };
+    let total = images
+        .iter()
+        .flat_map(|j| j.plan.entries.iter().filter(|e| !e.dir).map(|e| e.b))
+        .sum();
+    c.total.store(total, Ordering::Relaxed);
+    let hook = |_: usize, _: &[u8], data: &[u8], _: &Digest| {
+        c.done.fetch_add(data.len() as u64, Ordering::Relaxed);
+    };
+    write_images(images, threads, mem_limit, Some(&hook))
+}
+
 /// The TSV of the images' digests (`# image`, path, offset, size, sha256): the whole image, then each file.
 pub fn digests_text(results: &[ImageResult]) -> String {
     let mut t = String::from("# image\tpath\toffset\tsize\tsha256\n");

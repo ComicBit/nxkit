@@ -250,6 +250,7 @@ fn nup_main(a: &[String]) -> Option<i32> {
         discard_images: false,
         digests: None,
         skip_images: false,
+        progress: None,
     };
     let mut i = 0;
     while i < a.len() {
@@ -314,6 +315,7 @@ fn dump_main(a: &[String]) -> Option<i32> {
         mem_limit: 1 << 30,
         discard_images: false,
         digests: None,
+        progress: None,
     };
     let mut i = 0;
     while i < a.len() {
