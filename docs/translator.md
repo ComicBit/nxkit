@@ -39,6 +39,30 @@ The call is `nxb_xlate::msl::translate(&job, &code, &ctx)`. It returns `Translat
 The output keeps the contract of the engine host: the argument buffer at `[[buffer(0)]]` with `[[id(n)]]` members, the entry `main0` and its extra entries,
 the library suffixes and the fields of `_b.json`. The facts in `_b.json` come from the emitter. Nothing parses MSL text.
 
+## Pixel variants and side units
+
+A pixel shader gets extra entries around one static body function `dm_body_main0`. Each entry is a thin function that calls the body and then changes the result.
+
+| entry | purpose | `_b.json` field |
+|---|---|---|
+| `main0_a` | alpha test, state at `[[buffer(30)]]` | `alpha` `{entries}` |
+| `main0_l` | logic op, state at `[[buffer(29)]]`, function constants 200 and up | `logic` `{entries}` |
+| `main0_u` | integer colour outputs | `entry_u` |
+| `main0_m` | mixed outputs, with a mask for the integer targets | `entry_m`, `uint_mask_m` |
+| `main0_d` | dual source blending | `entry_d` |
+
+`Translated.side` names the alpha and logic entries. The step cuts them from `_b` into `_bx` with `nxb_shader::side::cut`.
+
+The library `_bf` is a second build of the pixel shader for framebuffer fetch. A sample of a 2D colour texture is replaced by the attachment `fbK` when its function constant `FX_i` selects it.
+The coordinate must be a varying (optionally divided by `w`) or a pixel position times uniforms.
+`_b.json` gets the field `fetch` with `calls` (`fc`, `tex_reg`, `varying_locn`, `proj` or `frag_pos`), `mixed_regs` and `outputs`.
+Only samples in the main function are replaced. A shader without such a sample gets `_bf` only when the step sets `Options.fetch_outputs_only`.
+The step sets `Options.dual_source` for the shaders that need `main0_d`.
+
+A discard in a helper function sets the flag `dm_kill`. Every caller returns at once after the call, as the main function does after its own discard.
+A fragment shader interlock (`FSIBegin`, `FSIEnd`) has no statements. The images and storage buffers that the shader writes carry `raster_order_group(0)` in the argument buffer.
+`raster.sample_mask` is false because the IR has no sample mask output. `first_store` belongs to compute kernels and has no pixel form.
+
 ## Identity and the cache
 
 The step stores each translation in the store. The key has the translator identity, the job, the code, the chain version V, the source, the paired shader,
