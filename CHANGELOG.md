@@ -2,38 +2,51 @@
 
 All notable changes are in this file. The format follows Keep a Changelog. Versions follow Semantic Versioning.
 
-## Unreleased
+## 0.6.5
+
+### Changed
+
+- The shader step needs less CPU time and memory.
+  On the reference title the standalone `nxb shaders build` took 327 s and 2,222 s of CPU time with 0.6.4.
+  The `air-bc` changes below bring it to 170 s and 1,115 s. All changes of 0.6.5 bring the CPU time to 879 s.
+  Peak memory went from 1.5 GB to 1.2 GB.
+- `air-bc` runs `mem2reg` in one pass over the definition blocks, with an undo log instead of a map for each block.
+  It also uses an Fx hasher, a structural key for CSE and a cache for TBAA nodes.
+  The writer finds constants and metadata through a hash index. Dead code removal uses a work list.
+  The output stays byte-identical.
+- Fewer shaders go to Apple's `metal`. On the reference title Apple makes 35 libraries. With 0.6.4 it made 1,079 of 23,601.
+  On a second title 14,780 of 14,796 shader sources build in process and pass `air-validate`. Before, 10,276 did.
+- The extract stage shows byte progress for a NUP and a dump, as it does for a package.
+- On a virtual machine without the `vm.page` sysctls, the machine load reads memory from `host_statistics64`.
 
 ### Added
 
-- `airc rawcheck` writes the reason of a reject or a failed build (`error`) and the SHA-256 of each library (`lib_sha256`).
 - The own front end compiles texture pools. A pool is an argument buffer with an `array<texture2d<float>, N>` or `array<sampler, N>` member.
 - The own front end compiles the translator's helper `dm_pool_mark`, with one instantiation for each pool type.
   Its relaxed device atomics become `air.atomic.global.load.i32` and `air.atomic.global.or.u.i32`.
+  Apple's IR wraps arrays and atomics in struct types. Thus pool libraries pass `air-validate`, but they are not byte-identical to Apple's libraries.
 - The own front end compiles `reinterpret_cast` from pointer to pointer and from integer to pointer.
-- On one title, 1,081 of 2,282 shaders with `dm_pool_mark` now take the raw path and pass `air-validate`.
-  The other shaders stop at builtins that the own front end does not support, mostly `simd_shuffle` and `front_facing`.
-  The libraries that built before stay byte-identical.
 - The own front end accepts `mulhi`, `simd_shuffle`, `simd_any` and `simd_all`.
   It also accepts the `front_facing` stage-in field and the `thread_index_in_simdgroup` parameter.
   `calculate_clamped_lod` and `calculate_unclamped_lod` work on `texture2d_array` too.
-- The IR has the same intrinsics, attributes and metadata as the IR of Apple's front end.
+  For these builtins the IR has the same intrinsics, attributes and metadata as the IR of Apple's front end.
   Apple's front end writes a `freeze` of the data operand of `simd_shuffle`. The own front end does the same, and `air-bc` writes `freeze`.
-  `air_front::FORMAT` is 8.
-- On one title 1,207 shaders went to Apple's `metal` for these reasons. The own front end compiles them in process, and they pass `air-validate`.
-  On the raw path, 158 of them have code after the last `return`. They build only with the `mem2reg` fix for such code.
-  On a second title the own front end makes 39 more libraries. The other libraries stay byte-identical, except for the fix below.
+- `air_front::FORMAT` is 8.
+- `airc rawcheck` writes the reason of a reject or a failed build (`error`) and the SHA-256 of each library (`lib_sha256`).
 
 ### Fixed
 
+- A full shader build for iOS wrote no stamp to the iOS library. The framework step then rejected the output with "their stamp: none".
+  The build now writes the game ID and profile digest to the Mac and the iOS library.
+  A rebuild removes old iOS outputs. An interrupted or key-limited rebuild leaves no iOS stamp.
+  The iOS packager takes the guard tables from the work folder of the build, not from the game profile. (#10)
 - The raw path failed with "unknown %v1" for a function with code after its last `return`.
   `mem2reg` removed the variable but kept its loads and stores in the block that no path reaches.
   These blocks now lose their accesses to promoted variables, and their loads read `undef`.
-  On one title 180 shaders went to Apple's `metal` for this reason, on another 1,017. All of them now take the raw path and pass `air-validate`.
   The other raw libraries stay byte-identical.
 - A call of a user function got the attributes of `dfdx` and `dfdy` (`convergent nounwind willreturn`) when the shader also used one of them.
   The two attribute groups had the same number. The call has `convergent nobuiltin "no-builtins"`, as in Apple's IR.
-  On one title 2 libraries changed for this reason.
+  On the reference title 2 libraries changed for this reason.
 
 ## 0.6.4
 
