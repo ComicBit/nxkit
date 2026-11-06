@@ -5,6 +5,12 @@
 //! entries, the library files `<key>_b`, `_bf`, `_bp`, `_bv`, `_bx`, `_bg*`, `_bl*`, `_bgv`, and `_b.json` as
 //! [`refl::Reflection`] writes it. Refer to `docs/translator.md`.
 
+/// The version of the MSL back end. The stage step keys its translation store on it besides the chain version.
+///
+/// Bump the number whenever a change alters the MSL text or the reflection for an unchanged input: a new emitter
+/// choice, a new helper, a new reflection field or a changed ABI constant. A change that keeps the output equal needs no bump.
+pub const TRANSLATOR_ID: &str = "msl-2.0";
+
 pub mod abi;
 pub mod args;
 pub mod buffers;
