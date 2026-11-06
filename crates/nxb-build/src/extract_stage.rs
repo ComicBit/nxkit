@@ -158,6 +158,42 @@ fn dlc(a: &Args, b: &Build, p: &Progress) -> Result<Option<String>, String> {
     Ok(Some(format!("{n} DLC")))
 }
 
+/// Runs `f` while a thread reports `counter`'s bytes as the stage's progress, as the script's poll of the extract
+/// folder reports them: a determinate bar with an ETA.
+fn with_bytes<T>(
+    p: &Progress,
+    step: &str,
+    counter: &nxb_extract::Counter,
+    f: impl FnOnce() -> T,
+) -> T {
+    let stop = AtomicBool::new(false);
+    std::thread::scope(|sc| {
+        sc.spawn(|| {
+            let mut last = None;
+            while !stop.load(Ordering::Relaxed) {
+                let (done, total) = (
+                    counter.done.load(Ordering::Relaxed),
+                    counter.total.load(Ordering::Relaxed),
+                );
+                if total > 0 && last != Some(done) {
+                    last = Some(done);
+                    p.set(Update {
+                        step: Some(step),
+                        done: Some(done),
+                        total: Some(total),
+                        unit: Some("B"),
+                        ..Default::default()
+                    });
+                }
+                std::thread::sleep(Duration::from_millis(250));
+            }
+        });
+        let r = f();
+        stop.store(true, Ordering::Relaxed);
+        r
+    })
+}
+
 /// Extracts the packages of the input (and the split in the same pass).
 fn packages(a: &Args, b: &Build, p: &Progress) -> Result<usize, String> {
     let out = |v: &str| b.work.join("extract").join(v);
@@ -186,34 +222,8 @@ fn packages(a: &Args, b: &Build, p: &Progress) -> Result<usize, String> {
         progress: Some(counter.clone()),
     };
     p.say("extract and shader split in one pass (nxb-extract)");
-    // the bytes written, as the script's poll of the extract folder reports them: a determinate bar with an ETA
-    let stop = AtomicBool::new(false);
-    let s = std::thread::scope(|sc| {
-        sc.spawn(|| {
-            let mut last = None;
-            while !stop.load(Ordering::Relaxed) {
-                let (done, total) = (
-                    counter.done.load(Ordering::Relaxed),
-                    counter.total.load(Ordering::Relaxed),
-                );
-                if total > 0 && last != Some(done) {
-                    last = Some(done);
-                    p.set(Update {
-                        step: Some("extracting"),
-                        done: Some(done),
-                        total: Some(total),
-                        unit: Some("B"),
-                        ..Default::default()
-                    });
-                }
-                std::thread::sleep(Duration::from_millis(250));
-            }
-        });
-        let r = nxb_extract::extract(&req);
-        stop.store(true, Ordering::Relaxed);
-        r
-    })
-    .map_err(|e| damaged(p, &e))?;
+    let s = with_bytes(p, "extracting", &counter, || nxb_extract::extract(&req))
+        .map_err(|e| damaged(p, &e))?;
     Ok(s.images.len())
 }
 
@@ -238,7 +248,13 @@ pub(crate) fn container(a: &Args, b: &Build, p: &Progress) -> Result<usize, Stri
             unit: Some("versions"),
             ..Default::default()
         });
-        let r = match b.src.source {
+        let counter = Arc::new(nxb_extract::Counter::default());
+        let step = if n > 1 {
+            format!("unpacking v{v} ({}/{n})", i + 1)
+        } else {
+            format!("unpacking v{v}")
+        };
+        let r = with_bytes(p, &step, &counter, || match b.src.source {
             Source::Nup => nxb_extract::nup::extract_nup(&nxb_extract::nup::NupRequest {
                 nup: b.base.clone(),
                 version: Some(*v),
@@ -248,6 +264,7 @@ pub(crate) fn container(a: &Args, b: &Build, p: &Progress) -> Result<usize, Stri
                 discard_images: false,
                 digests: None,
                 skip_images: false,
+                progress: Some(counter.clone()),
             })
             .map(|_| ()),
             _ => nxb_extract::dump::extract_dump(&nxb_extract::dump::DumpRequest {
@@ -258,9 +275,10 @@ pub(crate) fn container(a: &Args, b: &Build, p: &Progress) -> Result<usize, Stri
                 mem_limit: 1 << 30,
                 discard_images: false,
                 digests: None,
+                progress: Some(counter.clone()),
             })
             .map(|_| ()),
-        };
+        });
         r.map_err(|e| damaged(p, &e))?;
     }
     Ok(versions.len())

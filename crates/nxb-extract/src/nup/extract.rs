@@ -10,7 +10,7 @@ use crate::error::{ExtractError, Result};
 use crate::image::ImagePlan;
 use crate::romfs::RomEntry;
 use crate::storage::Storage;
-use crate::write::{ImageJob, ImageResult, write_images};
+use crate::write::{ImageJob, ImageResult, write_images_counted};
 
 /// Files of a container's RomFS folder behind virtual offsets: the image writer reads whole files at those offsets.
 struct TreeStorage {
@@ -108,6 +108,8 @@ pub struct NupRequest {
     pub digests: Option<PathBuf>,
     /// Only the code modules and the control data: no image is read or written.
     pub skip_images: bool,
+    /// Where to count the image bytes written, for a progress display.
+    pub progress: Option<Arc<crate::run::Counter>>,
 }
 
 fn write_file(path: &Path, data: &[u8]) -> Result<()> {
@@ -340,7 +342,8 @@ pub fn extract_nup(r: &NupRequest) -> Result<Vec<ImageResult>> {
             aoc.join(format!("{}.img", tid - s.app - 0x1000)),
         )?;
     }
-    let (results, closing) = write_images(jobs, r.threads, r.mem_limit, None)?;
+    let (results, closing) =
+        write_images_counted(jobs, r.threads, r.mem_limit, r.progress.as_deref())?;
     closing.wait();
     if let Some(pth) = &r.digests {
         let mut t = String::from("# image\tpath\toffset\tsize\tsha256\n");

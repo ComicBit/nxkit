@@ -253,6 +253,7 @@ fn req(nup: &Path, work: &Path) -> NupRequest {
         discard_images: false,
         digests: None,
         skip_images: false,
+        progress: None,
     }
 }
 

@@ -19,7 +19,7 @@ use crate::image::ImagePlan;
 use crate::nup::program_id;
 use crate::romfs::RomEntry;
 use crate::storage::Storage;
-use crate::write::{ImageJob, ImageResult, digests_text, write_images};
+use crate::write::{ImageJob, ImageResult, digests_text, write_images_counted};
 
 /// What to pack.
 #[derive(Clone, Debug)]
@@ -38,6 +38,8 @@ pub struct DumpRequest {
     pub discard_images: bool,
     /// Optional TSV of the images' digests.
     pub digests: Option<PathBuf>,
+    /// Where to count the image bytes written, for a progress display.
+    pub progress: Option<Arc<crate::run::Counter>>,
 }
 
 fn bad(m: impl Into<String>) -> ExtractError {
@@ -365,7 +367,8 @@ pub fn extract_dump(r: &DumpRequest) -> Result<Vec<ImageResult>> {
     }
     let (srcs, jobs): (Vec<PathBuf>, Vec<ImageJob>) = jobs.into_iter().unzip();
     let _ = srcs;
-    let (results, closing) = write_images(jobs, r.threads, r.mem_limit, None)?;
+    let (results, closing) =
+        write_images_counted(jobs, r.threads, r.mem_limit, r.progress.as_deref())?;
     closing.wait();
     for res in &results {
         let _ = writeln!(

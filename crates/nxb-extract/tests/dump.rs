@@ -59,6 +59,7 @@ fn req(dump: &Path, work: &Path) -> DumpRequest {
         mem_limit: 1 << 26,
         discard_images: false,
         digests: None,
+        progress: None,
     }
 }
 
@@ -89,8 +90,16 @@ fn a_dump_packs_the_newest_version_and_the_dlc() {
     make(&dump);
     assert!(is_dump(&dump));
     let work = dir.join("w");
-    let res = extract_dump(&req(&dump, &work)).unwrap();
+    let counter = std::sync::Arc::new(nxb_extract::Counter::default());
+    let mut r = req(&dump, &work);
+    r.progress = Some(counter.clone());
+    let res = extract_dump(&r).unwrap();
     assert_eq!(res.len(), 3);
+    let (done, total) = (
+        counter.done.load(std::sync::atomic::Ordering::Relaxed),
+        counter.total.load(std::sync::atomic::Ordering::Relaxed),
+    );
+    assert!(total > 70_000 && done == total, "{done} of {total}");
     let out = work.join("extract/v131072");
     let exefs: Vec<String> = tree_bytes(&out.join("ExeFS"))
         .into_iter()
