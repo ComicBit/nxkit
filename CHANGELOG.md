@@ -6,7 +6,7 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ### Changed
 
-- The pipeline archive starts compiler runs by the load of the Mac. 3 runs always go. More start while CPU and memory use stay below 90 %, up to one run for each core and what the memory budget holds.
+- The pipeline archive starts compiler runs by the load of the Mac. 3 runs always go when the memory budget holds them. More start while CPU and memory use stay below 90 %, up to one run for each core and what the memory budget holds.
   Before, 3 runs went while the shader step ran, and more only after it.
 - The compiler runs of the archive have nice 10. The shader step keeps the cores that it needs.
 - The default of `--threads` comes from the cores of the Mac, `round(P + 0.4 × E)`. Before, it was 10 on every Mac.
