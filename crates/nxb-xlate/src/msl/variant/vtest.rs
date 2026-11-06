@@ -249,3 +249,8 @@ pub(super) fn simple() -> V {
     b.ret();
     b
 }
+
+/// The float add.
+pub(super) fn fadd() -> Inst {
+    Inst(Inst::Add.0 | Inst::FP32)
+}

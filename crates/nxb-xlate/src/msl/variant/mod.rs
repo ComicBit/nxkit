@@ -8,6 +8,7 @@
 //!
 //! The vertex variants are in `vertex*`, `pull*` and `vin*`.
 
+pub mod int_inputs;
 pub mod vertex;
 pub mod vertex_pad;
 #[cfg(test)]

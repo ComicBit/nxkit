@@ -189,7 +189,14 @@ pub(super) fn entry_text(
 
 /// Build the base library `_b` and its reflection.
 pub fn build(s: &Structured, ctx: &Context<'_>, opt: &Options) -> R<Translated> {
+    build_with(s, ctx, opt, &[])
+}
+
+/// Build with the vertex inputs at `ints` declared `uint`.
+fn build_with(s: &Structured, ctx: &Context<'_>, opt: &Options, ints: &[u32]) -> R<Translated> {
     let job = &s.job;
+    let patched = (!ints.is_empty()).then(|| variant::int_inputs::declare(&s.props, ints));
+    let props = patched.as_ref().unwrap_or(&s.props);
     let shader = match job.stage.as_str() {
         "vs" => Shader::Vertex,
         "ps" => Shader::Fragment,
@@ -203,9 +210,7 @@ pub fn build(s: &Structured, ctx: &Context<'_>, opt: &Options) -> R<Translated> 
         return Err("unported: threadgroup memory past 32 KB (tg_spill)".into());
     }
     let usage: Usage = usage::collect(&s.info);
-    let res = args::build(
-        &s.props, &s.program, &usage, &job.stage, &s.notes, &s.fetch1d,
-    )?;
+    let res = args::build(props, &s.program, &usage, &job.stage, &s.notes, &s.fetch1d)?;
     let base_instance = shader == Shader::Vertex
         && res
             .cbs
@@ -214,7 +219,7 @@ pub fn build(s: &Structured, ctx: &Context<'_>, opt: &Options) -> R<Translated> 
     let lane_zero = shader == Shader::Vertex && opt.visibility_counter;
     let mut plan = io::build(
         &s.info,
-        &s.props,
+        props,
         shader,
         usage.lane_id,
         base_instance,
@@ -226,10 +231,24 @@ pub fn build(s: &Structured, ctx: &Context<'_>, opt: &Options) -> R<Translated> 
         Vec::new()
     };
     let shared = shared_params(s, &res, &plan, shader)?;
-    let mut em = Em::new(&s.info, &s.props, &res, opt, &shared, &plan, shader);
+    let mut em = Em::new(&s.info, props, &res, opt, &shared, &plan, shader);
+    em.probe = (shader == Shader::Vertex && ints.is_empty()).then(Vec::new);
     let mut bodies = Vec::new();
     for i in 0..s.info.functions.len() {
         bodies.push(em.body(i)?);
+    }
+    if let Some(uses) = em.probe.take() {
+        let declared = s
+            .job
+            .attr
+            .iter()
+            .filter_map(|(k, _)| u32::try_from(*k).ok())
+            .collect();
+        let float = |l: u32| props.definitions.attribute_types.get(l as usize) == Some(&0);
+        let found = variant::int_inputs::find(&s.info, &uses, &declared, &float);
+        if !found.is_empty() {
+            return build_with(s, ctx, opt, &found);
+        }
     }
     if opt.visibility_counter && shader == Shader::Vertex {
         em.notes.push(
