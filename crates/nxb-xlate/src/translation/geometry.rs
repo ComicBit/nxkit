@@ -44,7 +44,6 @@ pub fn structure_geometry_compute(
         uses_frag_coord: features & feature::FRAG_COORD_XY != 0,
         frag_out_map: tc.definitions.omap_targets as i64,
         geometry_stride: stride as i64,
-        spirv: Vec::new(),
     };
     let props = Props {
         definitions: defs,

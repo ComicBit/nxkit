@@ -1,12 +1,9 @@
-//! `Main` of `dmsh_xlate`: translate each job of a job file, with the retries, and write the outputs.
+//! The retry loop of a job and the resource lists a translation returns.
 
 use crate::accessor::{Accessor, Binding, image_types_of};
-use crate::job::{Job, parse_jobs};
-use crate::lowering;
-use crate::res::{CBuf, Res, SBuf, Tex};
+use crate::job::Job;
 use crate::types::SamplerType;
 use std::collections::BTreeMap;
-use std::path::Path;
 
 /// A buffer binding of the program info.
 #[derive(Clone, Debug, Default)]
@@ -31,10 +28,9 @@ pub struct TexInfo {
     pub flags: i64,
 }
 
-/// What a translation returns (`ShaderProgram`).
+/// What the front end returns: the resource lists of a program.
 #[derive(Clone, Debug, Default)]
 pub struct Program {
-    pub spirv: Vec<u8>,
     pub cbufs: Vec<BufferInfo>,
     pub sbufs: Vec<BufferInfo>,
     pub textures: Vec<TexInfo>,
@@ -43,15 +39,6 @@ pub struct Program {
     pub frag_out_map: i64,
     /// `GetResourceReservations().OutputSizePerInvocation` (geometry)
     pub geometry_stride: i64,
-}
-
-/// The translation core: decoders, IR, emitters, SPIR-V. One call is one `Translator.CreateContext(...).Translate`.
-pub trait Core {
-    /// Translate `code` for the job with the accessor's answers.
-    fn translate(&self, code: &[u8], acc: &mut Accessor, geometry: bool)
-    -> Result<Program, String>;
-    /// `GenerateVertexPassthroughForCompute` of a fresh context: the geometry reader SPIR-V.
-    fn passthrough_reader(&self, code: &[u8], acc: &mut Accessor) -> Result<Vec<u8>, String>;
 }
 
 fn bindings(l: &[TexInfo]) -> Vec<Binding> {
@@ -63,28 +50,6 @@ fn bindings(l: &[TexInfo]) -> Vec<Binding> {
             array_length: t.array_length as i32,
         })
         .collect()
-}
-
-fn tex(l: &[TexInfo]) -> Vec<Tex> {
-    l.iter()
-        .map(|t| Tex {
-            binding: t.binding,
-            ty: t.ty as i64,
-            format: crate::types::TEXTURE_FORMATS[t.format].to_string(),
-            cbuf_slot: t.cbuf_slot,
-            handle: t.handle,
-            array: t.array_length,
-            separate: t.separate,
-            flags: t.flags,
-        })
-        .collect()
-}
-
-/// The outputs of one job.
-pub struct Outputs {
-    pub spv: Vec<u8>,
-    pub reader: Option<Vec<u8>>,
-    pub res: Res,
 }
 
 /// The result of the retry loop of one job.
@@ -157,131 +122,4 @@ pub fn retry<T>(job: &Job, step: &Step<'_, T>) -> Result<Retried<T>, String> {
         image_types,
         texture_types,
     })
-}
-
-/// Translate one job (the body of the `try` in `Main`).
-pub fn run_job(core: &dyn Core, job: &Job, code: &[u8]) -> Result<Outputs, String> {
-    let geometry = job.geometry_topology.is_some();
-    let r = retry(job, &|_: &Job, acc: &mut Accessor| {
-        let p = core.translate(code, acc, geometry)?;
-        let fp64 = lowering::uses_float64(&p.spirv);
-        Ok(((), p, fp64))
-    })?;
-    let mut acc = Accessor::new(&r.job);
-    acc.notes = r.notes;
-    acc.fetch1d = r.fetch1d;
-    finish(
-        core,
-        &r.job,
-        code,
-        acc,
-        r.program,
-        geometry,
-        r.image_types,
-        r.texture_types,
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-fn finish(
-    core: &dyn Core,
-    job: &Job,
-    code: &[u8],
-    mut acc: Accessor,
-    p: Program,
-    geometry: bool,
-    image_types: Option<std::collections::BTreeMap<i32, crate::types::SamplerType>>,
-    texture_types: Option<std::collections::BTreeMap<i32, crate::types::SamplerType>>,
-) -> Result<Outputs, String> {
-    let reader = if geometry {
-        let mut fresh = Accessor::with_types(job, image_types, texture_types);
-        Some(core.passthrough_reader(code, &mut fresh)?)
-    } else {
-        None
-    };
-    let spv = lowering::apply(code, &job.stage, &p.spirv, &mut acc.notes)?;
-    let res = Res {
-        key: job.key.clone(),
-        stage: job.stage.clone(),
-        notes: acc.notes.clone(),
-        cbufs: p
-            .cbufs
-            .iter()
-            .map(|b| CBuf {
-                binding: b.binding,
-                slot: b.slot,
-            })
-            .collect(),
-        sbufs: p
-            .sbufs
-            .iter()
-            .map(|b| SBuf {
-                binding: b.binding,
-                slot: b.slot,
-                cb_slot: b.cb_slot,
-                cb_offset: b.cb_offset,
-                flags: b.flags,
-            })
-            .collect(),
-        textures: tex(&p.textures),
-        images: tex(&p.images),
-        geometry_stride: if geometry { p.geometry_stride } else { 0 },
-        uses_frag_coord: p.uses_frag_coord,
-        frag_out_map: p.frag_out_map,
-        fetch1d: acc.fetch1d.iter().map(|&h| h as i64).collect(),
-    };
-    Ok(Outputs { spv, reader, res })
-}
-
-/// `dmsh_xlate <jobs.json> <outdir>`: the exit code (0, or 1 when a job failed). Red lines go to stderr.
-pub fn main_jobs(core: &dyn Core, jobs_path: &Path, out_dir: &Path) -> Result<i32, String> {
-    let text =
-        std::fs::read_to_string(jobs_path).map_err(|e| format!("{}: {e}", jobs_path.display()))?;
-    let jobs = parse_jobs(&text)?;
-    std::fs::create_dir_all(out_dir).map_err(|e| e.to_string())?;
-    let (mut ok, mut bad) = (0, 0);
-    for job in &jobs {
-        let r = std::fs::read(&job.code_path)
-            .map_err(|e| e.to_string())
-            .and_then(|code| run_job(core, job, &code));
-        match r {
-            Ok(o) => {
-                if let Some(rd) = &o.reader {
-                    std::fs::write(out_dir.join(format!("{}.reader.spv", job.key)), rd)
-                        .map_err(|e| e.to_string())?;
-                }
-                std::fs::write(out_dir.join(format!("{}.spv", job.key)), &o.spv)
-                    .map_err(|e| e.to_string())?;
-                std::fs::write(
-                    out_dir.join(format!("{}.res.json", job.key)),
-                    o.res.to_text(),
-                )
-                .map_err(|e| e.to_string())?;
-                std::fs::write(
-                    out_dir.join(format!("{}.iface.json", job.key)),
-                    crate::iface::ShaderInterface::build(job, &o.res).to_text(),
-                )
-                .map_err(|e| e.to_string())?;
-                ok += 1;
-            }
-            Err(e) => {
-                bad += 1;
-                eprintln!("[RED] {}: {}", job.key, e.lines().next().unwrap_or(""));
-            }
-        }
-    }
-    println!("translated: {ok} ok, {bad} failed");
-    Ok(if bad == 0 { 0 } else { 1 })
-}
-
-/// A core that translates nothing yet: every job is red with a stable message.
-pub struct Unported;
-
-impl Core for Unported {
-    fn translate(&self, _: &[u8], _: &mut Accessor, _: bool) -> Result<Program, String> {
-        Err("NotImplemented: translation core is not ported".into())
-    }
-    fn passthrough_reader(&self, _: &[u8], _: &mut Accessor) -> Result<Vec<u8>, String> {
-        Err("NotImplemented: translation core is not ported".into())
-    }
 }

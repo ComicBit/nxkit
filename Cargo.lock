@@ -354,7 +354,6 @@ dependencies = [
  "nxb-maxwell",
  "nxb-model",
  "nxb-pyjson",
- "nxb-spvgen",
 ]
 
 [[package]]

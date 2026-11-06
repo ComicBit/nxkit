@@ -1,17 +1,14 @@
-//! The translation core: `Translator.CreateContext(...).Translate()` for the Maxwell path, from machine code to SPIR-V,
-//! and the typed program interface (descriptors) the driver turns into `res.json`.
+//! The front end of a translation: the context of a job to its structured program, and the typed program interface
+//! (descriptors) the back end reads.
 
 use super::context::TranslatorContext;
-use super::pipeline::{options_of, run_to_xform};
+use super::pipeline::run_to_xform;
 use super::props as tp;
 use super::resources::ResourceManager;
 use crate::accessor::Accessor;
-use crate::attr::{Stage, feature};
-use crate::codegen::generator::generate;
+use crate::attr::feature;
 use crate::codegen::props::{self as cp, Props};
-use crate::driver::{BufferInfo, Core, Program, TexInfo};
-use crate::ir::Ir;
-use crate::job::Job;
+use crate::driver::{BufferInfo, Program, TexInfo};
 use crate::structured::program::{FunctionIn, make_structured_program};
 use crate::structured::types::AggType;
 use crate::structured::{StructInfo, StructResources};
@@ -200,7 +197,7 @@ pub(super) fn tex_info(l: Vec<tp::TextureDescriptor>) -> Vec<TexInfo> {
         .collect()
 }
 
-/// The structured program of a context with its properties and resource lists (`spirv` is empty).
+/// The structured program of a context with its properties and resource lists.
 pub fn structure_context(
     tc: &TranslatorContext,
     acc: &mut Accessor,
@@ -249,7 +246,6 @@ pub fn structure_context(
         uses_frag_coord: features & feature::FRAG_COORD_XY != 0,
         frag_out_map: tc.definitions.omap_targets as i64,
         geometry_stride: 0,
-        spirv: Vec::new(),
     };
     let props = Props {
         definitions: defs,
@@ -262,137 +258,4 @@ pub fn structure_context(
         io_definitions: Vec::new(),
     };
     Ok((info, props, program))
-}
-
-/// `TranslatorContext.Translate()` of a context (no geometry-as-compute).
-pub fn translate_context(
-    tc: &TranslatorContext,
-    acc: &mut Accessor,
-    debug_mode: bool,
-) -> Result<Program, String> {
-    let (info, props, program) = structure_context(tc, acc, debug_mode)?;
-    let spirv = generate(info, props)?;
-    Ok(Program { spirv, ..program })
-}
-
-/// The translator core behind [`Core`].
-pub struct Translator;
-
-impl Core for Translator {
-    fn translate(
-        &self,
-        code: &[u8],
-        acc: &mut Accessor,
-        geometry: bool,
-    ) -> Result<Program, String> {
-        if geometry {
-            return Err("unported: geometry translation".into());
-        }
-        let job: &Job = acc.job();
-        let opts = options_of(job);
-        let tc = TranslatorContext::create(code, acc, opts)?;
-        let debug = tc.options.debug_mode;
-        translate_context(&tc, acc, debug)
-    }
-
-    fn passthrough_reader(&self, _code: &[u8], _acc: &mut Accessor) -> Result<Vec<u8>, String> {
-        Err("unported: geometry passthrough reader".into())
-    }
-}
-
-#[allow(dead_code)]
-fn _unused(_: Ir, _: Stage) {}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::path::PathBuf;
-
-    /// The whole driver with the Rust core on every job file of the corpus, compared byte for byte with the C# outputs.
-    #[test]
-    fn corpus_end_to_end() {
-        let (Some(corpus), Some(reff)) = (
-            std::env::var_os("NXB_XLATE_CORPUS"),
-            std::env::var_os("NXB_XLATE_REF"),
-        ) else {
-            return;
-        };
-        let jobs = PathBuf::from(corpus).join("jobs");
-        let out = std::env::temp_dir().join(format!("nxb-e2e-{}", std::process::id()));
-        let mut files: Vec<PathBuf> = std::fs::read_dir(&jobs)
-            .map(|d| d.flatten().map(|e| e.path()).collect())
-            .unwrap_or_default();
-        files.sort();
-        let (mut spv_same, mut res_same, mut total) = (0, 0, 0);
-        let mut why = std::collections::BTreeMap::<String, usize>::new();
-        for f in files {
-            let stem = f
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("")
-                .to_string();
-            let od = out.join(&stem);
-            let _ = main_jobs_quiet(&f, &od, &mut why);
-            let rd = PathBuf::from(&reff).join(&stem);
-            let Ok(list) = std::fs::read_dir(&rd) else {
-                continue;
-            };
-            for e in list.flatten() {
-                let p = e.path();
-                let name = p
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("")
-                    .to_string();
-                let is_spv = name.ends_with(".spv");
-                let is_res = name.ends_with(".res.json");
-                if !is_spv && !is_res {
-                    continue;
-                }
-                if is_spv {
-                    total += 1;
-                }
-                let want = std::fs::read(&p).unwrap_or_default();
-                if std::fs::read(od.join(&name)).ok().as_deref() == Some(&want[..]) {
-                    if is_spv {
-                        spv_same += 1;
-                    } else {
-                        res_same += 1;
-                    }
-                }
-            }
-            let _ = std::fs::remove_dir_all(&od);
-        }
-        let _ = std::fs::remove_dir_all(&out);
-        println!(
-            "end to end: spv identical {spv_same} of {total}, res.json identical {res_same} of {total}"
-        );
-        let mut v: Vec<_> = why.into_iter().collect();
-        v.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
-        for (m, n) in v.iter().take(15) {
-            println!("  {n:5} {m}");
-        }
-    }
-
-    fn main_jobs_quiet(
-        f: &std::path::Path,
-        od: &std::path::Path,
-        why: &mut std::collections::BTreeMap<String, usize>,
-    ) -> Result<(), String> {
-        let text = std::fs::read_to_string(f).map_err(|e| e.to_string())?;
-        let jobs = crate::job::parse_jobs(&text)?;
-        std::fs::create_dir_all(od).map_err(|e| e.to_string())?;
-        for job in &jobs {
-            let code = std::fs::read(&job.code_path).map_err(|e| e.to_string())?;
-            match crate::driver::run_job(&Translator, job, &code) {
-                Ok(o) => {
-                    let _ = std::fs::write(od.join(format!("{}.spv", job.key)), &o.spv);
-                    let _ =
-                        std::fs::write(od.join(format!("{}.res.json", job.key)), o.res.to_text());
-                }
-                Err(e) => *why.entry(e.chars().take(100).collect()).or_default() += 1,
-            }
-        }
-        Ok(())
-    }
 }

@@ -1,9 +1,10 @@
 #![allow(missing_docs)]
-//! Rust port of `dmsh_xlate`: the driver around the vendored shader translator.
+//! The shader translator: Maxwell and Ampere machine code to Metal Shading Language.
 //!
-//! Phase 1 of the port (see `docs/translator-port.md`): the job file, the answers the translator queries (`accessor`), the
-//! retry logic and the `res.json` writer (`driver`, `res`), and the visibility counter lowering (`lowering`). The translation
-//! core (decoders, IR, emitters, SPIR-V) plugs in through the [`driver::Core`] trait.
+//! The front end decodes the machine code (`cfg`, `ir`, `opt`, `xform`, `structured`, `translation`) and answers the
+//! queries of the job through `accessor`. The retry loop of `driver` repeats a translation with the guessed image and
+//! texture types and with 64 bit floats lowered to 32 bit. The back end `msl` turns the structured program into MSL
+//! libraries and their reflection.
 
 pub mod accessor;
 pub mod cfg;
@@ -11,13 +12,10 @@ pub mod codegen;
 pub mod corpus;
 pub mod driver;
 pub mod emit;
-pub mod iface;
 pub mod ir;
 pub mod job;
-pub mod lowering;
 pub mod msl;
 pub mod opt;
-pub mod res;
 pub mod structured;
 pub mod translation;
 pub mod types;
@@ -26,7 +24,5 @@ pub mod xform;
 /// The Maxwell decoder crate (kept under its old module path).
 pub use nxb_maxwell as maxwell;
 pub use nxb_maxwell::attr;
-/// The SPIR-V module builder crate (kept under its old module path).
-pub use nxb_spvgen as spv;
 mod ampere_decode_test;
 mod decoder_test;
