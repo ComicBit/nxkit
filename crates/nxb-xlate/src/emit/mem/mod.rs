@@ -5,6 +5,7 @@ pub(crate) mod attr;
 mod diff_tests;
 mod hlp;
 pub(crate) mod memory;
+mod memory_bits;
 pub(crate) mod surface;
 pub(crate) mod surface_ldst;
 pub(crate) mod tex;

@@ -389,7 +389,7 @@ pub fn describe(b: &Build) -> String {
     s
 }
 
-/// Runs the build ([`crate::stages::run_nodes`]; the events stay those of a run one after another). A multi-program
+/// Runs the build (`crate::stages::run_nodes`. The events stay those of a run one after another). A multi-program
 /// application builds its other programs too (`crate::programs`), a Mac-only build ends with the run command.
 pub fn run(a: &Args, p: &std::sync::Arc<Progress>) -> Result<(), String> {
     let mut b = plan(a)?;
