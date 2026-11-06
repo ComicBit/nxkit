@@ -3,7 +3,8 @@
 //! constants the entry uses. Also derives the container tags of each entry (`TYPE`, `VERS`, `CNST`, `VATT`, `VATY`).
 
 use crate::ast::*;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use crate::fx::{HashMap, HashSet};
+use std::collections::BTreeSet;
 
 /// Stage of an entry point (`TYPE` tag value).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -151,8 +152,8 @@ pub fn split(m: &Module) -> Result<Vec<Entry>, String> {
             .unwrap_or_default()
     };
     // static init: global stored -> globals loaded in the same init function
-    let mut deps: HashMap<String, Vec<String>> = HashMap::new();
-    let mut init_of: HashMap<String, String> = HashMap::new();
+    let mut deps: HashMap<String, Vec<String>> = HashMap::default();
+    let mut init_of: HashMap<String, String> = HashMap::default();
     for f in &m.functions {
         if f.section.as_deref() != Some(STATIC_INIT) || f.name == "_GLOBAL__sub_I__" {
             continue;

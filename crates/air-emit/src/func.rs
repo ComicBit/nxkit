@@ -83,18 +83,18 @@ pub struct FnGen<'a> {
     /// branch-throughs that still have to pass it.
     cleanups: Vec<(LocalId, Vec<Fixup>)>,
     /// Code to put before a branch-through's `br` when cleanups are emitted at the branch.
-    inline_at: std::collections::HashMap<String, Vec<String>>,
+    inline_at: crate::fx::HashMap<String, Vec<String>>,
     /// `cleanup.dest.slot`
     dest_slot: Option<String>,
     /// placeholder label -> resolved label
-    fixes: std::collections::HashMap<String, String>,
+    fixes: crate::fx::HashMap<String, String>,
     /// destination index of each branch-through target label (return is 1)
-    dest_ids: std::collections::HashMap<String, i32>,
+    dest_ids: crate::fx::HashMap<String, i32>,
     deferred_fix: Vec<Fixup>,
     unreachable_blocks: Vec<String>,
     ret: Option<RetKind>,
     /// Struct-path of field addresses: pointer -> (outermost struct, byte offset).
-    paths: std::collections::HashMap<String, (usize, u32)>,
+    paths: crate::fx::HashMap<String, (usize, u32)>,
     /// `a*b + c` may become `llvm.fmuladd` here (no `#pragma clang fp contract(off)` in effect).
     contract: bool,
     /// Nonzero while loading or storing a whole vector for a component access (clang tags none).
@@ -102,7 +102,7 @@ pub struct FnGen<'a> {
     /// clang's `%retval` slot of a non-void function.
     ret_slot: Option<String>,
     /// Known alignment of derived addresses (clang: the base's alignment at the field's offset).
-    aligns: std::collections::HashMap<String, u32>,
+    aligns: crate::fx::HashMap<String, u32>,
     /// Loading a sampler for a sampling call: clang copies it (`!tbaa.struct`).
     pub(crate) sampler_copy: bool,
     /// Loading the texture a method is called on (clang: through `this`, tagged).
@@ -127,18 +127,18 @@ impl<'a> FnGen<'a> {
             locals: Vec::new(),
             loops: Vec::new(),
             cleanups: Vec::new(),
-            inline_at: std::collections::HashMap::new(),
+            inline_at: crate::fx::HashMap::default(),
             dest_slot: None,
-            fixes: std::collections::HashMap::new(),
+            fixes: crate::fx::HashMap::default(),
             deferred_fix: Vec::new(),
             unreachable_blocks: Vec::new(),
-            dest_ids: std::collections::HashMap::new(),
+            dest_ids: crate::fx::HashMap::default(),
             ret: None,
-            paths: std::collections::HashMap::new(),
+            paths: crate::fx::HashMap::default(),
             contract: f.contract,
             no_tbaa: 0,
             ret_slot: None,
-            aligns: std::collections::HashMap::new(),
+            aligns: crate::fx::HashMap::default(),
             sampler_copy: false,
             tex_method: false,
             seq_depth: 0,

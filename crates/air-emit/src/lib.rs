@@ -14,13 +14,15 @@
 
 mod entry;
 pub mod func;
+pub mod fx;
 pub mod intrin;
 pub mod ir;
 mod mangle;
 pub mod meta;
 mod tbaa;
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use crate::fx::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 
 use msl_sema::hir::Module;
@@ -330,7 +332,7 @@ pub fn emit(m: &Module, t: &Target, source_name: &str) -> Result<String, Error> 
         funcs_template: m.funcs.iter().map(|f| f.template).collect(),
         preds: Vec::new(),
         order: Vec::new(),
-        order_set: HashSet::new(),
+        order_set: HashSet::default(),
         referenced: Vec::new(),
         fill_slot: None,
         in_template: 0,
@@ -448,7 +450,7 @@ pub fn emit(m: &Module, t: &Target, source_name: &str) -> Result<String, Error> 
         stack.extend(calls_of(&m.funcs[k]));
     }
     // clang's order: entry points in source order, then helpers depth-first in order of first call
-    let mut texts: HashMap<String, String> = HashMap::new();
+    let mut texts: HashMap<String, String> = HashMap::default();
     let mut done = vec![false; m.funcs.len()];
     for fid in (0..m.funcs.len()).filter(|k| m.funcs[*k].entry.is_some()) {
         emit_one(&mut cx, m, fid, &used, &mut done, &mut texts, false)?;

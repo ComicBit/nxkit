@@ -1,9 +1,9 @@
 //! Numbered metadata nodes with structural deduplication.
 
-use std::collections::HashMap;
+use crate::fx::HashMap;
 use std::fmt::Write;
 
-use crate::ir::escape;
+use crate::ir::escape_into;
 
 /// One operand of a metadata tuple.
 #[derive(Clone, Debug)]
@@ -16,6 +16,27 @@ pub enum Md {
     Node(usize),
     /// Any other operand spelled verbatim (`i8 addrspace(2)* @g`, `void ()* @f`).
     Raw(String),
+}
+
+/// Decimal digits of `v` without the formatting machinery (metadata nodes are built for every access).
+fn push_int(out: &mut String, v: i64) {
+    let mut buf = [0u8; 20];
+    let mut k = buf.len();
+    let mut u = v.unsigned_abs();
+    loop {
+        k -= 1;
+        buf[k] = b'0' + (u % 10) as u8;
+        u /= 10;
+        if u == 0 {
+            break;
+        }
+    }
+    if v < 0 {
+        out.push('-');
+    }
+    for &b in &buf[k..] {
+        out.push(b as char);
+    }
 }
 
 /// A string operand.
@@ -49,20 +70,25 @@ impl Meta {
     }
 
     fn node_text(&self, ops: &[Md]) -> String {
-        let mut body = String::from("!{");
+        let mut body = String::with_capacity(16 * ops.len() + 2);
+        body.push_str("!{");
         for (k, op) in ops.iter().enumerate() {
             if k > 0 {
                 body.push_str(", ");
             }
             match op {
                 Md::Str(t) => {
-                    let _ = write!(body, "!\"{}\"", escape(t));
+                    body.push_str("!\"");
+                    escape_into(&mut body, t);
+                    body.push('"');
                 }
                 Md::I32(v) => {
-                    let _ = write!(body, "i32 {v}");
+                    body.push_str("i32 ");
+                    push_int(&mut body, *v);
                 }
                 Md::Node(n) => {
-                    let _ = write!(body, "!{n}");
+                    body.push('!');
+                    push_int(&mut body, *n as i64);
                 }
                 Md::Raw(r) => body.push_str(r),
             }
@@ -104,5 +130,19 @@ mod tests {
         m.render(&mut out);
         assert_eq!(out, "!0 = !{!\"air.buffer\", i32 3}\n!1 = !{!0, i8 0}\n");
         assert_eq!(c, 1);
+    }
+
+    #[test]
+    fn integers_and_escapes_match_the_formatter() {
+        for v in [0i64, 7, -7, 10, 4096, i64::MIN, i64::MAX] {
+            let mut o = String::new();
+            push_int(&mut o, v);
+            assert_eq!(o, v.to_string());
+        }
+        let mut m = Meta::default();
+        m.node(&[s("a\"b\\c\n"), i(-3), Md::Node(12)]);
+        let mut out = String::new();
+        m.render(&mut out);
+        assert_eq!(out, "!0 = !{!\"a\\22b\\5Cc\\0A\", i32 -3, !12}\n");
     }
 }

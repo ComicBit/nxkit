@@ -3,7 +3,7 @@
 //! unchanged, the GPU compiler optimises again.
 
 use crate::ast::*;
-use std::collections::{HashMap, HashSet};
+use crate::fx::{HashMap, HashSet};
 
 fn vals_mut(op: &mut Op) -> Vec<&mut Val> {
     match op {
@@ -111,7 +111,7 @@ pub fn optimize(m: &mut Module) {
 fn mem2reg(f: &mut Function) {
     // candidates: allocas of first-class types used only by whole loads and stores (as the address), plus bitcasts
     // whose only uses are lifetime markers
-    let mut allocas: HashMap<String, Ty> = HashMap::new();
+    let mut allocas: HashMap<String, Ty> = HashMap::default();
     for (_, insts) in &f.blocks {
         for i in insts {
             if let (Some(r), Op::Alloca(t, _)) = (&i.res, &i.op) {
@@ -124,7 +124,7 @@ fn mem2reg(f: &mut Function) {
     if allocas.is_empty() {
         return;
     }
-    let mut marker_casts: HashMap<String, String> = HashMap::new();
+    let mut marker_casts: HashMap<String, String> = HashMap::default();
     for (_, insts) in &f.blocks {
         for i in insts {
             if let (Some(r), Op::Cast(k, (_, Val::Local(src)), _)) = (&i.res, &i.op) {
@@ -134,7 +134,7 @@ fn mem2reg(f: &mut Function) {
             }
         }
     }
-    let mut bad: HashSet<String> = HashSet::new();
+    let mut bad: HashSet<String> = HashSet::default();
     for (_, insts) in &f.blocks {
         for i in insts {
             match &i.op {
@@ -257,7 +257,7 @@ fn mem2reg(f: &mut Function) {
         }
     }
     // dominance frontiers
-    let mut df: Vec<HashSet<usize>> = vec![HashSet::new(); n];
+    let mut df: Vec<HashSet<usize>> = vec![HashSet::default(); n];
     for b in 0..n {
         if pred[b].len() >= 2 && idom[b] != usize::MAX {
             for &p in &pred[b] {
@@ -299,7 +299,7 @@ fn mem2reg(f: &mut Function) {
     let mut phis: Vec<Vec<(usize, String)>> = vec![Vec::new(); n]; // block -> (alloca slot, phi name)
     let mut counter = 0usize;
     for (a, work) in defs.iter_mut().enumerate() {
-        let mut has: HashSet<usize> = HashSet::new();
+        let mut has: HashSet<usize> = HashSet::default();
         while let Some(b) = work.pop() {
             for &d in &df[b] {
                 if has.insert(d) {
@@ -317,7 +317,7 @@ fn mem2reg(f: &mut Function) {
             kids[idom[b]].push(b);
         }
     }
-    let mut subst: HashMap<String, Val> = HashMap::new();
+    let mut subst: HashMap<String, Val> = HashMap::default();
     let mut phi_in: Vec<Vec<Vec<(Val, String)>>> =
         phis.iter().map(|p| vec![Vec::new(); p.len()]).collect();
     let mut remove: Vec<Vec<bool>> = f.blocks.iter().map(|b| vec![false; b.1.len()]).collect();
@@ -482,7 +482,7 @@ fn side_effect(op: &Op) -> bool {
 
 fn dce(f: &mut Function) {
     loop {
-        let mut used: HashSet<String> = HashSet::new();
+        let mut used: HashSet<String> = HashSet::default();
         for (_, insts) in &f.blocks {
             for i in insts {
                 let mut u = Vec::new();
@@ -521,7 +521,7 @@ fn substitute(f: &mut Function, subst: &HashMap<String, Val>) {
 /// Phis whose incoming values are all the same value (or the phi itself) become that value.
 fn trivial_phis(f: &mut Function) {
     loop {
-        let mut subst: HashMap<String, Val> = HashMap::new();
+        let mut subst: HashMap<String, Val> = HashMap::default();
         for (_, insts) in &f.blocks {
             for i in insts {
                 if let (Some(r), Op::Phi(_, _, ins)) = (&i.res, &i.op) {
@@ -558,10 +558,10 @@ fn trivial_phis(f: &mut Function) {
 
 /// Block-local common subexpressions: pure operations and loads from the constant address space.
 fn cse(f: &mut Function) {
-    let mut subst: HashMap<String, Val> = HashMap::new();
+    let mut subst: HashMap<String, Val> = HashMap::default();
     for (_, insts) in &mut f.blocks {
-        let mut seen: HashMap<String, String> = HashMap::new();
-        let mut drop: HashSet<usize> = HashSet::new();
+        let mut seen: HashMap<(Op, Vec<(String, u32)>), String> = HashMap::default();
+        let mut drop: HashSet<usize> = HashSet::default();
         for (k, i) in insts.iter().enumerate() {
             let Some(r) = &i.res else { continue };
             let pure = matches!(
@@ -591,7 +591,7 @@ fn cse(f: &mut Function) {
                     }
                 }
             }
-            let key = format!("{op:?}|{:?}", i.md);
+            let key = (op, i.md.clone());
             match seen.get(&key) {
                 Some(prev) => {
                     subst.insert(r.clone(), Val::Local(prev.clone()));

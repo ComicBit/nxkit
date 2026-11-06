@@ -266,14 +266,22 @@ pub fn kind_letter(s: Scalar) -> &'static str {
 /// Escapes a string for an LLVM metadata string or name.
 pub fn escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
+    escape_into(&mut out, s);
+    out
+}
+
+/// [`escape`] appended to `out`.
+pub fn escape_into(out: &mut String, s: &str) {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
     for b in s.bytes() {
         if b == b'"' || b == b'\\' || !(0x20..0x7f).contains(&b) {
-            let _ = write!(out, "\\{b:02X}");
+            out.push('\\');
+            out.push(HEX[usize::from(b >> 4)] as char);
+            out.push(HEX[usize::from(b & 15)] as char);
         } else {
             out.push(b as char);
         }
     }
-    out
 }
 
 #[cfg(test)]
