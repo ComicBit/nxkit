@@ -102,7 +102,8 @@ Since version 0.4.0, the split reads many more container families. A format that
 | Needle, Sumo, Phyre, MGFX, XNB, SLCT, Monolith, Snowdrop, SDF, MT Framework and some more | ported. Compared on synthetic files |
 | formats that need Oodle (some packs, Frostbite roots, some Unreal blocks) | not ported. Exit code 4 |
 | the CRA family | not ported. Exit code 4 |
-| zip members in bzip2 or lzma, encrypted Unreal indexes, LZ5 packages | not ported. Exit code 4 or a note |
+| zip members (stored, Deflate, bzip2, lzma) | ported. The decoders are `nxb-split::bzip2` and `nxb-split::unity::lzma`. Compared with vectors from Python's `zipfile`, `bzip2` and `xz` |
+| encrypted Unreal indexes, LZ5 packages | not ported. Exit code 4 or a note |
 
 Real data: the update image of one title with a 17.6 GB archive gave all 12 package files and all tables byte-identical to the reference split (measured: 298 s, and about 25 minutes for the reference).
 The reference scripts read approximately 35 container formats, and the port covers most of them. Only the real image and the NSP titles have real-data results. For all other families, the evidence is synthetic.
