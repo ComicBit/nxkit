@@ -402,3 +402,76 @@ fn framework_only_equals_the_reference_script() {
     }
     let _ = std::fs::remove_dir_all(&t.d);
 }
+
+#[test]
+fn packaging_checks_and_copies_the_guard_tables_of_this_shader_build() {
+    let d = oracle::scratch("ios-generated-guards");
+    let profile = d.join("profile");
+    let guards = d.join("work/tables");
+    let lib = d.join("ios/b-test");
+    let tables = d.join("Gen/tables");
+    for dir in [&profile, &guards, &lib, &tables] {
+        std::fs::create_dir_all(dir).unwrap();
+    }
+    std::fs::write(profile.join("game.tsv"), "modules\tmain\n").unwrap();
+    for name in ["shader_map.tsv", "pso_manifest.tsv"] {
+        std::fs::write(profile.join(name), "# static table\n").unwrap();
+    }
+    for name in ["main.fixups.tsv", "main.patched.bin", "marker"] {
+        std::fs::write(d.join(name), "").unwrap();
+    }
+    std::fs::write(lib.join("0000_b.metallib"), "synthetic").unwrap();
+    let game = crate::host::profile::Game::open(&profile).unwrap();
+    let digest = nxb_shader::chain::inputs(&profile).unwrap();
+    let ios = d.join("ios");
+    let check = || {
+        super::super::ipagen::check_program(
+            &guards,
+            (None, "test-game"),
+            &game,
+            [
+                d.to_str().unwrap(),
+                d.to_str().unwrap(),
+                ios.to_str().unwrap(),
+            ],
+            "marker",
+            "test",
+        )
+    };
+    assert!(check().unwrap_err().contains("their stamp: none"));
+    std::fs::write(lib.join("inputs.tsv"), "game\tother-game\ninputs\tstale\n").unwrap();
+    assert!(check().unwrap_err().contains("not a full build"));
+    std::fs::write(
+        lib.join("inputs.tsv"),
+        format!("game\ttest-game\ninputs\t{digest}\n"),
+    )
+    .unwrap();
+    let header = format!("# chain b-test inputs {digest} fixture\n");
+    std::fs::write(profile.join("c1_full.tsv"), &header).unwrap();
+    std::fs::write(
+        guards.join("c1_full.tsv"),
+        "# chain b-test inputs stale fixture\n",
+    )
+    .unwrap();
+    assert!(
+        check()
+            .unwrap_err()
+            .contains("c1_full.tsv is missing or not made from these libraries")
+    );
+    for name in ["c1_full.tsv", "cb_extent.tsv"] {
+        std::fs::write(
+            guards.join(name),
+            format!("{header}# {name} from this build\n"),
+        )
+        .unwrap();
+    }
+    assert_eq!(check().unwrap().1, "nvn");
+    super::copy_shader_tables(&game, &guards, "nvn", &tables, &mut |_| {}).unwrap();
+    for name in ["c1_full.tsv", "cb_extent.tsv"] {
+        assert_eq!(
+            std::fs::read(tables.join(name)).unwrap(),
+            std::fs::read(guards.join(name)).unwrap()
+        );
+    }
+    let _ = std::fs::remove_dir_all(d);
+}

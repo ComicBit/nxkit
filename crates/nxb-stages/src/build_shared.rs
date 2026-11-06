@@ -306,14 +306,12 @@ pub(crate) fn ios_side(
     ident.extend_from_slice(IOS.record().as_bytes());
     ident.push(0);
     ident.extend_from_slice(compiler_id.as_bytes());
-    let out = dir.join(format!("b-{}", cfg.chain));
-    fs::create_dir_all(&out).map_err(|e| fatal("iOS folder", e))?;
     Ok(Side {
         conv: IOS,
         tools,
         pch,
         compiler_id,
         ident: nxb_model::sha256(&ident).to_hex(),
-        out,
+        out: dir.to_path_buf(),
     })
 }

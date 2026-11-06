@@ -45,6 +45,7 @@ fn ipa_inputs(engine: PathBuf) -> ipa::Inputs {
         patched: var("PATCHED"),
         romfs: var("ROMFS"),
         msl_ios: var("MSL_IOS"),
+        guard_tables: None,
         aoc: var("AOC"),
         gfxapi: var("GFXAPI"),
         font_py: var("FONT_PY"),

@@ -103,3 +103,80 @@ fn airc_is_a_command() {
     assert!(std::fs::read_to_string(&ll).unwrap().contains("define"));
     let _ = std::fs::remove_dir_all(&t);
 }
+
+/// The real Mac/iOS shader stage, with a synthetic Maxwell compute shader that only exits.
+#[cfg(target_os = "macos")]
+#[test]
+fn full_shader_build_stamps_both_targets_and_retires_old_ios_outputs() {
+    if !Command::new("/usr/bin/xcrun")
+        .args(["--sdk", "iphoneos", "metal", "--version"])
+        .output()
+        .is_ok_and(|o| o.status.success())
+    {
+        return;
+    }
+    let d = tmp("ios-library-stamp");
+    let ios = d.join("ios/b-test");
+    std::fs::create_dir_all(&ios).unwrap();
+    let key = "0123456789abcdef";
+    let mut record = vec![0; 0x38];
+    record[..8].copy_from_slice(b"BTCDBTCD");
+    for word in [0_u64, 0xe300_0000_0007_000f, 0, 0] {
+        record.extend(word.to_le_bytes());
+    }
+    record.extend([0x34, 0x12, 0x76, 0x98]);
+    record.resize(record.len() + 0x800, 0);
+    std::fs::write(d.join("cs_test.bin"), record).unwrap();
+    std::fs::write(
+        d.join("shader_map.tsv"),
+        format!("cs_test.bin\t0\t0\t{key}\t0\n"),
+    )
+    .unwrap();
+    std::fs::write(
+        d.join("shader_facts.tsv"),
+        format!("{key}\t{{\"local\":[1,1,1]}}\n"),
+    )
+    .unwrap();
+    let obsolete = ios.join("fedcba9876543210_b.metallib");
+    std::fs::write(&obsolete, "old library").unwrap();
+    let run = |keys: &[&str]| {
+        let result = Command::new(nxb())
+            .current_dir(&d)
+            .args(["shaders", "build", ".", "cache", "--profile", "."])
+            .args([
+                "--game",
+                "test-game",
+                "--chain",
+                "test",
+                "--inputs",
+                "test-inputs",
+            ])
+            .args(["--store", "store", "--work", "work", "--scratch", "scratch"])
+            .args(["--ios", "ios", "--own-front", "off", "--jobs", "1"])
+            .args(keys)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    };
+    run(&[]);
+    for lib in [&ios, &d.join("cache/b-test")] {
+        let binary = std::fs::read(lib.join(format!("{key}_b.metallib"))).unwrap();
+        assert!(binary.starts_with(b"MTLB"));
+    }
+    let stamp = std::fs::read(d.join("cache/b-test/inputs.tsv")).unwrap();
+    assert_eq!(std::fs::read(ios.join("inputs.tsv")).unwrap(), stamp);
+    assert!(
+        !obsolete.exists(),
+        "a stamp must never certify stale iOS libraries"
+    );
+    run(&[key]);
+    assert!(
+        !ios.join("inputs.tsv").exists(),
+        "a subset cannot certify a full iOS library"
+    );
+    let _ = std::fs::remove_dir_all(d);
+}
