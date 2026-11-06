@@ -261,16 +261,26 @@ pub(super) fn p2r(ctx: &mut Ctx) -> R {
     Ok(())
 }
 
+/// `AUp2ur`: bit k of Rd is the uniform predicate UPk (7 is UPT) where bit k of the mask is set.
 pub(super) fn up2ur(ctx: &mut Ctx) -> R {
     let x = x(ctx);
-    if x.bits(24, 30) != URZ || x.imm32() != 1 {
-        return Err(fail(ctx, "UP2UR with a merge source or another mask"));
+    if x.bits(24, 30) != URZ || x.imm32() & !0xff != 0 {
+        return Err(fail(
+            ctx,
+            "UP2UR with a merge source or a mask past the predicates",
+        ));
     }
-    let p = pred_reg(ctx, 0, true);
-    let one = c(ctx, 1);
-    let zero = c(ctx, 0);
-    let v = ctx.conditional_select(p, one, zero);
-    set(ctx, &x, v, true);
+    let mut res = c(ctx, 0);
+    for k in 0..8 {
+        if x.imm32() >> k & 1 != 0 {
+            let p = pred_reg(ctx, k, true);
+            let bit = c(ctx, 1 << k);
+            let zero = c(ctx, 0);
+            let v = ctx.conditional_select(p, bit, zero);
+            res = ctx.bitwise_or(res, v);
+        }
+    }
+    set(ctx, &x, res, true);
     Ok(())
 }
 
