@@ -3,7 +3,8 @@
 
 use std::path::PathBuf;
 
-/// The command line (the NSP script's names, extras: `--dry-run`, `--engine`, `--shaders`, `--companion-app`, `--threads`).
+/// The command line (the NSP script's names, extras: `--dry-run`, `--engine`, `--shaders`, `--companion-app`, `--threads`,
+/// `--load-limit`).
 #[derive(Clone, Debug, Default)]
 pub struct Args {
     /// The folder holding one game's NSPs.
@@ -43,6 +44,9 @@ pub struct Args {
     pub companion: Option<PathBuf>,
     /// Worker threads.
     pub threads: usize,
+    /// `--load-limit <percent>`: the pipeline archive starts more compiler runs only while CPU and memory use stay
+    /// below this share of the machine (default 90).
+    pub load_limit: u8,
     /// `--own-front on|off|<verdicts>`: the own front end (default on: the raw tier, and own-identical shaders when verdicts exist.
     /// `NXB_OWN_FRONT=0` turns it off).
     pub own_front: String,
@@ -124,6 +128,7 @@ const VALUE: &[&str] = &[
     "--companion-app",
     COMPAT_ALIAS,
     "--threads",
+    "--load-limit",
     "--own-front",
     "--shader-manifest",
     "--nup",
@@ -250,6 +255,7 @@ pub fn parse(argv: &[String]) -> Result<Args, (i32, String)> {
         mac_sign: "-".into(),
         progress: "auto".into(),
         threads: 10,
+        load_limit: 90,
         ..Args::default()
     };
     let mut i = 0;
@@ -304,6 +310,14 @@ pub fn parse(argv: &[String]) -> Result<Args, (i32, String)> {
                 "--engine" => a.engine = Some(v.into()),
                 "--shaders" => a.shaders = Some(v.into()),
                 "--own-front" => a.own_front = v,
+                "--load-limit" => {
+                    a.load_limit = v
+                        .trim_end_matches('%')
+                        .parse()
+                        .ok()
+                        .filter(|p| (10..=100).contains(p))
+                        .ok_or((2, format!("--load-limit: {v} (a percent from 10 to 100)")))?;
+                }
                 "--shader-manifest" => a.manifest = Some(v.into()),
                 _ if k == "--companion-app" || k == COMPAT_ALIAS => a.companion = Some(v.into()),
                 _ => a.threads = v.parse().map_err(|_| (2, format!("--threads: {v}")))?,
@@ -386,6 +400,13 @@ mod tests {
             Ok(Some(2))
         );
         assert_eq!(code(&["dir", "--program", "x"]), Some(2));
+        assert_eq!(parse(&v(&["dir"])).map(|a| a.load_limit), Ok(90));
+        assert_eq!(
+            parse(&v(&["dir", "--load-limit", "75%"])).map(|a| a.load_limit),
+            Ok(75)
+        );
+        assert_eq!(code(&["dir", "--load-limit", "5"]), Some(2));
+        assert_eq!(code(&["dir", "--load-limit=101"]), Some(2));
         assert_eq!(code(&["dir", "--program", "-1"]), Some(2));
         assert_eq!(
             code(&["dir", "--platform", "mac-app", "--romfs", "separate"]),

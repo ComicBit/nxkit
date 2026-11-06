@@ -202,7 +202,9 @@ The module `nxb-build::order` puts the stages of `nxb build` in a graph. A stage
 The Mac host (`make` and `clang`) starts at the same time as the extract. The app parts are the companion app, the icon
 and the settings file. They start when the extract and the host are done, beside the shader step.
 The first pipeline archive starts its batches when the libraries that they use are ready.
-When the shader step stops, the archive stream gets one worker for each slot instead of 3 workers, if memory permits.
+The archive stream always has 3 compiler runs. It starts more while CPU and memory use stay below 90 % (`--load-limit`).
+Each load sample says how many more runs fit, and that many start at once. The limit is one run for each core and what the memory budget holds.
+The compiler runs have nice 10, so the shader step keeps the cores it needs.
 
 The events do not change. `nxb build` writes `stage` and `stage_end` in the order of the graph, thus the NDJSON stream is the stream of a run
 in series. Only the fields `t` and `elapsed` are different. If a stage fails, it reports in its own turn. The stages before it

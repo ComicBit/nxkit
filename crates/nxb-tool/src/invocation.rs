@@ -27,6 +27,8 @@ pub struct Invocation {
     pub max_stdout: usize,
     /// Stderr bytes kept, more is drained and dropped.
     pub max_stderr: usize,
+    /// Nice value of the child's process group (0 normal, up to 20 lowest), so it yields the CPU to the rest.
+    pub nice: i32,
 }
 
 impl Invocation {
@@ -42,6 +44,7 @@ impl Invocation {
             timeout: Duration::from_secs(30 * 60),
             max_stdout: 1 << 30,
             max_stderr: DEFAULT_MAX_STDERR,
+            nice: 0,
         }
     }
 
@@ -76,6 +79,12 @@ impl Invocation {
     /// Set the timeout.
     pub fn timeout(mut self, t: Duration) -> Self {
         self.timeout = t;
+        self
+    }
+
+    /// Run the child (and what it starts) at this nice value.
+    pub fn nice(mut self, nice: i32) -> Self {
+        self.nice = nice;
         self
     }
 

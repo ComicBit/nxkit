@@ -210,6 +210,7 @@ Run `nxb help build` for the full usage. Refer to [docs/pipeline-stages.md](docs
 | `--gpu ARCH\|none` | the architecture of the pipeline archive. The default is the architecture of this Mac. `none` skips the archive |
 | `--provisional`, `--survey-only`, `--no-heap-check`, `--profile-out D` | a game without a profile: provisional profile, survey only, skip the checks that start the game, the folder of the profile |
 | `--own-front on\|off` | the own front end |
+| `--load-limit PERCENT` | the pipeline archive starts more compiler runs while CPU and memory use stay below this share of the Mac. The default is 90 |
 | `--team-id`, `--framework`, `--shell-framework`, `--prepare-xcode`, `--xcode-workspace` | the iOS options. No device test |
 
 ### Exit codes of `nxb build`

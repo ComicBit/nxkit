@@ -2,6 +2,17 @@
 
 All notable changes are in this file. The format follows Keep a Changelog. Versions follow Semantic Versioning.
 
+## 0.6.4
+
+### Changed
+
+- The pipeline archive starts compiler runs by the load of the Mac. 3 runs always go. More start while CPU and memory use stay below 90 %, up to one run for each core and what the memory budget holds.
+  Before, 3 runs went while the shader step ran, and more only after it.
+- The compiler runs of the archive have nice 10. The shader step keeps the cores that it needs.
+- The new option `--load-limit PERCENT` sets the limit for CPU and memory. The default is 90.
+- The archive line of the summary says how many compiler runs went at once.
+- `nxb-sched::Headroom` admits runs by load. `nxb-sys` reads the CPU ticks, the memory in use (as Activity Monitor's "Memory Used") and the memory pressure.
+
 ## 0.6.3
 
 ### Fixed
