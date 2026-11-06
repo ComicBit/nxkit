@@ -297,10 +297,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nxb-spvgen"
-version = "0.5.1"
-
-[[package]]
 name = "nxb-stages"
 version = "0.5.1"
 dependencies = [

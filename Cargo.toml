@@ -55,7 +55,6 @@ nxb-profile = { path = "crates/nxb-profile" }
 nxb-xlatedev = { path = "crates/nxb-xlatedev" }
 nxb-xlate = { path = "crates/nxb-xlate" }
 nxb-maxwell = { path = "crates/nxb-maxwell" }
-nxb-spvgen = { path = "crates/nxb-spvgen" }
 
 [profile.test]
 # the parser tests recurse deeply: optimise them as the front-end project did
