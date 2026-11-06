@@ -33,6 +33,7 @@ pub enum AEmit {
     AFrnd,
     AF2f,
     AF2fp,
+    AF2ip,
     AHadd2,
     AHmul2,
     AHfma2,
@@ -189,6 +190,7 @@ fn build() -> Tables {
     a(t, 0x107, InstName::F2f, AEmit::AFrnd, 0, false, true);
     a(t, 0x104, InstName::F2f, AEmit::AF2f, 0, false, true);
     a(t, 0x03e, InstName::F2f, AEmit::AF2fp, 0, false, true);
+    a(t, 0x043, InstName::F2i, AEmit::AF2ip, 0, false, true);
     a(t, 0x030, InstName::Hadd2, AEmit::AHadd2, 0, false, true);
     a(t, 0x032, InstName::Hmul2, AEmit::AHmul2, 0, false, true);
     a(t, 0x031, InstName::Hfma2, AEmit::AHfma2, 0, false, true);

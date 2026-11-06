@@ -280,3 +280,21 @@ fn red_f32_add_is_a_compare_and_swap_loop() {
     let back = t.find("op 1a 0 0 0 d=L1, s=l3,").expect(&t);
     assert!(retry < load && load < add && add < cas && cas < back, "{t}");
 }
+
+#[test]
+fn f2ip_packs_two_saturated_bytes() {
+    // F2IP.U8.TRUNC R0, R1, R2
+    let f2ip = (0x243 | APT | 1 << 24 | 2 << 32, 0xff | 4 << 8);
+    let t = ampere_cs_text(&[f2ip, AEXIT]).expect("emit");
+    assert!(t.contains("op 10054 0 0 0 d=l1, s=l0,#0,"), "{t}");
+    assert!(t.contains("op 10057 0 0 0 d=l2, s=l1,#437f0000,"), "{t}");
+    assert!(t.contains("op 63 0 0 0 d=l8, s=l3,#8,"), "{t}");
+    assert!(t.contains("op 17 0 0 0 d=l9, s=l8,l7,"), "{t}");
+}
+
+#[test]
+fn f2ip_rejects_a_register_in_c() {
+    let f2ip = (0x243 | APT | 1 << 24 | 2 << 32, 0x03 | 4 << 8);
+    let e = ampere_cs_text(&[f2ip, AEXIT]).expect_err("fail");
+    assert!(e.contains("F2IP form"), "{e}");
+}
