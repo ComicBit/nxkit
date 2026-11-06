@@ -1,11 +1,13 @@
 //! Moves, special registers, constants and predicates of `InstEmitAmpereAlu.cs`.
 
 use super::operand::*;
+use crate::attr::Stage;
 use crate::emit::alu::int_logic::emit_p2r;
 use crate::emit::alu::mov::{emit_r2p, emit_sreg};
 use crate::emit::alu::video::{emit_ballot, emit_vote};
 use crate::emit::mem::memory::{emit_load_constant, extract_small_int, get_bit_offset};
 use crate::ir::Opd;
+use crate::ir::inst::{IoVariable, StorageKind};
 use crate::ir::ops::{FALSE, TRUE, regtype};
 use crate::maxwell::ampere::AmpOp;
 use crate::maxwell::ampere_table::reads_constant_bank;
@@ -208,6 +210,29 @@ fn load_constant(
         ctx.copy_to(d, value);
         k += 1;
     }
+    Ok(())
+}
+
+/// `APixelCovered`: 0x925 with 78..81 = 1 reads 1 for a covered pixel and 0 for a helper invocation. Any other form is refused.
+pub(super) fn pixel_covered(ctx: &mut Ctx) -> R {
+    let x = x(ctx);
+    if x.bits(78, 81) != 1
+        || x.bits(81, 84) != 7
+        || x.bits(24, 32) != 0
+        || x.bits(32, 48) != 0
+        || ctx.tc.definitions.stage != Stage::Fragment
+    {
+        let form = x.bits(78, 81);
+        return Err(fail(
+            ctx,
+            &format!("0x925 form {form} outside a covered pixel's read in a pixel shader"),
+        ));
+    }
+    let helper = ctx.load_io(StorageKind::Input, IoVariable::HelperInvocation, None);
+    let zero = c(ctx, 0);
+    let one = c(ctx, 1);
+    let v = ctx.conditional_select(helper, zero, one);
+    set(ctx, &x, v, false);
     Ok(())
 }
 

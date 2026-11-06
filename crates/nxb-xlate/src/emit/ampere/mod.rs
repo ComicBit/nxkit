@@ -77,6 +77,8 @@ pub fn dispatch(ctx: &mut EmitterContext<'_, '_>, e: AEmit) -> Result<(), String
         AFlo => bits::flo(ctx),
         ABrev => bits::brev(ctx),
         ASgxt => bits::sgxt(ctx),
+        ABmsk => bits::bmsk(ctx),
+        APixelCovered => mov::pixel_covered(ctx),
         AIpa => mem::ipa(ctx),
         AAld => mem::ald(ctx),
         AAst => mem::ast(ctx),

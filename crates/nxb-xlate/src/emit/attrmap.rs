@@ -297,7 +297,7 @@ fn stage_bit(stage: Stage) -> u8 {
 
 /// `Enum.ToString()` of an `IoVariable`.
 pub fn io_name(io: IoVariable) -> &'static str {
-    const NAMES: [&str; 43] = [
+    const NAMES: [&str; 44] = [
         "Invalid",
         "BackColorDiffuse",
         "BackColorSpecular",
@@ -341,6 +341,7 @@ pub fn io_name(io: IoVariable) -> &'static str {
         "VertexIndex",
         "ViewportIndex",
         "ViewportMask",
+        "HelperInvocation",
     ];
     NAMES.get(io.0 as usize).copied().unwrap_or("Invalid")
 }

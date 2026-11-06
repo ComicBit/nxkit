@@ -534,7 +534,9 @@ pub fn spirv_built_in(v: IoVariable) -> (u32, AggType) {
         IoVariable::TessellationLevelInner => (b::TessLevelInner, AggType::ARRAY | AggType::FP32),
         IoVariable::TessellationLevelOuter => (b::TessLevelOuter, AggType::ARRAY | AggType::FP32),
         IoVariable::ThreadId => (b::LocalInvocationId, AggType::VECTOR3 | AggType::U32),
-        IoVariable::ThreadKill => (b::HelperInvocation, AggType::BOOL),
+        IoVariable::ThreadKill | IoVariable::HelperInvocation => {
+            (b::HelperInvocation, AggType::BOOL)
+        }
         IoVariable::VertexId => (b::VertexId, AggType::S32),
         IoVariable::VertexIndex => (b::VertexIndex, AggType::S32),
         IoVariable::ViewportIndex => (b::ViewportIndex, AggType::S32),

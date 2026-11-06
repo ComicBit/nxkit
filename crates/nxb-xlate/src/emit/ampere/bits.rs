@@ -120,6 +120,50 @@ pub(super) fn brev(ctx: &mut Ctx) -> R {
     Ok(())
 }
 
+/// `ABmsk`: a mask of b bits from bit a, with PTX's bmsk semantics. `.W` (bit 75) takes both operands modulo 32, else a
+/// at least 32 gives 0 and b at least 32 reaches bit 31.
+pub(super) fn bmsk(ctx: &mut Ctx) -> R {
+    let x = x(ctx);
+    let u = is_uniform(ctx);
+    let (sa, sb) = second(ctx, &x, u, false, false)?;
+    let a = get(ctx, &sa)?;
+    let b = get(ctx, &sb)?;
+    let k31 = c(ctx, 31);
+    let a1 = ctx.bitwise_and(a, k31);
+    let k31 = c(ctx, 31);
+    let b1 = ctx.bitwise_and(b, k31);
+    let sum = ctx.i_add(a1, b1);
+    let m1 = c(ctx, -1);
+    let mut mask0 = ctx.shift_left(m1, a1);
+    let k32 = c(ctx, 32);
+    let mut reaches_top = ctx.i_compare_greater_or_equal_unsigned(sum, k32);
+    if !x.bit(75) {
+        let k32 = c(ctx, 32);
+        let a_over = ctx.i_compare_greater_or_equal_unsigned(a, k32);
+        let z = c(ctx, 0);
+        mask0 = ctx.conditional_select(a_over, z, mask0);
+        let k32 = c(ctx, 32);
+        let b_over = ctx.i_compare_greater_or_equal_unsigned(b, k32);
+        let either = ctx.bitwise_or(a_over, b_over);
+        reaches_top = ctx.bitwise_or(reaches_top, either);
+    }
+    // the bits above the field: none when it reaches the top, all when it is empty
+    let z = c(ctx, 0);
+    let empty = ctx.i_compare_equal(b1, z);
+    let all = c(ctx, -1);
+    let m1 = c(ctx, -1);
+    let k31 = c(ctx, 31);
+    let sh = ctx.bitwise_and(sum, k31);
+    let shifted = ctx.shift_left(m1, sh);
+    let mut above = ctx.conditional_select(empty, all, shifted);
+    let z = c(ctx, 0);
+    above = ctx.conditional_select(reaches_top, z, above);
+    let not_above = ctx.bitwise_not(above);
+    let res = ctx.bitwise_and(mask0, not_above);
+    set(ctx, &x, res, u);
+    Ok(())
+}
+
 pub(super) fn sgxt(ctx: &mut Ctx) -> R {
     let x = x(ctx);
     let u = is_uniform(ctx);
