@@ -7,7 +7,9 @@ use super::types::{msl_type, scalar};
 use super::usage::{self, Usage};
 use super::{Context, Library, Translated, facts, io, prelude};
 use crate::codegen::props::MemoryDef;
+use crate::structured::types::AggType;
 use crate::translation::msl_entry::Structured;
+use nxb_pyjson::Value;
 use std::fmt::Write;
 
 /// What to write for the main entry: its name and the stage keyword. Variants write further entries with other names.
@@ -25,9 +27,18 @@ fn kind(s: Shader) -> &'static str {
     }
 }
 
-/// The element type and length of a memory.
-fn memory(m: &MemoryDef) -> R<(String, i32)> {
-    Ok((msl_type(scalar(m.ty))?, m.array_length.max(1)))
+/// The element type of a memory and its length, `None` for a scalar.
+fn memory(m: &MemoryDef) -> R<(String, Option<i32>)> {
+    let len = m.ty.has(AggType::ARRAY).then(|| m.array_length.max(1));
+    Ok((msl_type(scalar(m.ty))?, len))
+}
+
+/// The declaration of a memory variable and the parameter that passes it on, without the address space.
+fn memory_decl(ty: &str, name: &str, len: Option<i32>) -> (String, String) {
+    match len {
+        Some(n) => (format!("{ty} {name}[{n}]"), format!("{ty} (&{name})[{n}]")),
+        None => (format!("{ty} {name}"), format!("{ty}& {name}")),
+    }
 }
 
 fn shared_params(s: &Structured, res: &args::Res, plan: &io::Plan, shader: Shader) -> R<Shared> {
@@ -48,16 +59,16 @@ fn shared_params(s: &Structured, res: &args::Res, plan: &io::Plan, shader: Shade
     }
     for m in &s.props.properties.local_memories {
         let (t, n) = memory(m)?;
-        p.params.push(d(
-            &format!("thread {t} (&lm{})[{n}]", m.id),
-            &format!("lm{}", m.id),
-        ));
+        let name = format!("lm{}", m.id);
+        p.params
+            .push(d(&format!("thread {}", memory_decl(&t, &name, n).1), &name));
     }
     for m in &s.props.properties.shared_memories {
         let (t, n) = memory(m)?;
+        let name = format!("sm{}", m.id);
         p.params.push(d(
-            &format!("threadgroup {t} (&sm{})[{n}]", m.id),
-            &format!("sm{}", m.id),
+            &format!("threadgroup {}", memory_decl(&t, &name, n).1),
+            &name,
         ));
     }
     Ok(p)
@@ -80,6 +91,7 @@ fn entry_text(
     res: &args::Res,
     plan: &io::Plan,
     body: &str,
+    depth_fix: bool,
 ) -> R<String> {
     let early = shader == Shader::Fragment && s.props.definitions.early_z_force;
     let has_out = shader != Shader::Compute && !plan.out_members.is_empty();
@@ -114,14 +126,21 @@ fn entry_text(
         for m in &plan.vec4_outputs {
             let _ = writeln!(t, "    out.{m} = float4(0.0, 0.0, 0.0, 1.0);");
         }
+        if plan.viewport_mask {
+            let _ = writeln!(t, "    uint {} = 1u;", io::VIEWPORT_MASK);
+        }
     }
     for m in &s.props.properties.local_memories {
         let (ty, n) = memory(m)?;
-        let _ = writeln!(t, "    {ty} lm{}[{n}];", m.id);
+        let _ = writeln!(t, "    {};", memory_decl(&ty, &format!("lm{}", m.id), n).0);
     }
     for m in &s.props.properties.shared_memories {
         let (ty, n) = memory(m)?;
-        let _ = writeln!(t, "    threadgroup {ty} sm{}[{n}];", m.id);
+        let _ = writeln!(
+            t,
+            "    threadgroup {};",
+            memory_decl(&ty, &format!("sm{}", m.id), n).0
+        );
     }
     t.push_str(body);
     let last = body.trim_end().lines().last().map(str::trim);
@@ -130,9 +149,9 @@ fn entry_text(
         return Ok(t);
     }
     if shader == Shader::Vertex {
-        t.push_str(
-            "    out.gl_Position.z = fma(out.gl_Position.z, 0.5, out.gl_Position.w * 0.5);\n",
-        );
+        for l in plan.vertex_epilogue(depth_fix) {
+            let _ = writeln!(t, "    {l}");
+        }
     }
     if has_out {
         t.push_str("    return out;\n");
@@ -147,7 +166,7 @@ pub fn build(s: &Structured, ctx: &Context<'_>, opt: &Options) -> R<Translated> 
     let shader = match job.stage.as_str() {
         "vs" => Shader::Vertex,
         "ps" => Shader::Fragment,
-        "cs" => Shader::Compute,
+        "cs" | "gs" => Shader::Compute,
         other => return Err(format!("unported: {other} stage")),
     };
     if s.props.definitions.transform_feedback_enabled {
@@ -186,6 +205,18 @@ pub fn build(s: &Structured, ctx: &Context<'_>, opt: &Options) -> R<Translated> 
                 .into(),
         );
     }
+    let opt_z = Options {
+        no_depth_fix: true,
+        ..opt.clone()
+    };
+    let body_z = if opt.entry_z && shader == Shader::Vertex {
+        let mut z = Em::new(&s.info, &s.props, &res, &opt_z, &shared, &plan, shader);
+        let body = z.body(0)?;
+        em.helpers.extend(z.helpers.iter().copied());
+        Some(body)
+    } else {
+        None
+    };
     let mut msl = prelude::header(s.props.host.reduced_precision);
     msl.push_str(&prelude::helpers(&em.helpers, res.border));
     msl.push_str(&res.text);
@@ -205,7 +236,20 @@ pub fn build(s: &Structured, ctx: &Context<'_>, opt: &Options) -> R<Translated> 
         &res,
         &plan,
         main,
+        !opt.no_depth_fix,
     )?);
+    if let Some(body) = &body_z {
+        msl.push('\n');
+        msl.push_str(&entry_text(
+            s,
+            &EntryName { name: "main0_z" },
+            shader,
+            &res,
+            &plan,
+            body,
+            false,
+        )?);
+    }
 
     let mut notes = s.notes.clone();
     notes.extend(em.notes.iter().cloned());
@@ -221,6 +265,10 @@ pub fn build(s: &Structured, ctx: &Context<'_>, opt: &Options) -> R<Translated> 
         pc_paired: ctx.pc_paired.to_string(),
         stage: job.stage.clone(),
         entry: "main0".into(),
+        entries: body_z
+            .iter()
+            .map(|_| ("entry_z".to_string(), Value::str("main0_z")))
+            .collect(),
         msl_entry_kind: kind(shader).into(),
         threadgroup_size: (shader == Shader::Compute).then(|| local_size(s)),
         c1: facts::hex(&job.c1),

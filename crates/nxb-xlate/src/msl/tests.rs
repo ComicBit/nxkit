@@ -365,10 +365,10 @@ fn compute_library_and_reflection() {
 
 #[test]
 fn unported_stages_are_reported() {
-    let job = parse_jobs(r#"[{"key": "k", "stage": "gs"}]"#)
+    let job = parse_jobs(r#"[{"key": "k", "stage": "hs"}]"#)
         .expect("job")
         .remove(0);
-    let e = crate::msl::translate(&job, &[], &Context::default()).expect_err("gs");
+    let e = crate::msl::translate(&job, &[], &Context::default()).expect_err("hs");
     assert_eq!(e.reason, "not ported");
 }
 

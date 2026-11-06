@@ -12,6 +12,10 @@ pub mod control;
 pub mod emit;
 pub mod entry;
 pub mod facts;
+pub mod geom;
+pub mod geom_reader;
+#[cfg(test)]
+mod geom_tests;
 pub mod handles;
 pub mod inst_alu;
 pub mod inst_img;
@@ -134,16 +138,26 @@ fn failure(e: String) -> Failure {
 
 /// Translate one shader from its job and machine code to its libraries.
 pub fn translate(job: &Job, code: &[u8], ctx: &Context<'_>) -> Result<Translated, Failure> {
-    if !matches!(job.stage.as_str(), "vs" | "ps" | "cs") {
+    let stage = job.stage.as_str();
+    if matches!(stage, "hs" | "ds") {
         return Err(Failure::new(
             "not ported",
-            format!("unported: {} stage", job.stage),
+            format!("unported: tessellation ({stage} stage)"),
         ));
     }
-    let structured = structure_job(job, code).map_err(failure)?;
+    if !matches!(stage, "vs" | "ps" | "cs" | "gs") {
+        return Err(Failure::new(
+            "not ported",
+            format!("unported: {stage} stage"),
+        ));
+    }
     let opt = Options {
-        visibility_counter: job.stage == "vs"
-            && nxb_model::sha256(code).to_hex() == VISIBILITY_COUNTER,
+        visibility_counter: stage == "vs" && nxb_model::sha256(code).to_hex() == VISIBILITY_COUNTER,
+        ..Options::default()
     };
+    if stage == "gs" {
+        return geom::translate(job, code, ctx, &opt).map_err(failure);
+    }
+    let structured = structure_job(job, code).map_err(failure)?;
     entry::build(&structured, ctx, &opt).map_err(failure)
 }
