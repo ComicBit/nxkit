@@ -110,6 +110,7 @@ mod tests {
             stage: ShaderStage::Compute,
             used_features: &mut features,
             hfm: &mut hfm,
+            definitions: None,
         };
         run_pass(&mut ir, &mut blocks, &mut ctx).expect("pass");
         let insts: Vec<Inst> = blocks[0].ops.iter().map(|n| ir.op(*n).inst).collect();

@@ -1,6 +1,7 @@
 //! `TransformPasses` and the transforms the corpus exercises.
 #![allow(missing_docs)]
 
+pub mod geometry_to_compute;
 pub mod helper;
 pub mod shared_store;
 pub mod shuffle;
@@ -11,6 +12,7 @@ pub mod texture;
 use crate::accessor::Accessor;
 use crate::ir::{Block, Inst, Ir, OperandType};
 use crate::opt::Env;
+use crate::translation::definitions::Definitions;
 use crate::translation::props::ShaderStage;
 use helper::Hfm;
 
@@ -33,6 +35,8 @@ pub struct XformCtx<'a> {
     pub stage: ShaderStage,
     pub used_features: &'a mut u32,
     pub hfm: &'a mut Hfm,
+    /// the definitions of the original stage (`TransformContext.Definitions`), for the vertex-as-compute passes
+    pub definitions: Option<&'a Definitions>,
 }
 
 fn fp(i: Inst) -> Inst {
@@ -57,7 +61,10 @@ pub fn run_pass(ir: &mut Ir, blocks: &mut [Block], env: &mut Env, ctx: &mut Xfor
     }
     tensor::run_pass(ir, blocks, ctx)?;
     if *ctx.used_features & feature::VTG_AS_COMPUTE != 0 {
-        return Err("unported: VertexToCompute / GeometryToCompute".into());
+        if ctx.stage != ShaderStage::Geometry {
+            return Err("unported: VertexToCompute".into());
+        }
+        geometry_to_compute::run_pass(ir, blocks, env, ctx)?;
     }
     Ok(())
 }

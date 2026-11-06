@@ -1,6 +1,7 @@
 //! `Translator.EmitShader`, `EmitOutputsInitialization` and `EmitOps` (the Maxwell path).
 
 use super::context::TranslatorContext;
+use super::host;
 use super::resources::ResourceManager;
 use crate::accessor::Accessor;
 use crate::attr::Stage;
@@ -32,6 +33,17 @@ pub fn emit_shader(
     emit_shader_mode(tc, acc, rm, ir, initialize_outputs, false).map(|(ir, f, _)| (ir, f))
 }
 
+/// `emit_shader` for a program translated as compute (`asCompute`): the stage is emulated by a compute shader.
+pub fn emit_shader_compute(
+    tc: &TranslatorContext,
+    acc: &mut Accessor,
+    rm: &mut ResourceManager,
+    ir: Ir,
+    initialize_outputs: bool,
+) -> Result<(Ir, Vec<FunctionCode>), String> {
+    emit_shader_full(tc, acc, rm, ir, initialize_outputs, false, true).map(|(ir, f, _)| (ir, f))
+}
+
 /// `emit_shader` with the lenient test mode: also returns the recorded emitter errors (instruction name, message).
 pub fn emit_shader_mode(
     tc: &TranslatorContext,
@@ -40,6 +52,18 @@ pub fn emit_shader_mode(
     ir: Ir,
     initialize_outputs: bool,
     lenient: bool,
+) -> Result<EmitResult, String> {
+    emit_shader_full(tc, acc, rm, ir, initialize_outputs, lenient, false)
+}
+
+fn emit_shader_full(
+    tc: &TranslatorContext,
+    acc: &mut Accessor,
+    rm: &mut ResourceManager,
+    ir: Ir,
+    initialize_outputs: bool,
+    lenient: bool,
+    vertex_as_compute: bool,
 ) -> Result<EmitResult, String> {
     if !tc.options.ampere {
         function_match_gate(tc)?;
@@ -56,7 +80,7 @@ pub fn emit_shader_mode(
     let mut errors = Vec::new();
     for (index, &fi) in order.iter().enumerate() {
         let function = &tc.program.functions[fi];
-        let mut ctx = EmitterContext::new(ir, tc, acc, rm, false, index != 0);
+        let mut ctx = EmitterContext::new(ir, tc, acc, rm, vertex_as_compute, index != 0);
         ctx.lenient = lenient;
         ctx.function_addresses.clone_from(&addresses);
         ctx.emit_start()?;
@@ -126,8 +150,21 @@ fn emit_outputs_initialization(ctx: &mut EmitterContext<'_, '_>) -> Result<(), S
             }
         }
     }
+    if stage == Stage::Geometry {
+        let d = &ctx.tc.definitions;
+        if d.gp_passthrough
+            && ctx.uses_viewport_mask()
+            && !ctx.acc.query_host_supports_geometry_shader_passthrough()
+            && host::SUPPORTS_VIEWPORT_MASK
+        {
+            // A passthrough shader writes no mask: all viewports stay enabled.
+            let c0 = ctx.ir.const_(0);
+            let all = ctx.ir.const_(-1);
+            ctx.store_io_e(StorageKind::Output, IoVariable::ViewportMask, None, c0, all);
+        }
+    }
     // NextInputAttributesComponents, per-patch and fixed function attributes only exist after SetNextStage (never called).
-    if stage != Stage::Vertex {
+    if !matches!(stage, Stage::Vertex | Stage::Geometry) {
         return Err("unported: output initialisation for this stage".into());
     }
     Ok(())

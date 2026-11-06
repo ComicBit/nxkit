@@ -101,6 +101,51 @@ impl Definitions {
         }
     }
 
+    /// `GetDefinitions(vertexAsCompute)`: the compute definitions a geometry shader is translated with.
+    pub fn vertex_as_compute(input_fixed: bool, gs: GraphicsState) -> Definitions {
+        Definitions::compute([32, if input_fixed { 1 } else { 32 }, 1], gs)
+    }
+
+    /// `InputTopology.InputVertexCount`.
+    pub fn input_vertex_count(&self) -> i32 {
+        match self.gs.topology {
+            topo::POINTS => 1,
+            topo::LINES => 2,
+            topo::LINES_ADJACENCY => 4,
+            topo::TRIANGLES => 3,
+            topo::TRIANGLES_ADJACENCY => 6,
+            _ => 1,
+        }
+    }
+
+    /// `InputTopology.InputVertexCountNoAdjacency`.
+    pub fn input_vertex_count_no_adjacency(&self) -> i32 {
+        match self.gs.topology {
+            topo::LINES | topo::LINES_ADJACENCY => 2,
+            topo::TRIANGLES | topo::TRIANGLES_ADJACENCY => 3,
+            _ => 1,
+        }
+    }
+
+    /// `GetGeometryOutputIndexBufferStridePerInstance` (`OutputTopology`: LineStrip 6, TriangleStrip 7).
+    pub fn geometry_output_index_buffer_stride_per_instance(&self, fixed_input: bool) -> i32 {
+        let max = self.max_output_vertices;
+        if fixed_input {
+            return max * 2;
+        }
+        max + match self.output_topology {
+            6 => max / 2,
+            7 => max / 3,
+            _ => max,
+        }
+    }
+
+    /// `GetGeometryOutputIndexBufferStride`.
+    pub fn geometry_output_index_buffer_stride(&self, fixed_input: bool) -> i32 {
+        self.geometry_output_index_buffer_stride_per_instance(fixed_input)
+            * self.threads_per_input_primitive
+    }
+
     pub fn attribute_type(&self, location: usize) -> AttributeType {
         self.gs.attr[location]
     }

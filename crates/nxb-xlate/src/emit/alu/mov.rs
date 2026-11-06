@@ -102,7 +102,8 @@ pub(crate) fn emit_sreg(ctx: &mut Ctx, sreg: SReg) -> Result<Opd, String> {
                     let s = ctx.ir.const_(16);
                     ctx.shift_left(pv, s)
                 } else {
-                    return Err("unported: S2r InvocationInfo input topology".into());
+                    let count = ctx.tc.definitions.input_vertex_count();
+                    ctx.ir.const_(count << 16)
                 }
             } else {
                 ctx.ir.const_(0)

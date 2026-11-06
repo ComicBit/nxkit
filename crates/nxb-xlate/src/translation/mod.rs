@@ -10,6 +10,9 @@ pub mod emit_shader;
 pub mod emit_test_util;
 #[cfg(test)]
 mod emit_tests;
+pub mod geometry;
+#[cfg(test)]
+mod geometry_tests;
 pub mod header;
 pub mod host;
 pub mod pipeline;
@@ -18,3 +21,4 @@ pub mod props_fmt;
 pub mod resources;
 pub mod resources_bind;
 pub mod resources_res;
+pub mod vac;

@@ -20,13 +20,18 @@ pub fn options_of(job: &Job) -> Options {
 /// `TranslatorContext.Translate`'s resource manager set-up (`CreateResourceManager`, local and shared memory).
 pub fn create_resource_manager(tc: &TranslatorContext, acc: &mut Accessor) -> ResourceManager {
     let mut rm = ResourceManager::new(tc.stage().into(), None);
+    set_current_memories(tc, acc, &mut rm);
+    rm
+}
+
+/// The local and shared memory set-up of `Translate`, after `CreateResourceManager`.
+pub fn set_current_memories(tc: &TranslatorContext, acc: &mut Accessor, rm: &mut ResourceManager) {
     let uses_local = tc.program.used_features & feature::LOCAL_MEMORY != 0;
     rm.set_current_local_memory(tc.local_memory_size, uses_local);
     if tc.stage() == Stage::Compute {
         let uses_shared = tc.program.used_features & feature::SHARED_MEMORY != 0;
         rm.set_current_shared_memory(acc.query_compute_shared_memory_size(), uses_shared);
     }
-    rm
 }
 
 /// The text of the `emit` phase for a job (what `Probe.Ops("emit", ...)` prints for the first attempt).
@@ -140,12 +145,29 @@ pub struct Transformed {
 
 /// Decode, emit, CFG, SSA, optimiser and transforms of a shader (`Translate` up to `StructuredProgram`).
 pub fn run_to_xform(tc: &TranslatorContext, acc: &mut Accessor) -> Result<Transformed, String> {
+    run_to_xform_mode(tc, acc, false)
+}
+
+/// `run_to_xform` for `Translate(asCompute)`: a geometry shader is emulated by a compute shader.
+pub fn run_to_xform_mode(
+    tc: &TranslatorContext,
+    acc: &mut Accessor,
+    as_compute: bool,
+) -> Result<Transformed, String> {
     use crate::cfg::{Cfg, register_usage, ssa};
     use crate::opt::{Env, PassCtx};
     use crate::translation::props::ShaderStage;
     use crate::xform::{XformCtx, helper::Hfm};
-    let mut rm = create_resource_manager(tc, acc);
-    let (mut ir, codes) = emit_shader(tc, acc, &mut rm, Ir::default(), true)?;
+    let mut rm = if as_compute {
+        super::vac::create_geometry_resource_manager(tc, acc)?
+    } else {
+        create_resource_manager(tc, acc)
+    };
+    let (mut ir, codes) = if as_compute {
+        super::emit_shader::emit_shader_compute(tc, acc, &mut rm, Ir::default(), true)?
+    } else {
+        emit_shader(tc, acc, &mut rm, Ir::default(), true)?
+    };
     if codes.is_empty() {
         return Err("no function".into());
     }
@@ -159,6 +181,9 @@ pub fn run_to_xform(tc: &TranslatorContext, acc: &mut Accessor) -> Result<Transf
     }
     let stage: ShaderStage = tc.stage().into();
     let mut used_features = tc.program.used_features as u32;
+    if as_compute {
+        used_features |= crate::xform::feature::VTG_AS_COMPUTE;
+    }
     let mut hfm = Hfm::new(codes.len(), stage);
     let mut env = Env { rm: &mut rm, acc };
     let pctx = PassCtx {
@@ -177,6 +202,7 @@ pub fn run_to_xform(tc: &TranslatorContext, acc: &mut Accessor) -> Result<Transf
                 stage,
                 used_features: &mut used_features,
                 hfm: &mut hfm,
+                definitions: Some(&tc.definitions),
             };
             crate::xform::run_pass(&mut ir, &mut cfg.blocks, &mut env, &mut x)?;
         }

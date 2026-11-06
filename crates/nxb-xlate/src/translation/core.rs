@@ -19,9 +19,9 @@ use crate::types::AttributeType;
 use AggType as Agg;
 
 /// The resource manager seen from the structured program (`GetConstantBufferBinding` queries the accessor).
-struct StructRes<'a, 'b> {
-    rm: &'a mut ResourceManager,
-    acc: &'a mut Accessor<'b>,
+pub(super) struct StructRes<'a, 'b> {
+    pub(super) rm: &'a mut ResourceManager,
+    pub(super) acc: &'a mut Accessor<'b>,
 }
 
 impl StructResources for StructRes<'_, '_> {
@@ -46,8 +46,11 @@ fn attr_num(t: AttributeType) -> u32 {
     }
 }
 
-fn definitions_of(tc: &TranslatorContext) -> cp::Definitions {
-    let d = &tc.definitions;
+pub(super) fn definitions_of(tc: &TranslatorContext) -> cp::Definitions {
+    definitions_for(&tc.definitions)
+}
+
+pub(super) fn definitions_for(d: &super::definitions::Definitions) -> cp::Definitions {
     let elem = |t: AttributeType| match t {
         AttributeType::Float => Agg::FP32,
         AttributeType::Sint => Agg::S32,
@@ -135,7 +138,7 @@ fn mem_defs(v: &[tp::MemoryDefinition]) -> Vec<cp::MemoryDef> {
         .collect()
 }
 
-fn properties_of(rm: &ResourceManager) -> cp::Properties {
+pub(super) fn properties_of(rm: &ResourceManager) -> cp::Properties {
     let p = &rm.properties;
     cp::Properties {
         constant_buffers: p.constant_buffers.values().map(buffer_def).collect(),
@@ -148,7 +151,7 @@ fn properties_of(rm: &ResourceManager) -> cp::Properties {
     }
 }
 
-fn host_caps(acc: &Accessor) -> cp::HostCaps {
+pub(super) fn host_caps(acc: &Accessor) -> cp::HostCaps {
     use super::host as h;
     cp::HostCaps {
         reduced_precision: acc.query_host_reduced_precision(),
@@ -165,7 +168,7 @@ fn host_caps(acc: &Accessor) -> cp::HostCaps {
     }
 }
 
-fn buf_info(rm: &ResourceManager, sb: bool) -> Vec<BufferInfo> {
+pub(super) fn buf_info(rm: &ResourceManager, sb: bool) -> Vec<BufferInfo> {
     let l = if sb {
         rm.get_storage_buffer_descriptors()
     } else {
@@ -182,7 +185,7 @@ fn buf_info(rm: &ResourceManager, sb: bool) -> Vec<BufferInfo> {
         .collect()
 }
 
-fn tex_info(l: Vec<tp::TextureDescriptor>) -> Vec<TexInfo> {
+pub(super) fn tex_info(l: Vec<tp::TextureDescriptor>) -> Vec<TexInfo> {
     l.iter()
         .map(|t| TexInfo {
             binding: t.binding as i64,
