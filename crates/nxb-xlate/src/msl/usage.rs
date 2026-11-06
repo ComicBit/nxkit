@@ -49,6 +49,8 @@ pub struct Usage {
     pub frag_depth: bool,
     /// The program discards.
     pub discard: bool,
+    /// The program has a fragment shader interlock region.
+    pub interlock: bool,
     /// The program has a loop, a switch lowering or a call.
     pub calls: bool,
     /// Constant buffer bindings read at the constant vec4 index 100, component 1 (the base instance).
@@ -136,6 +138,7 @@ pub fn collect(info: &StructInfo) -> Usage {
         match inst {
             Inst::Barrier | Inst::SubgroupBarrier => u.barrier = true,
             Inst::Discard => u.discard = true,
+            Inst::FSIBegin | Inst::FSIEnd => u.interlock = true,
             Inst::Call => u.calls = true,
             Inst::SwizzleAdd => u.lane_id = true,
             _ => {}

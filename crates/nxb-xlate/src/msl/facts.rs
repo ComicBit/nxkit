@@ -37,27 +37,12 @@ pub fn vertex_inputs(p: &Plan) -> Vec<VertexInput> {
     v
 }
 
-/// A binding the shader writes through.
-fn writes(b: &Binding) -> bool {
-    b.rw == Some(true)
-        || b.msl_type.contains("access::write")
-        || b.msl_type.contains("access::read_write")
-}
-
 /// The raster facts. Only the pixel shader has any besides the default.
 pub fn raster(shader: Shader, p: &Plan, discards: bool, bindings: &[Binding]) -> Raster {
-    if shader != Shader::Fragment {
-        return Raster::default();
-    }
-    let mut colors = p.colors.clone();
-    colors.sort_unstable();
-    colors.dedup();
-    Raster {
-        discard: Some(discards || bindings.iter().any(writes)),
-        sample_mask: Some(false),
-        primitive_id: p.primitive_id,
-        colors: Some(colors),
-        ..Raster::default()
+    if shader == Shader::Fragment {
+        super::facts_ps::raster(p, discards, bindings)
+    } else {
+        Raster::default()
     }
 }
 

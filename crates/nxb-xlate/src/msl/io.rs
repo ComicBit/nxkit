@@ -84,6 +84,8 @@ pub struct Plan {
     pub frag_outs: Vec<FragOut>,
     /// The fragment shader reads a primitive id.
     pub primitive_id: bool,
+    /// The fragment shader writes a sample mask (the IR has no such output, so this stays false).
+    pub sample_mask: bool,
     /// The vertex shader writes a layer.
     pub layer: bool,
     /// The shader writes a viewport index.
