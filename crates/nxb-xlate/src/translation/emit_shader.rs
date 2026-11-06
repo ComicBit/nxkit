@@ -1,6 +1,7 @@
 //! `Translator.EmitShader`, `EmitOutputsInitialization` and `EmitOps` (the Maxwell path).
 
 use super::context::TranslatorContext;
+use super::fsi_match::{self, FunctionType};
 use super::host;
 use super::resources::ResourceManager;
 use crate::accessor::Accessor;
@@ -65,11 +66,23 @@ fn emit_shader_full(
     lenient: bool,
     vertex_as_compute: bool,
 ) -> Result<EmitResult, String> {
-    if !tc.options.ampere {
-        function_match_gate(tc)?;
-    }
+    let types = if tc.options.ampere {
+        vec![FunctionType::User; tc.program.functions.len()]
+    } else {
+        fsi_match::run_pass(&tc.program)
+    };
+    let builtins: Vec<(u64, FunctionType)> = tc
+        .program
+        .functions
+        .iter()
+        .zip(&types)
+        .filter(|(_, t)| **t != FunctionType::User)
+        .map(|(f, t)| (f.address, *t))
+        .collect();
     // `program.Where(!IsCompilerGenerated).OrderBy(Address)`: the position is the function id.
-    let mut order: Vec<usize> = (0..tc.program.functions.len()).collect();
+    let mut order: Vec<usize> = (0..tc.program.functions.len())
+        .filter(|&i| types[i] == FunctionType::User)
+        .collect();
     order.sort_by_key(|&i| tc.program.functions[i].address);
     let addresses: Vec<u64> = order
         .iter()
@@ -83,6 +96,7 @@ fn emit_shader_full(
         let mut ctx = EmitterContext::new(ir, tc, acc, rm, vertex_as_compute, index != 0);
         ctx.lenient = lenient;
         ctx.function_addresses.clone_from(&addresses);
+        ctx.builtin_functions.clone_from(&builtins);
         ctx.emit_start()?;
         if initialize_outputs && index == 0 {
             emit_outputs_initialization(&mut ctx)?;
@@ -103,28 +117,6 @@ fn emit_shader_full(
         funcs.push(FunctionCode { code });
     }
     Ok((ir, funcs, errors))
-}
-
-/// `FunctionMatch.RunPass` only changes anything when a function reads the FSI SRs `Affinity` and `OrderingTicket`
-/// (every pattern that sets `hasGetAddress` does). The pass itself is not ported: such a program fails closed.
-fn function_match_gate(tc: &TranslatorContext) -> Result<(), String> {
-    use crate::maxwell::enums::SReg;
-    use crate::maxwell::insts::InstS2r;
-    for f in tc.program.functions.iter().skip(1) {
-        for b in &f.blocks {
-            for op in &b.ops {
-                if op.name == InstName::S2r {
-                    let r = InstS2r(op.raw).s_reg();
-                    if r == SReg::Affinity || r == SReg::OrderingTicket {
-                        return Err(
-                            "unported: FunctionMatch (fragment shader interlock functions)".into(),
-                        );
-                    }
-                }
-            }
-        }
-    }
-    Ok(())
 }
 
 fn emit_outputs_initialization(ctx: &mut EmitterContext<'_, '_>) -> Result<(), String> {

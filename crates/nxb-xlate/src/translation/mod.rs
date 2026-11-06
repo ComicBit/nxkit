@@ -10,6 +10,10 @@ pub mod emit_shader;
 pub mod emit_test_util;
 #[cfg(test)]
 mod emit_tests;
+pub mod fsi_match;
+#[cfg(test)]
+mod fsi_match_tests;
+pub mod fsi_patterns;
 pub mod geometry;
 #[cfg(test)]
 mod geometry_tests;

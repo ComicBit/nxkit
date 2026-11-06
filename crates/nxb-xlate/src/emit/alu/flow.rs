@@ -6,6 +6,7 @@ use crate::ir::ops::{FALSE, OperandType, regtype};
 use crate::maxwell::enums::Ccc;
 use crate::maxwell::insts::*;
 use crate::maxwell::names::Emit;
+use crate::translation::fsi_match::FunctionType;
 
 type Ctx<'a, 'b> = EmitterContext<'a, 'b>;
 type R = Result<(), String>;
@@ -158,9 +159,17 @@ fn brx(ctx: &mut Ctx) -> R {
     Ok(())
 }
 
-/// `Cal`: a call of a user function (the FSI built-ins need `FunctionMatch`, which is not ported).
+/// `Cal`: a call of a user function or the begin and end of the fragment shader interlock.
 fn cal(ctx: &mut Ctx) -> R {
     let address = ctx.curr_op.absolute_address();
+    if let Some((_, ty)) = ctx.builtin_functions.iter().find(|(a, _)| *a == address) {
+        match ty {
+            FunctionType::FsiBegin => ctx.fsi_begin(),
+            FunctionType::FsiEnd => ctx.fsi_end(),
+            _ => {}
+        }
+        return Ok(());
+    }
     let id = ctx
         .function_addresses
         .iter()

@@ -48,6 +48,8 @@ pub struct EmitterContext<'a, 'b> {
     pub errors: Vec<(String, String)>,
     /// Addresses of the functions in id order (`DecodedProgram.GetFunctionByAddress(..).Id`).
     pub function_addresses: Vec<u64>,
+    /// The functions `FunctionMatch` replaced: the fragment shader interlock built-ins and the dropped helpers.
+    pub builtin_functions: Vec<(u64, crate::translation::fsi_match::FunctionType)>,
     ops: Vec<NodeId>,
     tag_locals: HashMap<u32, Opd>,
     labels: HashMap<u64, BlockLabel>,
@@ -75,6 +77,7 @@ impl<'a, 'b> EmitterContext<'a, 'b> {
             lenient: false,
             errors: Vec::new(),
             function_addresses: Vec::new(),
+            builtin_functions: Vec::new(),
             ops: Vec::new(),
             tag_locals: HashMap::new(),
             labels: HashMap::new(),
