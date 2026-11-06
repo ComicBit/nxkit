@@ -26,6 +26,7 @@ pub mod retro;
 pub mod scanfile;
 pub mod shaders;
 pub mod sized;
+pub mod sjis;
 pub mod snowdrop;
 pub mod src;
 pub mod sumo;

@@ -55,23 +55,6 @@ fn undcx(d: &[u8], label: &str) -> R<Vec<u8>> {
     Ok(out)
 }
 
-/// A Shift JIS name for ASCII and half-width katakana, two-byte characters need the table this port does not carry.
-fn sjis(b: &[u8]) -> R<String> {
-    let mut s = String::new();
-    for &c in b {
-        match c {
-            0..=0x7f => s.push(c as char),
-            0xa1..=0xdf => s.push(char::from_u32(0xff61 + u32::from(c) - 0xa1).unwrap_or('?')),
-            _ => {
-                return Err(SplitError::Unsupported(
-                    "a Shift JIS name with double-byte characters (BND3)".into(),
-                ));
-            }
-        }
-    }
-    Ok(s)
-}
-
 /// `bnd3_members`: (name, data) of each entry of a BND3 archive.
 fn bnd3_members(d: &[u8], label: &str) -> R<Vec<(String, Vec<u8>)>> {
     let (fmt, be) = (*d.get(12).unwrap_or(&0), *d.get(13).unwrap_or(&1));
@@ -99,7 +82,7 @@ fn bnd3_members(d: &[u8], label: &str) -> R<Vec<(String, Vec<u8>)>> {
             .get(nm..)
             .and_then(|x| x.iter().position(|&b| b == 0))
             .ok_or_else(|| SplitError::Red("ValueError: substring not found".into()))?;
-        let name = sjis(&d[nm..nm + z])?.replace('\\', "/");
+        let name = crate::sjis::decode(&d[nm..nm + z]).replace('\\', "/");
         let name = name
             .split_once("/Source/")
             .map_or(name.as_str(), |x| x.1)
@@ -157,3 +140,6 @@ pub fn plan(files: &[File], p: &mut Plan) -> R<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;
