@@ -13,6 +13,8 @@ pub const TRANSLATOR_ID: &str = "msl-2.0";
 
 pub mod abi;
 pub mod args;
+#[cfg(test)]
+mod bind_tests;
 pub mod buffers;
 pub mod control;
 pub mod emit;
@@ -38,6 +40,7 @@ pub mod refl;
 pub mod spill;
 #[cfg(test)]
 mod tests;
+pub mod texoff;
 pub mod types;
 pub mod usage;
 pub mod variant;

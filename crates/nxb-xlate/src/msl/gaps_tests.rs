@@ -11,6 +11,7 @@ use crate::driver::BufferInfo;
 use crate::ir::{Inst, IoVariable, StorageKind};
 use crate::structured::ast::{A, BlockType};
 use crate::structured::types::AggType;
+use crate::types::SamplerType;
 
 pub(super) fn translate(b: &B) -> Translated {
     let ctx = Context {
@@ -237,6 +238,30 @@ fn the_hmma_helper_runs_on_simdgroup_matrices() {
     }
 }
 
+fn bind_1d_level() -> B {
+    super::bind_tests::sample(SamplerType::TEXTURE_1D, 1 << 5, |_, u, v| vec![u, v])
+}
+
+fn bind_off_dyn() -> B {
+    super::bind_tests::sample(SamplerType::TEXTURE_2D, 1 << 6, |_, u, v| vec![u, v, u, v])
+}
+
+fn bind_off_dyn_level() -> B {
+    super::bind_tests::sample(SamplerType::TEXTURE_2D, (1 << 6) | (1 << 5), |b, u, v| {
+        vec![u, v, b.k(0), u, v]
+    })
+}
+
+fn bind_3d_array() -> B {
+    let ty = SamplerType(SamplerType::TEXTURE_3D.0 | SamplerType::ARRAY);
+    super::bind_tests::sample(ty, 0, |b, u, v| vec![u, v, u, b.k(1)])
+}
+
+fn bind_cube_array() -> B {
+    let ty = SamplerType(SamplerType::TEXTURE_CUBE.0 | SamplerType::ARRAY);
+    super::bind_tests::image(ty, 4)
+}
+
 /// The samples compile with Apple's compiler.
 #[test]
 #[ignore]
@@ -257,6 +282,15 @@ fn gaps_metal_compiles_the_samples() {
             "ps_pool_sep",
             super::pool_tests::pool_sample(64, 7, 0x2a, true, false),
         ),
+        ("ps_1d_level", bind_1d_level()),
+        ("ps_off_dyn", bind_off_dyn()),
+        ("ps_off_dyn_level", bind_off_dyn_level()),
+        ("ps_tex3d_array", bind_3d_array()),
+        (
+            "cs_img_cube",
+            super::bind_tests::image(SamplerType::TEXTURE_CUBE, 3),
+        ),
+        ("cs_img_cube_array", bind_cube_array()),
     ];
     for (n, b) in samples {
         let src = dir.join(format!("gaps_{n}.metal"));

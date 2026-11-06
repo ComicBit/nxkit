@@ -34,17 +34,29 @@ impl Em<'_> {
 
     /// The coordinate arguments of an image access: the coordinate and the array layer.
     fn image_coords(&mut self, o: &OpData, i: &mut usize, t: &AstTex) -> R<Vec<String>> {
-        if t.ty.0 & SamplerType::MASK == 5 {
-            return Err("unported: cube image access".into());
-        }
         let dims = dimensions(t.ty)?;
         let mut c = Vec::new();
         for _ in 0..dims {
             c.push(self.tsrc(o, i, AggType::S32)?.s);
         }
-        let mut out = vec![vec_of("uint", &c)];
+        let mask = t.ty.0 & SamplerType::MASK;
+        // A cube image takes the texel and then the face. The face is the third coordinate.
+        let mut out = match (mask, c.pop()) {
+            (5, Some(face)) => vec![vec_of("uint", &c), format!("uint({face})")],
+            (_, Some(last)) => {
+                c.push(last);
+                vec![vec_of("uint", &c)]
+            }
+            _ => return Err("image without coordinates".into()),
+        };
         if t.ty.0 & SamplerType::ARRAY != 0 {
-            out.push(format!("uint({})", self.tsrc(o, i, AggType::S32)?.s));
+            let layer = self.tsrc(o, i, AggType::S32)?.s;
+            if mask == 4 {
+                self.notes
+                    .push("3D image array is bound as a 3D image, the layer is ignored".into());
+            } else {
+                out.push(format!("uint({layer})"));
+            }
         }
         Ok(out)
     }

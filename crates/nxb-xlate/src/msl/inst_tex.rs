@@ -3,6 +3,7 @@
 use super::args::SET_NAME;
 use super::emit::{Em, R, Shader, Val};
 use super::pool;
+use super::texoff::{Level, Off, shifted};
 use super::types::scalar;
 use super::usage::is_plain_sample;
 use crate::structured::ast::{AstTex, OpData};
@@ -140,15 +141,6 @@ impl Em<'_> {
         })
     }
 
-    fn offset_of(&mut self, o: &OpData, i: &mut usize, dims: i32) -> R<String> {
-        let mut parts = Vec::new();
-        for _ in 0..dims {
-            let v = self.tconst(o, i)?;
-            parts.push(v.to_string());
-        }
-        Ok(vec_of("int", &parts))
-    }
-
     /// Texture sample, gather and fetch.
     pub(super) fn sample(&mut self, o: &OpData) -> R<Option<Val>> {
         let t = o.tex.clone().ok_or("not a texture operation")?;
@@ -233,7 +225,14 @@ impl Em<'_> {
         } else {
             None
         };
-        let array_arg = array.map(|a| format!("uint(max({a}, 0))"));
+        let layered = t.ty.0 & SamplerType::MASK != 4;
+        if array.is_some() && !layered {
+            self.notes
+                .push("3D texture array is bound as a 3D texture, the layer is ignored".into());
+        }
+        let array_arg = array
+            .filter(|_| layered)
+            .map(|a| format!("uint(max({a}, 0))"));
         let mut opts = Vec::new();
         if let Some(b) = &bias {
             opts.push(format!("bias({b})"));
@@ -241,16 +240,47 @@ impl Em<'_> {
         if let Some(l) = level.as_ref().filter(|_| !int_coords) {
             opts.push(format!("level({l})"));
         }
-        if grad {
+        let one_d = t.ty.0 & SamplerType::MASK == 1;
+        let lod_given = level.as_deref().is_some_and(|l| l != "0.0f");
+        if one_d && !int_coords && (bias.is_some() || grad || lod_given) {
+            self.notes.push(
+                "1D texture sample with a level, bias or gradient reads the default level (Metal has no such form)"
+                    .into(),
+            );
+        }
+        if one_d {
+            opts.clear();
+        } else if grad {
             let g = match dims {
                 2 => "gradient2d",
                 3 if t.ty.0 & SamplerType::MASK == 5 => "gradientcube",
-                3 => "gradient3d",
-                _ => return Err("unported: gradient of a 1D texture".into()),
+                _ => "gradient3d",
             };
             opts.push(format!("{g}({}, {})", dxy[0], dxy[1]));
         }
-        let call = |coord: &str, off: Option<&str>| -> String {
+        let implicit = self.shader == Shader::Fragment
+            && !int_coords
+            && !gather
+            && !grad
+            && level.is_none()
+            && bias.is_none();
+        let lod = match (&level, &r.smp) {
+            (Some(l), _) if int_coords => Level::Int(l),
+            (Some(l), _) if !gather => Level::Float(l),
+            (None, Some(s)) if implicit => Level::Implicit(s),
+            _ => Level::Base,
+        };
+        let call = |coord: &str, off: Option<&Off>| -> String {
+            let mut off_arg = None;
+            let mut shift = None;
+            if let Some(x) = off.or_else(|| offsets.first()) {
+                if x.constant && !int_coords {
+                    off_arg = Some(x.vector());
+                } else {
+                    shift = Some(shifted(coord, x, &r.tex, int_coords, &lod));
+                }
+            }
+            let coord = shift.as_deref().unwrap_or(coord);
             let mut a: Vec<String> = Vec::new();
             if let Some(s) = r.smp.as_ref().filter(|_| !int_coords) {
                 a.push(s.clone());
@@ -271,7 +301,7 @@ impl Em<'_> {
                 a.push(d.clone());
             }
             if gather {
-                let off = off.map_or_else(|| offsets.first().cloned(), |x| Some(x.to_string()));
+                let off = off_arg;
                 if shadow {
                     a.extend(off);
                     return format!("{}.gather_compare({})", r.tex, a.join(", "));
@@ -282,7 +312,7 @@ impl Em<'_> {
                 return format!("{}.gather({})", r.tex, a.join(", "));
             }
             a.extend(opts.iter().cloned());
-            a.extend(offsets.first().cloned());
+            a.extend(off_arg);
             let name = if shadow { "sample_compare" } else { "sample" };
             format!("{}.{name}({})", r.tex, a.join(", "))
         };
