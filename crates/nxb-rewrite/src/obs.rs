@@ -1,13 +1,13 @@
 //! Observation gates: the registered ones, the address region gates found by the SDK's own symbols, and the
 //! `StandardAllocator::Initialize` gate.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use nxb_a64::{Insn, Op, Reg, decode};
 
 use crate::error::{RewriteError, fail};
 use crate::pat::{memop, nops, preg};
-use crate::rw::{R, Rw, dis, num};
+use crate::rw::{R, Rw};
 use crate::scan::Kind;
 use std::collections::BTreeMap;
 
@@ -138,50 +138,10 @@ impl Rw {
             .any(|w| (w[0].addr as i64) <= off && off < w[w.len() - 1].addr as i64 + 4)
     }
 
-    /// x9 to x17 carry nothing at `off`: each is written before it is read, up to a `bl` or `ret`.
-    pub(crate) fn scratch_dead(&self, off: i64) -> R<bool> {
-        let mut written: HashSet<Option<u32>> = HashSet::new();
-        let mut a = off;
-        for _ in 0..16 {
-            if !(0 <= a && a < self.text_end) {
-                return Ok(false);
-            }
-            let ins = dis(self.w32(a), a)?;
-            if matches!(ins.mn, "bl" | "ret") {
-                return Ok(true);
-            }
-            if ins.mn == "b" {
-                a = ins.imm(0).unwrap_or(0);
-                continue;
-            }
-            if matches!(ins.mn, "br" | "blr" | "cbz" | "cbnz" | "tbz" | "tbnz")
-                || ins.mn.starts_with("b.")
-            {
-                return Ok(false);
-            }
-            for r in &ins.reads {
-                let n = num(r);
-                if n.is_some_and(|n| (9..=17).contains(&n)) && !written.contains(&n) {
-                    return Ok(false);
-                }
-            }
-            for r in &ins.writes {
-                written.insert(num(r));
-            }
-            a += 4;
-        }
-        Ok(false)
-    }
-
-    fn after_bl(&self, off: i64) -> bool {
-        off >= 4 && self.w32(off - 4) >> 26 == 0x25
-    }
-
     /// The registered observation gates of the build.
     pub(crate) fn apply_obs(
         &mut self,
         obs: &[crate::patches::Obs],
-        starts: &[i64],
         kinds: &BTreeMap<i64, (Kind, i64)>,
         windows: &[Vec<Insn>],
     ) -> R<()> {
@@ -193,14 +153,7 @@ impl Rw {
                     "assertion failed: observation gate original instruction mismatch {off:#x}: {w:08x}"
                 ));
             }
-            if !(starts.binary_search(&off).is_ok()
-                || self.after_bl(off)
-                || self.scratch_dead(off)?)
-            {
-                return fail(format!(
-                    "assertion failed: observation gate neither at a function entry, after a bl nor before a call with x9-x17 unread {off:#x}"
-                ));
-            }
+            // any instruction `site_obs` can relocate: the gate frame saves x0 to x28 and the flags and restores them
             if !(off < self.text_end && !kinds.contains_key(&off) && !Self::in_window(windows, off))
             {
                 return fail(format!(
@@ -218,10 +171,10 @@ impl Rw {
     /// The address region gates and the `StandardAllocator::Initialize` gates found by symbol.
     pub(crate) fn symbol_gates(
         &mut self,
-        starts: &[i64],
         kinds: &BTreeMap<i64, (Kind, i64)>,
         windows: &[Vec<Insn>],
         log: &mut Vec<String>,
+        ue_call: Option<usize>,
     ) -> R<Vec<ObsRow>> {
         let sym = defined(&self.img);
         let mut rows: Vec<ObsRow> = Vec::new();
@@ -257,11 +210,7 @@ impl Rw {
                     ];
                     let mut bad = None;
                     for (off, _, _) in &sites {
-                        let ok = starts.binary_search(off).is_ok()
-                            || self.after_bl(*off)
-                            || self.scratch_dead(*off)?;
-                        if !ok
-                            || *off >= self.text_end
+                        if *off >= self.text_end
                             || kinds.contains_key(off)
                             || Self::in_window(windows, *off)
                         {
@@ -302,6 +251,20 @@ impl Rw {
                 id: OBS_STDALLOC_INIT,
                 word: format!("{:08x}", self.w32(off)),
                 why: format!("StandardAllocator::Initialize(void *, size_t{sfx}) entry: the size in x2, capped when the address in x1 is null"),
+            });
+        }
+        if let Some(c) = ue_call {
+            let c = c as i64;
+            if c >= self.text_end || kinds.contains_key(&c) || Self::in_window(windows, c) {
+                return fail(format!(
+                    "assertion failed: FMallocBinned3 gate conflicts with a rewrite site {c:#x}"
+                ));
+            }
+            rows.push(ObsRow {
+                off: c,
+                id: 21,
+                word: "d503201f".into(),
+                why: "FMallocBinned3 constructor call (cut): the object in x0; the host puts its allocator's vtable in (hle_uemalloc.c)".into(),
             });
         }
         for r in &rows {

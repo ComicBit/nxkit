@@ -38,10 +38,20 @@ pub struct Stage<'a> {
 /// The outcomes so far.`abort` when the run stopped (stages waiting for a dependency that will never run give up).
 struct Board {
     slots: Mutex<(Vec<Option<Outcome>>, bool)>,
+    /// How long each early stage's work took (its own time, not the wait for its dependencies).
+    took: Mutex<Vec<Option<f64>>>,
     cv: Condvar,
 }
 
 impl Board {
+    fn took(&self, i: usize, secs: f64) {
+        self.took.lock().unwrap_or_else(PoisonError::into_inner)[i] = Some(secs);
+    }
+
+    fn elapsed(&self, i: usize) -> Option<f64> {
+        self.took.lock().unwrap_or_else(PoisonError::into_inner)[i]
+    }
+
     fn put(&self, i: usize, o: Outcome) {
         self.slots.lock().unwrap_or_else(PoisonError::into_inner).0[i] = Some(o);
         self.cv.notify_all();
@@ -87,6 +97,7 @@ pub fn run(p: &Progress, stages: Vec<Stage<'_>>) -> Result<(), String> {
     let n = stages.len();
     let board = Board {
         slots: Mutex::new((vec![None; n], false)),
+        took: Mutex::new(vec![None; n]),
         cv: Condvar::new(),
     };
     let board = &board;
@@ -97,7 +108,12 @@ pub fn run(p: &Progress, stages: Vec<Stage<'_>>) -> Result<(), String> {
                 Work::Early(f) => {
                     let deps = st.deps.clone();
                     s.spawn(move || {
-                        let o = board.wait(&deps).and_then(|()| f());
+                        let o = board.wait(&deps).and_then(|()| {
+                            let t0 = std::time::Instant::now();
+                            let r = f();
+                            board.took(i, t0.elapsed().as_secs_f64());
+                            r
+                        });
                         board.put(i, o);
                     });
                     Work::Reused(String::new())
@@ -125,8 +141,9 @@ pub fn run(p: &Progress, stages: Vec<Stage<'_>>) -> Result<(), String> {
                     _ => board.get(i),
                 };
                 // a hidden stage's failure is reported by the stage that needs it, in that stage's turn
+                // an early stage ended long before its turn: its own time is the elapsed time of its `stage_end`
                 if name.is_some() {
-                    p.end(&o?, true);
+                    p.end_with(&o?, true, board.elapsed(i));
                 }
             }
             Ok(())
@@ -287,6 +304,47 @@ mod tests {
         ];
         assert!(run(&p, stages).is_ok());
         assert!(seen.load(Ordering::SeqCst));
+    }
+
+    /// An early stage that ran during an earlier turn reports its own running time, not the time since its `stage`.
+    #[test]
+    fn early_stage_reports_its_own_time() {
+        let buf = Buf::default();
+        let p = Progress::new(Mode::Json, Box::new(buf.clone()));
+        let stages = vec![
+            Stage {
+                name: Some("slow turn".into()),
+                deps: vec![],
+                work: Work::Turn(Box::new(|| {
+                    std::thread::sleep(Duration::from_millis(300));
+                    Ok(String::new())
+                })),
+            },
+            Stage {
+                name: Some("early".into()),
+                deps: vec![],
+                work: Work::Early(Box::new(|| {
+                    std::thread::sleep(Duration::from_millis(120));
+                    Ok("built".into())
+                })),
+            },
+        ];
+        assert!(run(&p, stages).is_ok());
+        let text = String::from_utf8_lossy(&buf.0.lock().unwrap_or_else(PoisonError::into_inner))
+            .into_owned();
+        let end = text
+            .lines()
+            .filter_map(|l| nxb_pyjson::parse(l).ok())
+            .find(|v| {
+                v.get("ev").and_then(|x| x.as_str()) == Some("stage_end")
+                    && v.get("name").and_then(|x| x.as_str()) == Some("early")
+            })
+            .unwrap();
+        let nxb_pyjson::Value::Float(el) = end.get("elapsed").unwrap() else {
+            panic!("no elapsed");
+        };
+        let el = *el;
+        assert!((0.1..0.25).contains(&el), "elapsed {el}");
     }
 
     #[test]

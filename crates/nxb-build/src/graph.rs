@@ -11,52 +11,21 @@ use nxb_model::ContentKey;
 use crate::Args;
 use crate::events::Progress;
 
-/// One NSP/NSZ of the folder: (title ID, version, path).
-type Package = (String, u32, PathBuf);
-
-fn packages(dir: &Path) -> Result<Vec<Package>, String> {
-    let mut out = Vec::new();
-    for e in std::fs::read_dir(dir)
-        .map_err(|e| format!("{}: {e}", dir.display()))?
-        .flatten()
-    {
-        let name = e.file_name().to_string_lossy().into_owned();
-        let lower = name.to_lowercase();
-        if !(lower.ends_with(".nsp") || lower.ends_with(".nsz")) || name.starts_with("._") {
-            continue;
-        }
-        let tags: Vec<&str> = name
-            .split('[')
-            .filter_map(|t| t.split(']').next())
-            .collect();
-        let title = tags
-            .iter()
-            .find(|t| t.len() == 16 && t.chars().all(|c| c.is_ascii_hexdigit()))
-            .map(|t| t.to_uppercase());
-        let version = tags
-            .iter()
-            .find_map(|t| t.strip_prefix('v').and_then(|v| v.parse::<u32>().ok()))
-            .unwrap_or(0);
-        if let Some(t) = title {
-            out.push((t, version, e.path()));
-        }
-    }
-    out.sort();
-    Ok(out)
-}
-
-/// The game profile (`dm/games/<title>/game.tsv`): key -> values.
-fn profile(engine: &Path, title: &str) -> Result<(PathBuf, BTreeMap<String, String>), String> {
-    let dir = engine.join("dm/games").join(title);
-    let text = std::fs::read_to_string(dir.join("game.tsv"))
-        .map_err(|e| format!("no profile for {title}: {e}"))?;
+/// The game profile `dir/game.tsv`: key -> values. A provisional profile that the survey has not written yet reads
+/// as no keys (`missing_ok`).
+fn profile_at(dir: &Path, missing_ok: bool) -> Result<(PathBuf, BTreeMap<String, String>), String> {
+    let text = match std::fs::read_to_string(dir.join("game.tsv")) {
+        Ok(t) => t,
+        Err(_) if missing_ok => String::new(),
+        Err(e) => return Err(format!("{}: {e}", dir.join("game.tsv").display())),
+    };
     let mut m = BTreeMap::new();
     for l in text.lines().filter(|l| !l.starts_with('#')) {
         if let Some((k, v)) = l.split_once('\t') {
             m.entry(k.to_string()).or_insert_with(|| v.to_string());
         }
     }
-    Ok((dir, m))
+    Ok((dir.to_path_buf(), m))
 }
 
 fn identity(p: &Path) -> String {
@@ -105,33 +74,89 @@ pub struct Build {
     pub engine: PathBuf,
     /// The stages.
     pub nodes: Vec<Node>,
+    /// What the game is read from.
+    pub src: crate::inputs::Inputs,
+    /// The profile is a provisional one (`<work>/profile/<title>`, or `--profile-out`): the engine has none for the
+    /// game or `--provisional` asked for one.
+    pub prov: bool,
+}
+
+impl Build {
+    /// A build with nothing but a work folder and a provisional profile folder.
+    #[cfg(test)]
+    pub(crate) fn for_test(work: PathBuf, profile: PathBuf) -> Build {
+        Build {
+            title: "0400000000000000".into(),
+            base: PathBuf::new(),
+            updates: Vec::new(),
+            package: "v0".into(),
+            split_versions: Vec::new(),
+            work,
+            profile: (profile, BTreeMap::new()),
+            shaders: PathBuf::new(),
+            out: PathBuf::new(),
+            gpus: Vec::new(),
+            engine: PathBuf::new(),
+            nodes: Vec::new(),
+            src: crate::inputs::Inputs {
+                source: crate::inputs::Source::Nup,
+                app: 0x0400_0000_0000_0000,
+                base: PathBuf::new(),
+                updates: Vec::new(),
+                dlc: Vec::new(),
+                app_flag: None,
+                has_base: false,
+                notes: Vec::new(),
+            },
+            prov: true,
+        }
+    }
+
+    /// The shader split runs inside the extract's pass (packages with a profile in place).
+    pub(crate) fn split_fused(&self) -> bool {
+        self.src.source == crate::inputs::Source::Packages && self.nodes[0].reused.is_none()
+    }
 }
 
 /// Discovers the inputs and builds the graph.
 pub fn plan(a: &Args) -> Result<Build, String> {
-    let pk = packages(&a.nsp_dir)?;
-    let base = pk
-        .iter()
-        .filter(|p| {
-            p.0.ends_with("000")
-                && a.title_id
-                    .as_ref()
-                    .is_none_or(|t| t.eq_ignore_ascii_case(&p.0))
-        })
-        .min_by_key(|p| p.1)
-        .ok_or("no base game NSP in the folder")?;
-    let title = base.0.clone();
-    let upd_title = format!("{}800", &title[..13]);
-    let updates: Vec<(u32, PathBuf)> = pk
-        .iter()
-        .filter(|p| p.0 == upd_title)
-        .map(|p| (p.1, p.2.clone()))
-        .collect();
+    let src = crate::inputs::discover(a)?;
+    let title = format!("{:016X}", src.app);
+    let (base, updates) = (src.base.clone(), src.updates.clone());
+    // the folder the build folder and the output default into: the input folder, or the one holding the .nup file
+    let home: PathBuf = if a.nsp_dir.is_file() {
+        a.nsp_dir
+            .parent()
+            .map_or_else(|| PathBuf::from("."), Path::to_path_buf)
+    } else {
+        a.nsp_dir.clone()
+    };
     let engine = a
         .engine
         .clone()
         .ok_or("--engine <engine folder> is required (profiles under dm/games)")?;
-    let prof = profile(&engine, &title)?;
+    let work = a
+        .work_dir
+        .clone()
+        .unwrap_or_else(|| home.join(format!("{title}_build")));
+    let registered = engine.join("dm/games").join(&title);
+    let has_registered = registered.join("game.tsv").is_file();
+    let prov = a.provisional || !has_registered;
+    if !prov && a.survey_only {
+        crate::exit::set(2);
+        return Err(format!(
+            "--survey-only: the engine has a profile for {title}: it surveys a game with no profile (add --provisional to survey it anyway)"
+        ));
+    }
+    let prof = if prov {
+        let root = a
+            .profile_out
+            .as_deref()
+            .map_or_else(|| work.join("profile"), crate::options::expand);
+        profile_at(&root.join(&title), true)?
+    } else {
+        profile_at(&registered, false)?
+    };
     let newest = updates.iter().map(|u| u.0).max().unwrap_or(0);
     let package = a
         .package
@@ -143,10 +168,6 @@ pub fn plan(a: &Args) -> Result<Build, String> {
         .get("shader_versions")
         .map(|v| v.split(' ').map(str::to_string).collect())
         .unwrap_or_else(|| vec![package.clone()]);
-    let work = a
-        .work_dir
-        .clone()
-        .unwrap_or_else(|| a.nsp_dir.join(format!("{title}_build")));
     // the shader step's library folder: given (--shaders: an existing folder, the step is skipped) or the one this
     // build writes, `<work>/shader/cache/b-<V>` with V from the engine (dmsh_chain.py)
     let shaders = match &a.shaders {
@@ -160,13 +181,25 @@ pub fn plan(a: &Args) -> Result<Build, String> {
         .clone()
         .or_else(|| prof.1.get("name").cloned())
         .unwrap_or_else(|| title.clone());
+    // a provisional build of a game the engine has a profile for never takes the place of the registered build's app
+    let shadow = if prov && has_registered {
+        "-provisional"
+    } else {
+        ""
+    };
     let out = a
         .out
         .clone()
-        .unwrap_or_else(|| a.nsp_dir.join(format!("{name}.app")));
-    let gpus: Vec<String> = match a.gpu.as_deref() {
-        None | Some("none") => Vec::new(),
-        Some(g) => g.split(',').map(nxb_archive::plan::arch_name).collect(),
+        .unwrap_or_else(|| home.join(format!("{name}{shadow}.app")));
+    // `--gpu`: architectures, `none`, or by default (a Mac app of a game with shader pairs) this Mac's GPU, as the
+    // script resolves it, an iOS build takes its own list from the profile
+    let gpus: Vec<String> = match a.gpu.as_deref().map(str::trim) {
+        Some("none") => Vec::new(),
+        Some(g) if !g.is_empty() => g.split(',').map(nxb_archive::plan::arch_name).collect(),
+        _ if a.platform == "mac-app" && prof.0.join("shader_pairs.tsv").is_file() => {
+            vec![crate::host::gpu::mac_arch(&work)?]
+        }
+        _ => Vec::new(),
     };
     let key = |name: &str, fields: &[(&str, String)]| {
         let mut b = ContentKey::builder(&format!("nxb-build {name} 1"));
@@ -175,8 +208,9 @@ pub fn plan(a: &Args) -> Result<Build, String> {
         }
         b.finish()
     };
-    let nsps: String = std::iter::once(identity(&base.2))
+    let nsps: String = std::iter::once(identity(&base))
         .chain(updates.iter().map(|u| identity(&u.1)))
+        .chain(src.dlc.iter().map(|d| identity(&d.2)))
         .collect::<Vec<_>>()
         .join(";");
     let ex = |v: &str| work.join("extract").join(v).join("RomFS.img");
@@ -184,6 +218,12 @@ pub fn plan(a: &Args) -> Result<Build, String> {
         .iter()
         .chain([&package])
         .all(|v| ex(v).is_file());
+    // a provisional build's rewrite is part of its extract stage: the images alone do not make it reusable
+    let have_patched = !prov
+        || std::fs::read_dir(work.join(format!("patched_{package}"))).is_ok_and(|d| {
+            d.flatten()
+                .any(|e| e.file_name().to_string_lossy().ends_with(".patched.bin"))
+        });
     let have_split =
         std::fs::read_dir(work.join("shader/pkg")).is_ok_and(|mut d| d.next().is_some());
     let mut nodes = vec![
@@ -197,7 +237,7 @@ pub fn plan(a: &Args) -> Result<Build, String> {
                     ("versions", split_versions.join(" ")),
                 ],
             ),
-            reused: have_extract
+            reused: (have_extract && have_patched)
                 .then(|| "the work folder's images (kept for the next build)".into()),
         },
         Node {
@@ -254,7 +294,7 @@ pub fn plan(a: &Args) -> Result<Build, String> {
     });
     let mut b = Build {
         title,
-        base: base.2.clone(),
+        base,
         updates,
         package,
         split_versions,
@@ -265,6 +305,8 @@ pub fn plan(a: &Args) -> Result<Build, String> {
         gpus,
         engine,
         nodes,
+        src,
+        prov,
     };
     if a.platform == "ios" {
         // the IPA is named by the profile, beside the build folder, as the script names it
@@ -275,7 +317,7 @@ pub fn plan(a: &Args) -> Result<Build, String> {
                 .get("ipa")
                 .cloned()
                 .unwrap_or_else(|| format!("{name}.ipa"));
-            b.out = b.work.parent().unwrap_or(&a.nsp_dir).join(ipa);
+            b.out = b.work.parent().unwrap_or(&home).join(ipa);
         }
         b.gpus = Vec::new();
         b.nodes = crate::iosbuild::nodes(a, &b);
@@ -293,9 +335,13 @@ pub fn describe(b: &Build) -> String {
         b.package,
         b.work.display()
     );
+    let _ = writeln!(s, "input {:?}", b.src.source);
     let _ = writeln!(s, "base {}", b.base.display());
     for (v, p) in &b.updates {
         let _ = writeln!(s, "update v{v} {}", p.display());
+    }
+    for (t, v, p) in &b.src.dlc {
+        let _ = writeln!(s, "dlc {t:016X} v{v} {}", p.display());
     }
     let _ = writeln!(s, "app {}", b.out.display());
     for (i, n) in b.nodes.iter().enumerate() {
@@ -320,158 +366,65 @@ pub fn describe(b: &Build) -> String {
     s
 }
 
-pub(crate) fn stage_extract(a: &Args, b: &Build, p: &Progress) -> Result<String, String> {
-    let keys = a.keys.clone().ok_or("-k/--keys is required to extract")?;
-    let out = |v: &str| b.work.join("extract").join(v);
-    let pkg = b.work.join("shader/pkg");
-    let req = nxb_extract::Request {
-        keys,
-        base: b.base.clone(),
-        out_base: out("v0"),
-        updates: b
-            .updates
-            .iter()
-            .map(|(v, path)| (path.clone(), out(&format!("v{v}"))))
-            .collect(),
-        threads: a.threads,
-        mem_limit: 1 << 30,
-        cache_chunks: 512,
-        digests: None,
-        html: true,
-        base_outputs: true,
-        app: None,
-        discard_images: false,
-        allow_damaged: false,
-        manifest: false,
-        split: Some((
-            b.profile.0.join("game.tsv"),
-            nxb_extract::split::SplitOutputs {
-                pkg,
-                map: b.work.join("shader/shader_map.tsv"),
-                facts: b.work.join("shader/shader_facts.tsv"),
-                pairs: b.work.join("shader/shader_pairs.tsv"),
-                pso_pairs: b.work.join("shader/pso_pairs.tsv"),
-            },
-        )),
-    };
-    p.say("extract and shader split in one pass (nxb-extract)");
-    let s = nxb_extract::extract(&req).map_err(|e| e.to_string())?;
-    let note = crate::rewrite::ensure(&b.engine, &b.profile.0, &b.work, &b.package)?;
-    Ok(format!(
-        "{} images{}",
-        s.images.len(),
-        note.map(|n| format!(", {n}")).unwrap_or_default()
-    ))
-}
-
-/// The app stage: stage and sign (an in-place update of `previous`, the app as it was when the build started) with the
-/// parts made ahead (`host::app::prepare`).
-fn stage_app(
-    a: &Args,
-    b: &Build,
-    previous: Option<PathBuf>,
-    parts: crate::host::app::AppParts,
-) -> Result<String, String> {
-    let w = &b.work;
-    let prof = &b.profile.1;
-    let ex = w.join("extract").join(&b.package);
-    let (companion, icns, lang) = (parts.companion, parts.icns, parts.lang);
-    let nacp = std::fs::read(ex.join("control.nacp")).unwrap_or_default();
-    let version = nxb_extract::version::display_version(&nacp);
-    let name = a
-        .app_name
-        .clone()
-        .or_else(|| nxb_extract::version::title_name(&nacp).ok())
-        .unwrap_or_else(|| b.title.clone());
-    let patched = w.join(format!("patched_{}", b.package));
-    let fork = std::fs::read_to_string(b.engine.join("dm/fork_patches.txt")).unwrap_or_default();
-    let tables = b.profile.0.clone();
-    let pso_pairs = w.join("shader/pso_pairs.tsv");
-    let inputs = nxb_pack::macapp::MacAppInputs {
-        host: w.join("tools/dmhost"),
-        companion: companion.clone(),
-        patched: patched.clone(),
-        romfs: ex.join("RomFS.img"),
-        msl: b.shaders.clone(),
-        msl_name: None,
-        tables,
-        font: w.join("font"),
-        pso: (!b.gpus.is_empty()).then(|| w.join("pso/mac")),
-        pso_pairs: pso_pairs.is_file().then_some(pso_pairs),
-        html: Some(ex.join("html")),
-        env_file: None,
-        settings: Some(parts.settings),
-        icns,
-        title_id: b.title.clone(),
-        name,
-        version: (!version.is_empty()).then_some(version),
-        bundle_id: a.bundle_id.clone(),
-        category: prof.get("app_category").cloned(),
-        lang: Some(lang.clone()),
-        marker: prof.get("romfs_marker").cloned(),
-        fork_patches: fork
-            .lines()
-            .map(str::trim)
-            .filter(|l| !l.is_empty())
-            .collect::<Vec<_>>()
-            .join(","),
-        commit: None,
-        aoc: None,
-        programs: Vec::new(),
-    };
-    let plan = nxb_pack::macapp::plan(&inputs).map_err(|e| e.to_string())?;
-    let done = match previous {
-        Some(prev) => {
-            // the companion app comes from the previous app: keep a copy, the update rewrites it in place
-            let keep = w.join("tmp/nxnative");
-            if companion.starts_with(&prev) {
-                std::fs::create_dir_all(w.join("tmp")).map_err(|e| e.to_string())?;
-                std::fs::copy(&companion, &keep).map_err(|e| e.to_string())?;
-            }
-            let mut plan = plan;
-            for e in &mut plan.entries {
-                if e.dest == "Contents/MacOS/nxnative" && companion.starts_with(&prev) {
-                    e.content = nxb_pack::appstage::Content::File(keep.clone());
-                }
-            }
-            nxb_pack::incremental::update(&plan, &prev, &b.out, a.threads)
-                .map(|r| r.to_string())
-                .map_err(|e| e.to_string())
-        }
-        None => {
-            let o = nxb_pack::appstage::StageOptions {
-                threads: a.threads,
-                ..Default::default()
-            };
-            nxb_pack::appstage::stage_and_sign(&plan, &b.out, &o)
-                .map(|r| format!("{} files staged and signed", r.files))
-                .map_err(|e| e.to_string())
-        }
-    }?;
-    // a partial library folder travels into the app as `msl/<b-V>/_b_partial.json`, the summary says so too
-    Ok(match nxb_sched::Partial::read(&b.shaders) {
-        Some(st) => format!("{done}; {}", st.note()),
-        None => done,
-    })
-}
-
 /// Runs the build. Stages overlap where the graph allows ([`crate::order`]): the Mac host from the start, the app's
 /// companion app, icon and settings once the extract and the host are done (beside the shader step), the first
 /// archive streamed beside the shader step ([`crate::pipeline`]); the events stay those of a run one after another.
 pub fn run(a: &Args, p: &std::sync::Arc<Progress>) -> Result<(), String> {
     use crate::order::{Stage, Work};
     use std::sync::Mutex;
-    let b = plan(a)?;
+    let mut b = plan(a)?;
     if a.dry_run {
         print!("{}", describe(&b));
         return Ok(());
     }
+    if b.prov {
+        // the tools the build starts (make, the Python helpers) find the provisional profile as the script's
+        // DM_GAMES_DIR makes them
+        crate::host::set_games(
+            b.profile
+                .0
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_default(),
+            a.provisional
+                && b.engine
+                    .join("dm/games")
+                    .join(&b.title)
+                    .join("game.tsv")
+                    .is_file(),
+        );
+        // no profile yet: survey and guess first (they write it), then plan again with it in place
+        if crate::provisional::prepare(a, &b, p)? {
+            return Ok(());
+        }
+        b = plan(a)?;
+    }
+    crate::options::check_metal(a, &b, p)?;
+    let seen_args;
+    let a = if a.seen_shaders {
+        seen_args = crate::options::seen_shaders(a, &b, p)?;
+        &seen_args
+    } else {
+        a
+    };
     if a.platform == "ios" {
         return crate::iosbuild::run(a, &b, p);
     }
-    p.plan(b.nodes.len());
+    p.plan_more(b.nodes.len());
     let b = &b;
     let streamed: Mutex<Option<String>> = Mutex::new(None);
+    let archive_error: Mutex<Option<String>> = Mutex::new(None);
+    let no_archive = std::sync::atomic::AtomicBool::new(false);
+    // the script's rule: a pipeline archive that fails is no archive for the app (the host builds its bases on the first
+    // start), the build goes on
+    let give_up = |e: String| -> crate::order::Outcome {
+        p.say(&format!(
+            "[RED] pipeline archive: {e}; the app is packed without one and builds its pipeline bases on its first start (--gpu none skips this step)"
+        ));
+        no_archive.store(true, std::sync::atomic::Ordering::SeqCst);
+        Ok("failed, the app is packed without one".into())
+    };
+    let (archive_error, no_archive) = (&archive_error, &no_archive);
     let parts: Mutex<Option<crate::host::app::AppParts>> = Mutex::new(None);
     let (streamed, parts) = (&streamed, &parts);
     let previous = b.out.is_dir().then(|| b.out.clone());
@@ -480,21 +433,42 @@ pub fn run(a: &Args, p: &std::sync::Arc<Progress>) -> Result<(), String> {
     for (i, n) in b.nodes.iter().enumerate() {
         let mut deps = n.deps.clone();
         let work = match (&n.reused, i, n.name.as_str()) {
+            // reused images still need their patched modules: the rewrite runs (or stops the build) here
+            (Some(r), 0, _) => {
+                let r = r.clone();
+                Work::Turn(Box::new(move || {
+                    let note =
+                        crate::rewrite::ensure(&b.engine, &b.profile.0, &b.work, &b.package)?;
+                    Ok(format!(
+                        "reused: {r}{}",
+                        note.map(|n| format!(", {n}")).unwrap_or_default()
+                    ))
+                }))
+            }
             (Some(r), _, _) => Work::Reused(format!("reused: {r}")),
-            (_, 0, _) => Work::Turn(Box::new(move || stage_extract(a, b, p))),
-            (_, 1, _) => Work::Reused("in the extract's pass".into()),
+            (_, 0, _) => Work::Turn(Box::new(move || crate::extract_stage::run(a, b, p))),
+            (_, 1, _) if b.split_fused() => Work::Reused("in the extract's pass".into()),
+            (_, 1, _) => Work::Turn(Box::new(move || crate::extract_stage::split(a, b, p))),
             (_, 2, _) => Work::Turn(Box::new(move || {
+                crate::provisional::take_tables(b)?;
                 // the shader step and the first architecture's archive together (crate::pipeline)
                 let o = crate::pipeline::shaders_and_archive(a, b, p)?;
                 *streamed.lock().map_err(|_| "lock")? = o.archive;
+                *archive_error.lock().map_err(|_| "lock")? = o.archive_error;
                 Ok(o.shaders)
             })),
             (_, _, name) if name.starts_with("Pipeline archive") => {
                 let arch = name.trim_start_matches("Pipeline archive ");
                 Work::Turn(Box::new(move || {
-                    match streamed.lock().map_err(|_| "lock")?.take() {
-                        Some(s) => Ok(s),
-                        None => crate::pipeline::stage_pso(b, arch),
+                    let made = streamed.lock().map_err(|_| "lock")?.take();
+                    let failed = archive_error.lock().map_err(|_| "lock")?.take();
+                    match (made, failed) {
+                        (Some(s), _) => Ok(s),
+                        (None, Some(e)) => give_up(e),
+                        (None, None) => match crate::pipeline::stage_pso(b, arch) {
+                            Ok(s) => Ok(s),
+                            Err(e) => give_up(crate::pipeline::archive_failure(&e)),
+                        },
                     }
                 }))
             }
@@ -517,7 +491,13 @@ pub fn run(a: &Args, p: &std::sync::Arc<Progress>) -> Result<(), String> {
                 let prev = previous.clone();
                 Work::Turn(Box::new(move || {
                     let made = parts.lock().map_err(|_| "lock")?.take();
-                    stage_app(a, b, prev, made.ok_or("the app's parts were not made")?)
+                    crate::app_stage::stage_app(
+                        a,
+                        b,
+                        prev,
+                        made.ok_or("the app's parts were not made")?,
+                        no_archive.load(std::sync::atomic::Ordering::SeqCst),
+                    )
                 }))
             }
         };

@@ -13,17 +13,20 @@ A switch turns it off: `NXB_OWN_RAW=0`. If the front end rejects a shader, Apple
 
 ## Status
 
-Version 0.4.0 is the fifth public release. It is early software. Read this section before you use it.
+Version 0.5.1 is the seventh public release. It is early software. Read this section before you use it.
 
 - Mac only for the build tools. The tools run on macOS on Apple silicon. Other systems are not supported.
 - The tools need Apple tools (`metal`, `metallib`, `air-opt`, `metal-tt`, `codesign`, `xcrun`) from your own Xcode.
-- Ported in this release: the code rewrite step (`nxb rewrite`), the NRO collection (`nxb nro`), the translator (in Rust, with the C# translator as fallback for each key),
-  more readers in the split, iOS games with more than one program, framework builds and the own iOS signer.
-  `nxb build --platform ios` runs the iOS flow. It was not run end to end.
-- A full build in one run with these defaults was not timed. Each stage was compared alone.
+- Changed in this release: the chain value in each `_b.json` file is the computed value. The rewrite step follows the current engine.
+  `nxb build` takes more inputs and options. A game without a profile gets a provisional profile. **The Rust translator is off by default** (refer to the next point).
+  Refer to [CHANGELOG.md](CHANGELOG.md).
+- **The Rust translator is off by default.** Releases 0.4.0 and 0.5.0 said that it is on. It does not follow the current engine translator (for example its Maxwell denormal flush).
+  Thus its output can differ from the output of the C# translator. `--xlate-rust on` or `NXB_XLATE_RUST=1` turns it on. The default mode uses the C# translator. The .NET runtime is necessary.
+- `nxb build --platform ios` runs the iOS flow. Each stage was checked alone. Nobody ran the stages in one run. There is no device test.
+- A full build in one run with these defaults was not timed. Each stage was compared alone. A full run on one title had an archive error that 0.5.1 fixes. Nobody ran the full build again.
 - **The raw path is on by default.** Its libraries are not byte-identical to Apple's libraries. In a GPU test of 3,625 shaders (about 15 % of the corpus),
   220 gave a different output. Nobody tested the other shaders. If you need Apple's output, set `NXB_OWN_RAW=0`.
-- The C# translator is still necessary for some shaders (geometry, tessellation, transform feedback, vertex shaders as compute and some rare cases).
+- The C# translator does all shaders in the default mode. With the Rust translator on, it still does some shaders (geometry, tessellation, transform feedback, vertex shaders as compute and some rare cases).
   Without the .NET runtime, a key of that type fails.
 - The shader step for iOS is not part of the verified path. Only a sample was compared.
 - Unity readers, large text segments (100 MB and more), frame step builds without a local sample and framework and multi-program builds are checked with synthetic files only.
@@ -54,11 +57,15 @@ more titles.
 | IPA writer | a 59-entry sample and a bundle with a 300 MB file | byte-identical. A full game IPA was not built |
 | iOS stages (`nxb ios`) | generators and workspace writer on real and synthetic inputs, one title for the IPA | the generators are byte-identical. 75 of 75 IPA entries are equal in name, method, sizes, CRC and attributes. Two entries are equal in part only: the executable (only `__LINKEDIT` differs) and the font file |
 | Overlap in `nxb build` | one title, extract, split and shaders reused | the event streams are the same, except the times. 58,211 of 58,211 paths exist in both outputs. All files are byte-identical, except two rebuilt Mach-O files and their lines in `CodeResources` |
-| Rewrite (`nxb rewrite`) | 25 real modules, with ZBIC, NRO and frame step stubs | all tables, `.patched.bin` and the fixups are byte-identical. 98 of 98 NRO modules also |
+| Shader step, current engine (0.5.1) | a full run (C# translator, own front end off) against a Python build of the same engine. Sample: 41,883 libraries | 0 of 41,883 libraries differ. The `_b.json` files are equal. 5 shaders are stubs that the Python run itself left |
+| Rewrite (`nxb rewrite`), current engine (0.5.1) | 111 modules: 9 real, 4 synthetic and 98 NRO modules | `.patched.bin`, the six tables and `build_src.sha256` are byte-identical in 111 of 111. The finder `ue_region` is not ported |
+| Rewrite (`nxb rewrite`), earlier script | 25 real modules, with ZBIC, NRO and frame step stubs | all tables, `.patched.bin` and the fixups are byte-identical. 98 of 98 NRO modules also. The script changed after this comparison |
+| Profile files, survey and `nxb profile` (0.5.1) | 1,115 tables of 145 profiles, 11 extractions, 6 surveys | read and write of the tables: 1,115 of 1,115. Guess: 11 of 11. Survey and provisional profile: 6 of 6. Registered profile check: 10 of 10 |
+| Split, ZBIC segments (0.5.1) | the four modules of one Switch 2 package, and a synthetic file | each segment hash is correct |
 | Rewrite, very large modules and three frame step builds | synthetic modules only | byte-identical to the script. The rules for real code of these builds are not tested |
 | NRO collection (`nxb nro`) | one real image | `nro.tsv` and 98 of 98 modules are byte-identical |
-| Translator in Rust | three titles, first-attempt jobs | 16,268 of 16,268, 19,592 of 19,592 and 28,669 of 28,669 keys byte-identical (SPIR-V and `res.json`) |
-| Translator in Rust, Switch 2 (Ampere) | one title | 42,299 of 42,331 keys byte-identical. 17 fail in the C# translator also, 15 go to the C# path |
+| Translator in Rust, engine version of the port | three titles, first-attempt jobs | 16,268 of 16,268, 19,592 of 19,592 and 28,669 of 28,669 keys byte-identical (SPIR-V and `res.json`). Not compared again on the current engine, where it differs. It is off by default |
+| Translator in Rust, Switch 2 (Ampere), engine version of the port | one title | 42,299 of 42,331 keys byte-identical. 17 fail in the C# translator also, 15 go to the C# path |
 | Split, more readers | one real update image with a 17.6 GB archive, and synthetic files | the real image gave byte-identical package files and tables. The other readers (Unity, archive families, Needle, Sumo and more) were compared with the reference functions on synthetic files only |
 | iOS profile port | 142 profiles | byte-identical |
 | iOS framework, multi-program and IPA reuse | synthetic fixtures, framework IPA with a real `xcodebuild` | framework IPA: 47 of 47 entries equal (executable, framework binary and font file equal in part). The other flows: all files equal on the fixtures |
@@ -95,10 +102,34 @@ limits it. The own front end is not byte-identical in the validated mode.
 
 ### Known limits
 
-- Not ported: the CRA archive family, formats that need Oodle, geometry and mesh shaders. In the Rust translator, geometry, tessellation, transform feedback,
-  vertex shaders as compute and the interlock function match are not ported. The C# translator does these keys.
-- The own-identical allow list is not in this repository. Without it, only the raw path runs. The rewrite rules are in `data/rewrite-rules`.
-- `nxb rewrite` stops with exit code 4 when the engine files are not the files that the rules come from.
+- The Rust translator does not follow the current engine translator. It is off by default. To do: port the changes, compare again on all titles, then make it the default.
+- Keys that the Rust translator does not do (the C# translator does them): geometry and its passthrough reader, tessellation, vertex shaders as compute, transform feedback,
+  the interlock function match, task and mesh shaders (520 in the Switch 2 package) and `SharedStoreSmallIntCas` (15 shaders). 17 compute shaders are red in the C# translator also.
+  No local title has jobs of these four kinds, thus nobody tested them.
+- The Ampere path is checked on one package. Its jobs come from a new Rust job writer. Nobody compared them with the job writer of the reference scripts.
+- `spirv-cross` stays an external program.
+- The raw path is not byte-identical to Apple. A GPU test covered 3,625 shaders, and 220 differed (about 6 %). The check in the process looks at the container only.
+  The raw path is not wired for iOS. After a change of the front end, an old raw cache entry can stay in the store.
+- The own-identical allow list is not in this repository. Without it, only the raw path runs. A new Metal toolchain version has no verdicts, and it turns the own tiers off.
+- The pipeline archive uses Apple tools. "Equal" means that the loader finds each base library.
+- The app stage puts about 58,000 loose library files in the app. The reference script packs one image file. The host reads the two forms. `DMSH_IOS_PULL=0` is not ported.
+- The rewrite step is checked against the current script on 111 modules. Not ported: the finder `ue_region` (a main module with `SwitchVirtualAddressSpaceSize` stops with exit code 4).
+  The finders for Unreal and Snowdrop have no real positive sample. The layouts of three more titles and some frame step stubs are checked with synthetic files only.
+  Three more titles were not checked again with the current script.
+- Each change of the engine changes the hashes that the rules pin. Make the rules again (`nxb rewrite-rules`) and compare the oracle cases. If the engine differs from the pin,
+  `nxb rewrite` stops with exit code 4, and `nxb build` stops at the rewrite step with exit code 1. The message gives the two hashes.
+- Not supported in the extract and the split (exit code 4 with a named message): Oodle formats, LZ5, CRA, sparse NCAs, zip with bzip2 or lzma, BND3 names in double-byte Shift JIS.
+  The checksums of LZ4 frames are not checked. A base game with its update in one run gives an error in the reference split and in this split.
+- XCI, merged packages, dump folders, NSZ block mode and DLC were checked with synthetic files only. One real NSZ file was checked. `nxb build` does not split the shader content of DLC.
+- `nxb build` was run with a registered profile on one title (Mac app). A game without a profile gets a provisional profile. The heap check, the region check and the shader captures start the game, and they are not ported.
+  Without `--no-heap-check`, such a game stops with exit code 4. With it, the memory layout is a guess. Nobody checked it with a run. The shader step and the stages after it were **not** run for the Switch 2 package.
+- Not ported in `nxb build`: the census of the rewrite sites and the source checks of Unreal paks and Frostbite headers.
+  Also not ported: `--program N` for N more than 0, `--platform mac` and the header of the settings file for one multi-program profile. `--allow-shader-regressions` has no effect. `--mac-sign` was not run with a real identity.
+- iOS: no device test. The IPA writer is serial.
+- The overlap of stages is partial. The shader step does not start while the extract runs. Nobody timed a cold full run on a quiet machine. Each gain from overlap, the host and the raw path is an estimate.
+- `nxb cache` exists. The shader step does not write cache entries at this time, thus the cache is empty. `--shader-manifest` and `--partial` have unit tests only.
+- Some error lines start with an old program name (`nxb-extract:` and others). `nxb self-check` finds the external tools only. The signer command `nxb sign` gives exit code 3 for an unsupported input. The other commands give exit code 4.
+- The release ZIP file has an ad-hoc signature and no notarization.
 - There is one program, `nxb`. The separate program names of earlier releases (`nxb-extract`, `nxb-split`, `nxb-ios`, `nxb-macapp`, `nxb-ipa`, `nxb-pack`, `nxb-pso`, `nxb-archive`, `shaderbuild`, `airc`) are gone. Use `nxb <command>`.
 - Not done: Windows and Linux. The process runner and the locks refuse to run there.
 - Two processes can write the same store key at the same time. The last writer wins. The files stay valid.
@@ -125,7 +156,7 @@ This is a short path for a first test. The reference scripts stay the fallback.
 4. Test the build: `nxb build --dry-run <arguments>` prints the stage graph. Then run `nxb build <arguments>`.
    The default platform is `ios`, as in the reference script. For a Mac app, add `--platform mac-app`.
 5. The raw path is on. To get Apple's libraries, set `NXB_OWN_RAW=0`. To turn off all own tiers, set `NXB_OWN_FRONT=0`.
-6. The Rust translator is on, and the translator host is on when its binary is next to the translator. To use the C# path only, set `NXB_XLATE_RUST=0` and `NXB_XLATE_HOST=off`.
+6. The Rust translator is off. The translator host is on when its binary is next to the translator. To use the Rust translator, set `NXB_XLATE_RUST=1` (it differs from the C# translator on the current engine). To use one process for each batch, set `NXB_XLATE_HOST=off`.
 7. Read the exit code and the `[RED]` lines. Exit code 4 means unsupported input. Run the reference script for that step and tell us the case.
 
 ## Build from source
@@ -147,7 +178,8 @@ The tests for this are small. Refer to the section 0.5.0 of the changelog.
 
 | command | purpose |
 |---|---|
-| `nxb build` | the whole build. `nxb build --platform mac-app` (or `ios`) runs all ported stages. `--dry-run` prints the stage graph and the cache keys |
+| `nxb build` | the whole build. `nxb build --platform mac-app` (or `ios`) runs all ported stages. `--dry-run` prints the stage graph and the cache keys. It takes NSP, NSZ, XCI, XCZ, merged packages (`--app`), `.nup` (`--nup`), dump folders (`--dump`) and DLC (`--aoc`). A game without a profile gets a provisional profile (`--provisional`, `--survey-only`, `--no-heap-check`, `--profile-out`). Exit codes: 0, 1, 2, 3, 4, 6 and 130. Refer to [docs/pipeline-stages.md](docs/pipeline-stages.md) |
+| `nxb profile` | `guess`, `show`, `check` and `manifest`: the survey values of a game and the checks of a profile |
 | `nxb extract` | NSP, XCI, NSZ, XCZ, Switch 2 package (`.nup`, no keys needed) or dump folder (`--dump`) to RomFS images, ExeFS, control data and icon |
 | `nxb split` | shader split of extracted images into package records and tables. Exit code 4 means unsupported format |
 | `nxb rewrite`, `nxb rewrite-rules`, `nxb nro` | the code rewrite step, the rule files and the NRO collection |
@@ -167,6 +199,37 @@ nxb extract --keys <prod.keys> --base <base.nsp> --out <dir> --update <update.ns
 nxb build --dry-run <arguments>     # print the stage graph first
 ```
 
+### Options of `nxb build`
+
+Run `nxb help build` for the full usage. Refer to [docs/pipeline-stages.md](docs/pipeline-stages.md) for the state of the test of each option.
+
+| option | meaning |
+|---|---|
+| `--platform mac-app\|ios` | the target. The default is `ios` |
+| `--engine DIR`, `-k KEYS`, `--work-dir D`, `-o OUT`, `--progress json` | the engine folder, the keys file, the work folder, the output and the NDJSON events |
+| `--nup FILE`, `--dump FOLDER`, `--app ID`, `--title-id ID`, `--aoc PACKAGE` | the inputs: a Switch 2 package, a dump folder, a game in a merged package, DLC |
+| `--env-file`, `--motion`, `--no-motion`, `--seen-shaders`, `--romfs bundle\|separate`, `--keep-extracted`, `--show-fps` | the options of the reference script |
+| `--allow-damaged`, `--allow-other-metal`, `--allow-shader-regressions` | let the build go on after a damaged file or a newer Metal compiler. The last option has no effect |
+| `--mac-sign ID` | signs the app again with an identity. Not run with a real identity |
+| `--gpu ARCH\|none` | the architecture of the pipeline archive. The default is the architecture of this Mac. `none` skips the archive |
+| `--provisional`, `--survey-only`, `--no-heap-check`, `--profile-out D` | a game without a profile: provisional profile, survey only, skip the checks that start the game, the folder of the profile |
+| `--xlate-host HOST`, `--own-front on\|off` | the translator host and the own front end. The Rust translator has no option in `nxb build`: set `NXB_XLATE_RUST=1` |
+| `--team-id`, `--framework`, `--shell-framework`, `--prepare-xcode`, `--xcode-workspace` | the iOS options. No device test |
+
+### Exit codes of `nxb build`
+
+| code | meaning |
+|---|---|
+| 0 | done |
+| 1 | error. Also a rewrite stage that stops because the engine files differ from the pinned files |
+| 2 | incorrect arguments |
+| 3 | damaged data |
+| 4 | not supported. Run the reference step |
+| 6 | a key is missing |
+| 130 | interrupted by SIGINT or SIGTERM |
+
+With `--progress json`, standard output has NDJSON events only.
+
 ### Environment variables
 
 The tools read no fixed private path. Inputs come from arguments or from these variables.
@@ -181,13 +244,13 @@ The tools read no fixed private path. Inputs come from arguments or from these v
 | `NXB_ORACLE_EXACT` | signer tests | set to `1` to compare bytes with the `codesign` of the host. Without it, the tests check that `codesign --verify` accepts our output. Set it on the Mac where the signer was proven |
 | `NXB_OWN_FRONT` | `nxb shaders` | set to `0` to turn off the own front end |
 | `NXB_OWN_RAW` | `nxb shaders`, `nxb build` | not set: the raw path is on for each shader that the front end accepts. `0`: off. `list`: only the shaders of the shipped raw allow list. A file name: only the shaders of that list |
-| `NXB_XLATE_RUST` | `nxb shaders`, `nxb build` | set to `0`, `off` or `false` to use only the C# translator |
+| `NXB_XLATE_RUST` | `nxb shaders`, `nxb build` | set to `1`, `on` or `true` to turn the Rust translator on. It is off by default since 0.5.1. `--xlate-rust on\|off` overrides it for `nxb shaders build` |
 | `NXB_XLATE_HOST` | `nxb shaders`, `nxb build` | the translator host program and its arguments. `off` uses one process for each batch |
 | `NXB_REWRITE_RULES` | `nxb rewrite` | a folder with rule files. The default is `rewrite-rules` next to the binary, then `data/rewrite-rules` of the checkout |
 | `NXB_REWRITE_PATCHES` | `nxb rewrite` | a snapshot file instead of the rule folder |
 | `NXB_TMP` | `nxb extract` | a folder for decoded streams that do not fit in memory |
-| `NXB_ENGINE` | `nxb ios`, `nxb rewrite` | the folder with the engine files that the iOS stages and the rewrite step read |
-| `NXB_ORACLE_*` | iOS tests | inputs for the tests that compare with the reference scripts. Without them the tests skip |
+| `NXB_ENGINE` | `nxb ios`, `nxb rewrite`, `nxb profile` | the folder with the engine files that the iOS stages, the rewrite step and the survey read. `nxb build` takes `--engine` |
+| `NXB_ORACLE_*`, `NXB_ZBIC_EXEFS` | tests | inputs for the tests that compare with the reference scripts and the ZBIC reader. Without them the tests skip |
 
 ## Architecture
 

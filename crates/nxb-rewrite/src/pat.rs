@@ -88,19 +88,33 @@ pub(crate) fn canon(r: &Reg) -> String {
     }
 }
 
-/// `'w' + reg_name(r)[1:]` for the registers `regs_access` lists, as a register number (`None` if not numeric).
-pub(crate) fn wname(r: &Reg) -> Option<u32> {
-    match r {
-        Reg::X(29) | Reg::X(30) => None,
-        Reg::X(n) | Reg::W(n) => Some(u32::from(*n)),
-        Reg::F(_, n) => Some(u32::from(*n)),
-        _ => None,
-    }
+/// `written_w(p)`: the general registers `p` writes as numbers (a write of `wN` or `xN` is the same register).
+/// `x29` and `x30` count (Capstone calls them `fp` and `lr`), FP and SIMD registers do not.
+pub(crate) fn written_w(i: &Insn) -> std::collections::HashSet<u32> {
+    i.writes
+        .iter()
+        .filter_map(|r| match r {
+            Reg::X(n) | Reg::W(n) => Some(u32::from(*n)),
+            _ => None,
+        })
+        .collect()
 }
 
-/// Whether `regs_access` lists a write whose `reg_name` equals `name`.
-pub(crate) fn writes_named(i: &Insn, name: &str) -> bool {
-    i.writes.iter().any(|r| r.name() == name)
+/// `writes_reg(p, reg)`: whether `p` changes the general register `reg` (`xN` or `wN`), a compare only sets flags.
+pub(crate) fn writes_reg(i: &Insn, reg: &str) -> bool {
+    let n: Option<u32> = reg.get(1..).and_then(|d| d.parse().ok());
+    !matches!(i.mn, "cmp" | "cmn" | "tst") && n.is_some_and(|n| written_w(i).contains(&n))
+}
+
+/// `writes_reg_any(p, regs)` for a set of register numbers.
+pub(crate) fn writes_reg_any<T: Copy + Into<u32>>(
+    i: &Insn,
+    regs: &std::collections::HashSet<T>,
+) -> bool {
+    !matches!(i.mn, "cmp" | "cmn" | "tst") && {
+        let w = written_w(i);
+        regs.iter().any(|r| w.contains(&(*r).into()))
+    }
 }
 
 /// Whether the mnemonic is a direct branch (`b`, `bl`, `cbz`, `cbnz`, `tbz`, `tbnz`, `b.cond`).

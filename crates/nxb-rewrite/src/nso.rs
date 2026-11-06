@@ -219,7 +219,7 @@ pub fn load(d: &[u8], name: &str) -> Result<Module, RewriteError> {
         let raw = &d[*fo..*fo + c];
         let seg: Vec<u8> = if flags >> i & 1 != 0 {
             if flags & NSO_ZSTD != 0 {
-                match crate::zbic::decompress(raw, *sz) {
+                match nxb_codec::zbic::decompress(raw, *sz) {
                     Ok(v) => v,
                     Err(e) => return fail(format!("{name}: {} segment: {e}", NAMES[i])),
                 }

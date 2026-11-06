@@ -4,12 +4,3 @@ scope = "0100B8A026F14000"
 
 [[build]]
 row = ["build", "v65536", "1.0.1", "main=b7f965b9d7227db8e29f04e84ea7331b", "subsdk0=ab62fe8edd07a6a293f885d54359e559", "sdk=0023a1b06130cd795f7bc4613772af0a"]
-
-[[rule]]
-binding = "build"
-kind = "cut"
-build = "b7f965b9d7227db8e29f04e84ea7331b"
-offset = 79856
-old = "e06b0294"
-new = "1f2003d5"
-why = "nninitStartup: bl 0xae770 (FMallocBinned3 constructor, 38 GB of address space) → nop; the host allocator is in the object already (hle_uemalloc.c)"

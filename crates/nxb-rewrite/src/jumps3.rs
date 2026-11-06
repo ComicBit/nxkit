@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use nxb_a64::{Insn, Op, Reg, Sh, Wb};
 
 use crate::jumps::{An, cmp_imm, mov_ww};
-use crate::pat::{gn, is_branch, ldrsw_idx, memop, nops, pimm, preg, tx, wname};
+use crate::pat::{gn, is_branch, ldrsw_idx, memop, nops, pimm, preg, tx, writes_reg, written_w};
 use crate::rw::R;
 
 impl An<'_> {
@@ -178,7 +178,7 @@ impl An<'_> {
         }
     }
 
-    fn tail_call_at_end(insl: &[Insn], j: usize) -> bool {
+    pub(crate) fn tail_call_at_end(insl: &[Insn], j: usize) -> bool {
         if j + 1 != insl.len() {
             return false;
         }
@@ -189,79 +189,6 @@ impl An<'_> {
             return Self::ldr_x18_mem(p);
         }
         false
-    }
-
-    /// The `br x18` is an indirect tail call, not a jump table.
-    pub(crate) fn tail_call(insl: &[Insn], j: usize) -> bool {
-        if j + 1 == insl.len() {
-            return Self::tail_call_at_end(insl, j);
-        }
-        if j < 4 || insl.windows(2).any(|p| p[1].addr != p[0].addr + 4) {
-            return false;
-        }
-        let suffix = &insl[j + 1..];
-        if suffix[0].mn != "bl" || suffix[1..].iter().any(|p| p.mn != "udf") {
-            return false;
-        }
-        let st = suffix[0].target().unwrap_or(0);
-        if insl[0].addr <= st && st <= insl[insl.len() - 1].addr {
-            return false;
-        }
-        if insl[0].mn != "stp" || insl[0].op_str() != "x29, x30, [sp, #-0x10]!" {
-            return false;
-        }
-        if insl[1].mn != "mov" || insl[1].op_str() != "x29, sp" {
-            return false;
-        }
-        if insl[j - 1].mn != "ldp" || insl[j - 1].op_str() != "x29, x30, [sp], #0x10" {
-            return false;
-        }
-        let guard = &insl[2];
-        if guard.mn != "cbz" || guard.target() != Some(suffix[0].addr) {
-            return false;
-        }
-        let mut load = false;
-        for p in &insl[3..j - 1] {
-            if !matches!(
-                p.mn,
-                "mov" | "ldr" | "ldur" | "ldp" | "str" | "stur" | "stp"
-            ) {
-                return false;
-            }
-            let w: Vec<String> = p.writes.iter().map(|r| r.name()).collect();
-            if w.iter().any(|n| {
-                matches!(
-                    n.as_str(),
-                    "sp" | "wsp" | "fp" | "lr" | "x29" | "w29" | "x30" | "w30"
-                )
-            }) {
-                return false;
-            }
-            if matches!(p.mn, "str" | "stur" | "stp") {
-                if p.wb {
-                    return false;
-                }
-                let Some(Op::Mem {
-                    base, index, disp, ..
-                }) = p.ops.last()
-                else {
-                    return false;
-                };
-                if !matches!(base.name().as_str(), "sp" | "fp" | "x29")
-                    || index.is_some()
-                    || *disp < 16
-                {
-                    return false;
-                }
-            }
-            if w.iter().any(|n| n == "x18" || n == "w18") {
-                if load || !Self::ldr_x18_mem(p) {
-                    return false;
-                }
-                load = true;
-            }
-        }
-        load
     }
 
     /// The byte or halfword table form with its `add` further back.
@@ -288,7 +215,7 @@ impl An<'_> {
                 found = Some(k);
                 break;
             }
-            if p.writes.iter().any(|r| r.name() == "x18") {
+            if writes_reg(p, "x18") {
                 return Ok(None);
             }
         }
@@ -353,6 +280,8 @@ impl An<'_> {
             if let Some((a, b)) = mov_ww(p)
                 && idx.contains(&a)
             {
+                // a copy replaces the index: a check of its old value bounds nothing
+                idx.remove(&a);
                 idx.insert(b);
                 continue;
             }
@@ -362,10 +291,9 @@ impl An<'_> {
                 cmp = Some(q);
                 break;
             }
-            if p.writes
+            if written_w(p)
                 .iter()
-                .filter_map(wname)
-                .any(|x| x < 256 && idx.contains(&(x as u8)))
+                .any(|x| *x < 256 && idx.contains(&(*x as u8)))
             {
                 return Ok(None);
             }

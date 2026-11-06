@@ -62,6 +62,7 @@ pub fn vertex(
     cross: &CrossFn<'_>,
     pixel_sources: &[String],
     info: (&str, String, &str, String),
+    chain: &str,
     first: Option<(Vec<u8>, Value)>,
 ) -> Result<VsOut, (String, String)> {
     let fail = |r: &str, d: String| (r.to_string(), d);
@@ -119,7 +120,8 @@ pub fn vertex(
     }
     let _ = workdir;
     let src = common_passes(&src)?;
-    let src = vx::vs_base_instance(&vx::vs_layer(&vx::vs_init(&src)));
+    let layered = vx::vs_layer(&vx::vs_init(&src)).map_err(|e| fail("vertex failed", e))?;
+    let src = vx::vs_base_instance(&layered);
     let (src, pad) = if pixel_sources.is_empty() {
         (src, vec![])
     } else {
@@ -133,11 +135,11 @@ pub fn vertex(
     if discard {
         full.push_str(&vx::vs_discard(&single).map_err(|e| fail("vertex failed", e))?);
     }
-    let (full, layer) = vx::vs_layer_entry(&full);
+    let (full, layer) = vx::vs_layer_entry(&full).map_err(|e| fail("vertex failed", e))?;
     let (name, k, pc, c1_hex) = info;
     let pi = PsInfo {
         key,
-        chain: "0ad559cdbb28",
+        chain,
         source: format!("{name}#{k}"),
         pc_paired: pc,
         stage: "vs",

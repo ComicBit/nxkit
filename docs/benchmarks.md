@@ -50,7 +50,7 @@ The sum of the stages is approximately 16:00 with the Apple front end, 15:00 wit
 and 12:30 with the own front end for `own-identical` and `own-validated` shaders. The reference build scripts take 23:42.
 This is a factor of approximately 1.5x, 1.6x or 1.9x. These sums use the first archive time (273 s). With the archive time of 207 s, each sum is approximately 1 min shorter (derived). Nobody ran this sum as one process. There is no overlap of stages in this sum.
 The overlap of stages in version 0.3.0 can make a real run shorter than the sum. Nobody timed a cold build with overlap, thus the size of the gain is an estimate.
-The changes of version 0.4.0 (raw path, Rust translator, host) are not in these sums.
+The changes of version 0.4.0 (raw path, Rust translator, host) are not in these sums. Since 0.5.1, the Rust translator is off by default. The 0.5.1 changes (the fix of the chain value, the rewrite step of the current engine, the new inputs and options of `nxb build`) are not in these sums. Nobody timed a full run of `nxb build` with them.
 
 ## Findings
 
@@ -84,7 +84,7 @@ No run below is a full build. The numbers of the earlier sections do not include
 | NRO collection, one image | 4.5 s (script) | 3.5 s | measured. The archive table dominates both times |
 | translation of 802 jobs, host against process bridge | 6.3 to 8.4 s (19 starts) | 1.0 to 1.7 s (1 start) | measured, load average 9 to 10 |
 | shader step subset (160 keys, 261 shaders), host against process bridge | 20.7 s | 20.2 s | measured. The Metal compile dominates |
-| shader step subset (160 keys), Rust translator against C# process bridge | 16 s | 17 s | measured. No gain, no .NET process |
+| shader step subset (160 keys), Rust translator against C# process bridge | 16 s | 17 s | measured with 0.4.0, with the Rust translator on. No gain, no .NET process. The translator is off by default since 0.5.1 |
 | shader step subset (160 keys), raw path on all shaders against Apple's compiler | 14.4 s | 6.5 s | measured, not a benchmark |
 
 Notes:

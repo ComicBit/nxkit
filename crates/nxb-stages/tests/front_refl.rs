@@ -60,6 +60,15 @@ fn reflection_matches_python() {
     id.push(0);
     id.extend_from_slice(compiler_id().as_bytes());
     let ident = nxb_model::sha256(&id).to_hex();
+    let chain = {
+        let f = std::fs::read_dir(&out)
+            .unwrap()
+            .flatten()
+            .find(|e| e.file_name().to_string_lossy().ends_with("_b.json"))
+            .unwrap();
+        let v = nxb_pyjson::parse(&std::fs::read_to_string(f.path()).unwrap()).unwrap();
+        v.get("chain").and_then(|c| c.as_str()).unwrap().to_string()
+    };
     let (mut ok, mut bad) = (0usize, Vec::new());
     for e in std::fs::read_dir(&w).unwrap().flatten() {
         let n = e.file_name().to_string_lossy().into_owned();
@@ -97,7 +106,7 @@ fn reflection_matches_python() {
         let (name, k) = inputs.loc[key].clone();
         let info = PsInfo {
             key,
-            chain: "0ad559cdbb28",
+            chain: &chain,
             source: format!("{name}#{k}"),
             pc_paired: inputs.pc_of.get(key).map_or("", String::as_str),
             stage,
