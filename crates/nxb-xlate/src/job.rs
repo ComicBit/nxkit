@@ -21,6 +21,8 @@ pub struct Job {
     pub nvn2_cs: Option<Vec<i32>>,
     pub stage_memory: Option<Vec<i32>>,
     pub geometry_topology: Option<i32>,
+    /// A task or mesh shader, written as a compute job with its SPH taken off.
+    pub mesh_stage: Option<MeshStage>,
     /// The vertex or geometry shader captures transform feedback (the job has a `tf` layout).
     pub tf: bool,
     pub early_fragment_tests: bool,
@@ -28,6 +30,63 @@ pub struct Job {
     /// `debug` is on unless the job says `false`.
     pub debug: bool,
     pub softfloat64: bool,
+}
+
+/// The facts of a task or mesh shader (`mesh_stage` of the job, `dmsh_meshstage.info`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MeshStage {
+    /// `ts` or `ms`.
+    pub kind: String,
+    /// The threads of a workgroup.
+    pub threads: u32,
+    /// The payload bytes of a task shader.
+    pub payload: u32,
+    /// Whether a mesh shader has a task shader (`ts` always has its mesh shaders).
+    pub task: bool,
+    /// The most vertices of a mesh shader.
+    pub max_v: u32,
+    /// The most primitives of a mesh shader.
+    pub max_p: u32,
+    /// The vertex components the SPH enables in attribute order: (attribute, component), position as `None`.
+    pub vertex: Vec<(Option<i32>, i32)>,
+    /// The per-primitive components: (attribute, component).
+    pub primitive: Vec<(i32, i32)>,
+    /// Why the build refused the shader, when it did.
+    pub refused: Option<String>,
+}
+
+fn mesh_stage(v: &Value) -> Option<MeshStage> {
+    let n = |k: &str| {
+        v.get(k)
+            .and_then(Value::as_i64)
+            .and_then(|x| u32::try_from(x).ok())
+            .unwrap_or(0)
+    };
+    let comps = |k: &str| -> Vec<(Option<i32>, i32)> {
+        let list = v.get(k).and_then(Value::as_list).unwrap_or(&[]);
+        list.iter()
+            .filter_map(|e| {
+                let e = e.as_list()?;
+                let at = e.first().and_then(Value::as_i64).map(|x| x as i32);
+                Some((at, e.get(1)?.as_i64()? as i32))
+            })
+            .collect()
+    };
+    let kind = v.get("kind")?.as_str()?.to_string();
+    Some(MeshStage {
+        threads: n("threads"),
+        payload: n("payload"),
+        task: !matches!(v.get("task"), Some(Value::Bool(false))),
+        max_v: n("max_v"),
+        max_p: n("max_p"),
+        vertex: comps("vertex"),
+        primitive: comps("primitive")
+            .into_iter()
+            .filter_map(|(a, c)| Some((a?, c)))
+            .collect(),
+        refused: v.get("refused").and_then(Value::as_str).map(str::to_string),
+        kind,
+    })
 }
 
 fn int_list(v: &Value) -> Option<Vec<i64>> {
@@ -100,6 +159,7 @@ impl Job {
                 .get("geometry_topology")
                 .and_then(Value::as_i64)
                 .map(|x| x as i32),
+            mesh_stage: v.get("mesh_stage").and_then(mesh_stage),
             tf: !matches!(v.get("tf"), None | Some(Value::Null))
                 && v.get("tf")
                     .and_then(Value::as_list)

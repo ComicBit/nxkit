@@ -24,6 +24,9 @@ pub mod inst_misc;
 pub mod inst_query;
 pub mod inst_tex;
 pub mod io;
+pub mod mesh;
+#[cfg(test)]
+mod mesh_tests;
 pub mod prelude;
 pub mod refl;
 #[cfg(test)]
@@ -131,6 +134,8 @@ const VISIBILITY_COUNTER: &str = "f5f4d23149565acd852f6b7091f64cc8cb3aa019ccb33b
 fn failure(e: String) -> Failure {
     if e.starts_with("unported:") {
         Failure::new("not ported", e)
+    } else if let Some(d) = e.strip_prefix("mesh stage failed: ") {
+        Failure::new("mesh stage failed", d)
     } else {
         Failure::new("translation failed", e)
     }
@@ -145,11 +150,20 @@ pub fn translate(job: &Job, code: &[u8], ctx: &Context<'_>) -> Result<Translated
             format!("unported: tessellation ({stage} stage)"),
         ));
     }
+    if matches!(stage, "ts" | "ms") {
+        return Err(Failure::new(
+            "translation failed",
+            format!("a {stage} job is written as stage cs with a mesh_stage"),
+        ));
+    }
     if !matches!(stage, "vs" | "ps" | "cs" | "gs") {
         return Err(Failure::new(
             "not ported",
             format!("unported: {stage} stage"),
         ));
+    }
+    if stage == "cs" {
+        mesh::check(job, code).map_err(failure)?;
     }
     let opt = Options {
         visibility_counter: stage == "vs" && nxb_model::sha256(code).to_hex() == VISIBILITY_COUNTER,

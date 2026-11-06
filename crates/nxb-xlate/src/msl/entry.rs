@@ -5,7 +5,7 @@ use super::emit::{Em, Options, R, Shader, Shared};
 use super::refl::Reflection;
 use super::types::{msl_type, scalar};
 use super::usage::{self, Usage};
-use super::{Context, Library, Translated, facts, io, prelude};
+use super::{Context, Library, Translated, facts, io, mesh, prelude};
 use crate::codegen::props::MemoryDef;
 use crate::structured::types::AggType;
 use crate::translation::msl_entry::Structured;
@@ -83,6 +83,51 @@ fn tg_bytes(s: &Structured) -> i64 {
         .sum()
 }
 
+/// One parameter of an entry function: the declaration with its attribute, without it, and the name.
+pub struct Param {
+    pub attr: String,
+    pub plain: String,
+    pub name: String,
+}
+
+/// The parameters of an entry function.
+pub fn entry_params(res: &args::Res, plan: &io::Plan) -> Vec<Param> {
+    let mut v = Vec::new();
+    let mut add = |plain: String, attr: Option<String>, name: &str| {
+        let attr = attr.map_or_else(|| plain.clone(), |a| format!("{plain} [[{a}]]"));
+        v.push(Param {
+            attr,
+            plain,
+            name: name.to_string(),
+        });
+    };
+    if !plan.in_members.is_empty() {
+        add("main0_in in".into(), Some("stage_in".into()), "in");
+    }
+    if res.has_args {
+        let plain = format!("constant {SET_TYPE}& {SET_NAME}");
+        add(plain, Some("buffer(0)".into()), SET_NAME);
+    }
+    for b in &plan.builtins {
+        add(
+            format!("{} {}", b.ty, b.name),
+            Some(b.attr.to_string()),
+            b.name,
+        );
+    }
+    v
+}
+
+/// How an entry function is written.
+#[derive(Clone, Copy)]
+enum Form {
+    /// An entry function, with the depth convention of a vertex shader.
+    Entry { depth_fix: bool },
+    /// The body of a task or mesh stage: a function that takes the parameters without attributes and the stage memory
+    /// the wrapper owns.
+    StageBody,
+}
+
 /// The text of one entry function around a body.
 fn entry_text(
     s: &Structured,
@@ -91,34 +136,50 @@ fn entry_text(
     res: &args::Res,
     plan: &io::Plan,
     body: &str,
-    depth_fix: bool,
+    form: Form,
 ) -> R<String> {
+    let (stage_body, depth_fix) = match form {
+        Form::Entry { depth_fix } => (false, depth_fix),
+        Form::StageBody => (true, false),
+    };
     let early = shader == Shader::Fragment && s.props.definitions.early_z_force;
     let has_out = shader != Shader::Compute && !plan.out_members.is_empty();
     let ret = if has_out { "main0_out" } else { "void" };
-    let mut params = Vec::new();
-    if !plan.in_members.is_empty() {
-        params.push("main0_in in [[stage_in]]".to_string());
-    }
-    if res.has_args {
-        params.push(format!("constant {SET_TYPE}& {SET_NAME} [[buffer(0)]]"));
-    }
-    for b in &plan.builtins {
-        params.push(format!("{} {} [[{}]]", b.ty, b.name, b.attr));
-    }
     let mut t = String::new();
-    let attr = if early {
-        "[[early_fragment_tests]] "
+    if stage_body {
+        let mut params: Vec<String> = entry_params(res, plan)
+            .into_iter()
+            .map(|p| p.plain)
+            .collect();
+        for m in &s.props.properties.shared_memories {
+            let (ty, n) = memory(m)?;
+            let p = memory_decl(&ty, &format!("sm{}", m.id), n).1;
+            params.push(format!("threadgroup {p}"));
+        }
+        let _ = writeln!(
+            t,
+            "static inline __attribute__((always_inline)) void {}({})\n{{",
+            e.name,
+            params.join(", ")
+        );
     } else {
-        ""
-    };
-    let _ = writeln!(
-        t,
-        "{attr}{} {ret} {}({})\n{{",
-        kind(shader),
-        e.name,
-        params.join(", ")
-    );
+        let params: Vec<String> = entry_params(res, plan)
+            .into_iter()
+            .map(|p| p.attr)
+            .collect();
+        let attr = if early {
+            "[[early_fragment_tests]] "
+        } else {
+            ""
+        };
+        let _ = writeln!(
+            t,
+            "{attr}{} {ret} {}({})\n{{",
+            kind(shader),
+            e.name,
+            params.join(", ")
+        );
+    }
     if has_out {
         t.push_str("    main0_out out = {};\n");
     }
@@ -134,7 +195,13 @@ fn entry_text(
         let (ty, n) = memory(m)?;
         let _ = writeln!(t, "    {};", memory_decl(&ty, &format!("lm{}", m.id), n).0);
     }
-    for m in &s.props.properties.shared_memories {
+    for m in s
+        .props
+        .properties
+        .shared_memories
+        .iter()
+        .filter(|_| !stage_body)
+    {
         let (ty, n) = memory(m)?;
         let _ = writeln!(
             t,
@@ -169,15 +236,27 @@ pub fn build(s: &Structured, ctx: &Context<'_>, opt: &Options) -> R<Translated> 
         "cs" | "gs" => Shader::Compute,
         other => return Err(format!("unported: {other} stage")),
     };
+    // A task or mesh shader is a compute job, and its tables and reflection are those of its own stage
+    let stage_name = job
+        .mesh_stage
+        .as_ref()
+        .map_or(job.stage.as_str(), |m| m.kind.as_str());
     if s.props.definitions.transform_feedback_enabled {
-        return Err("unported: transform feedback".into());
+        return Err(format!(
+            "unported: transform feedback of a {} shader",
+            if job.stage == "vs" {
+                "vertex"
+            } else {
+                stage_name
+            }
+        ));
     }
     if shader == Shader::Compute && tg_bytes(s) > i64::from(super::abi::TG_MAX) {
         return Err("unported: threadgroup memory past 32 KB (tg_spill)".into());
     }
     let usage: Usage = usage::collect(&s.info);
     let res = args::build(
-        &s.props, &s.program, &usage, &job.stage, &s.notes, &s.fetch1d,
+        &s.props, &s.program, &usage, stage_name, &s.notes, &s.fetch1d,
     )?;
     let base_instance = shader == Shader::Vertex
         && res
@@ -229,15 +308,36 @@ pub fn build(s: &Structured, ctx: &Context<'_>, opt: &Options) -> R<Translated> 
         let _ = write!(msl, "{}\n{{\n{b}}}\n", em.signature(i)?);
     }
     let main = bodies.first().ok_or("program without a main function")?;
-    msl.push_str(&entry_text(
-        s,
-        &EntryName { name: "main0" },
-        shader,
-        &res,
-        &plan,
-        main,
-        !opt.no_depth_fix,
-    )?);
+    if let Some(m) = &job.mesh_stage {
+        msl.push_str(&entry_text(
+            s,
+            &EntryName {
+                name: mesh::BODY_NAME,
+            },
+            shader,
+            &res,
+            &plan,
+            main,
+            Form::StageBody,
+        )?);
+        let params = entry_params(&res, &plan);
+        let words = (job.shared.max(0) + 3) / 4;
+        let text = mesh::wrap(m, &params, s.props.properties.shared_memories.len(), words)?;
+        msl.push('\n');
+        msl.push_str(&text);
+    } else {
+        msl.push_str(&entry_text(
+            s,
+            &EntryName { name: "main0" },
+            shader,
+            &res,
+            &plan,
+            main,
+            Form::Entry {
+                depth_fix: !opt.no_depth_fix,
+            },
+        )?);
+    }
     if let Some(body) = &body_z {
         msl.push('\n');
         msl.push_str(&entry_text(
@@ -247,7 +347,7 @@ pub fn build(s: &Structured, ctx: &Context<'_>, opt: &Options) -> R<Translated> 
             &res,
             &plan,
             body,
-            false,
+            Form::Entry { depth_fix: false },
         )?);
     }
 
@@ -263,7 +363,7 @@ pub fn build(s: &Structured, ctx: &Context<'_>, opt: &Options) -> R<Translated> 
         dm_ctl: job.key.clone(),
         source: ctx.source.clone(),
         pc_paired: ctx.pc_paired.to_string(),
-        stage: job.stage.clone(),
+        stage: stage_name.to_string(),
         entry: "main0".into(),
         entries: body_z
             .iter()
@@ -273,18 +373,21 @@ pub fn build(s: &Structured, ctx: &Context<'_>, opt: &Options) -> R<Translated> 
         threadgroup_size: (shader == Shader::Compute).then(|| local_size(s)),
         c1: facts::hex(&job.c1),
         notes,
-        drv_unfillable: super::refl::unfillable(&reads, &job.stage),
+        drv_unfillable: super::refl::unfillable(&reads, stage_name),
         drv_reads: reads,
         bindings: res.bindings.clone(),
         vertex_inputs: facts::vertex_inputs(&plan),
         ..Reflection::default()
     };
     r.raster = facts::raster(shader, &plan, usage.discard, &r.bindings);
+    if let Some(m) = &job.mesh_stage {
+        mesh::reflect(m, &mut r);
+    }
     let mut varyings = plan.varyings.clone();
     varyings.sort_by_key(|v| v.location);
     Ok(Translated {
         key: job.key.clone(),
-        stage: job.stage.clone(),
+        stage: stage_name.to_string(),
         libraries: vec![Library {
             suffix: "_b".into(),
             msl,
