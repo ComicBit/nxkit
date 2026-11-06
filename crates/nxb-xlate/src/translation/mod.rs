@@ -19,6 +19,7 @@ pub mod geometry;
 mod geometry_tests;
 pub mod header;
 pub mod host;
+pub mod msl_entry;
 pub mod pipeline;
 pub mod props;
 pub mod props_fmt;
