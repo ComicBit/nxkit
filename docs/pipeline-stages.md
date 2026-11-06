@@ -68,7 +68,7 @@ Without `--version`, it takes the newest update. When the package has no base ga
 - **Merged packages.** A package can hold more than one game. `--app <id>` gives the application id in hexadecimal.
   The stage then uses only the contents of that application.
 
-Not ported at this time: the `--html` output of some titles. A sparse NCA stops with exit code 4, because no sample was available.
+Not ported at this time: the `--html` output of some titles. The base game of a sparse program stops with exit code 4 unless its update NSP is read in the same run.
 
 ### Tests on real data
 
@@ -101,8 +101,10 @@ Since version 0.4.0, the split reads many more container families. A format that
 | Unity bundles and serialized files (LZMA, LZ4, stored blocks, format 17 to 22, type trees) | ported. Compared on synthetic files only, because no real Unity title was available |
 | Needle, Sumo, Phyre, MGFX, XNB, SLCT, Monolith, Snowdrop, SDF, MT Framework and some more | ported. Compared on synthetic files |
 | formats that need Oodle (some packs, Frostbite roots, some Unreal blocks) | not ported. Exit code 4 |
-| the CRA family | not ported. Exit code 4 |
-| zip members in bzip2 or lzma, encrypted Unreal indexes, LZ5 packages | not ported. Exit code 4 or a note |
+| the CRA family | ported. `nxb-split::cra` unscrambles each file and checks its checksum. The file table is read from the NROs of `DM_NRO_DIR`, and a missing table stops the plan. Each NRO is also scanned like main. Compared with the reference script on a synthetic NRO and archive made by `tools/gen_cra_fixture.py` |
+| zip members (stored, Deflate, bzip2, lzma) | ported. The decoders are `nxb-split::bzip2` and `nxb-split::unity::lzma`. Compared with vectors from Python's `zipfile`, `bzip2` and `xz` |
+| BND3 entry names in Shift JIS | ported. `nxb-split::sjis` decodes ASCII, half-width katakana and JIS X 0208 like Python's `shift-jis` codec with `replace`. A test compares all 65536 byte pairs with the codec. The table is made by `tools/gen_sjis_table.py` |
+| encrypted Unreal indexes, LZ5 packages | not ported. Exit code 4 or a note |
 
 Real data: the update image of one title with a 17.6 GB archive gave all 12 package files and all tables byte-identical to the reference split (measured: 298 s, and about 25 minutes for the reference).
 The reference scripts read approximately 35 container formats, and the port covers most of them. Only the real image and the NSP titles have real-data results. For all other families, the evidence is synthetic.
