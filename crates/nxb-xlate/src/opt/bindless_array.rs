@@ -3,10 +3,13 @@ use super::tex::{self, BINDLESS};
 use super::{Env, utils};
 use crate::ir::{Block, Inst, Ir, NodeId, Opd, OperandType, StorageKind};
 use crate::translation::props::TextureFlags;
+use crate::types::SamplerType;
 
 type R<T> = Result<T, String>;
 
 pub const MINIMUM_ARRAY_LENGTH: i32 = 2;
+const NVN_TEXTURE_BUFFER_INDEX: i32 = 2;
+const NVN_SLOT_ARRAY_LENGTH: i32 = 32;
 
 fn s(ir: &Ir, n: NodeId, i: usize) -> R<Opd> {
     ir.op(n)
@@ -97,8 +100,18 @@ fn process(ir: &mut Ir, blocks: &mut [Block], bi: usize, pos: usize, env: &mut E
     } else {
         (src0_slot, 0)
     };
-    let length =
+    let mut length =
         MINIMUM_ARRAY_LENGTH.max(env.acc.query_texture_array_length_from_buffer(src0_slot));
+    // The replay binds images and buffer textures element by element, so these stay short
+    let (is_image, ty) = {
+        let t = tex::tex(ir, node).ok_or("texture operation")?;
+        (tex::is_image(ir.op(node).inst), t.ty.0)
+    };
+    if src0_slot != NVN_TEXTURE_BUFFER_INDEX
+        && (is_image || ty & SamplerType::MASK == SamplerType::TEXTURE_BUFFER.0)
+    {
+        length = length.min(NVN_SLOT_ARRAY_LENGTH);
+    }
 
     if !has_secondary
         && let Some((table_index, base_offset)) = try_array_base(ir, vec_index)?

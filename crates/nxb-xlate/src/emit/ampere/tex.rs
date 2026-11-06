@@ -143,10 +143,10 @@ fn binding(
 pub(super) fn tex(ctx: &mut Ctx) -> R {
     let x = x(ctx);
     let mut opcode = x.opcode();
-    // 0x361, 0x364 and 0x367 (TEX, TLD4, TLD) take the handle in a register of the second source block,
-    // 0xf60, 0xf63 and 0xf6c (TEX, TLD4, TXD) in a uniform register at 40..46
-    let handle_in_b = matches!(opcode, 0x361 | 0x364 | 0x367);
-    let handle_in_ur = matches!(opcode, 0xf60 | 0xf63 | 0xf6c);
+    // 0x361, 0x364, 0x367 and 0x36a (TEX, TLD4, TLD, TMML) take the handle in a register of the second source block,
+    // 0xf60, 0xf63, 0xf6c and 0xf69 (TEX, TLD4, TXD, TMML) in a uniform register at 40..46
+    let handle_in_b = matches!(opcode, 0x361 | 0x364 | 0x367 | 0x36a);
+    let handle_in_ur = matches!(opcode, 0xf60 | 0xf63 | 0xf6c | 0xf69);
     let bindless = handle_in_b || handle_in_ur;
     let mut bound_handle: Option<Opd> = None;
     if handle_in_ur {
@@ -160,8 +160,8 @@ pub(super) fn tex(ctx: &mut Ctx) -> R {
     }
     if bindless {
         opcode = match opcode {
-            0xf63 | 0xf6c => opcode - 0x400,
-            0x364 | 0x367 => opcode + 0x7ff,
+            0xf63 | 0xf6c | 0xf69 => opcode - 0x400,
+            0x364 | 0x367 | 0x36a => opcode + 0x7ff,
             _ => 0xb60,
         };
     }
@@ -397,7 +397,9 @@ pub(super) fn tex(ctx: &mut Ctx) -> R {
     let count = (mask as u32).count_ones();
     let results = locals(ctx, count);
     if opcode == 0xb69 {
-        tmml(ctx, ty, flags, handle, cbuf_slot, mask, &results, &sources)?;
+        tmml(
+            ctx, ty, flags, handle, cbuf_slot, mask, &results, &sources, bindless,
+        )?;
     } else {
         let sb = if bindless {
             SetBinding { set: 0, binding: 0 }
@@ -421,8 +423,13 @@ fn tmml(
     mask: i32,
     results: &[Opd],
     sources: &[Opd],
+    bindless: bool,
 ) -> R {
-    let sb = binding(ctx, Inst::Lod, ty, flags, cbuf_slot, handle)?;
+    let sb = if bindless {
+        SetBinding { set: 0, binding: 0 }
+    } else {
+        binding(ctx, Inst::Lod, ty, flags, cbuf_slot, handle)?
+    };
     let mut r = 0;
     for comp in 0..4 {
         if mask & (1 << comp) == 0 {

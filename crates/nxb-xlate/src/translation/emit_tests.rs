@@ -194,3 +194,52 @@ fn sured_refuses_another_form() {
     let r = ampere_cs_text(&[(lo, hi | 1 << 4)]);
     assert!(r.is_err_and(|e| e.contains("SURED form")));
 }
+
+/// `ISETP` 0x80d with the immediate `imm`, compare field `cmp` and predicate result `pd`.
+fn guard_cull(imm: u64, cmp: u64, pd: u64) -> (u64, u64) {
+    (
+        0x80d | APT | imm << 32,
+        cmp << (76 - 64) | pd << (81 - 64) | 7 << (84 - 64) | 7 << (87 - 64),
+    )
+}
+
+#[test]
+fn guard_cull_never_drops_a_vertex() {
+    let t = ampere_vs_text(&[guard_cull(0x8000_0000, 6, 0)]).expect("emit");
+    // P0 is written with false, through its shadow
+    assert!(
+        t.contains("d=R5:0, s=#0,") && t.contains("d=R2:0, s=R5:0,"),
+        "{t}"
+    );
+    assert!(ampere_vs_text(&[guard_cull(0xc432_1111, 0, 7)]).is_ok());
+}
+
+#[test]
+fn guard_cull_refuses_another_form_and_other_stages() {
+    assert!(ampere_vs_text(&[guard_cull(0x1234, 6, 0)]).is_err());
+    let r = ampere_cs_text(&[guard_cull(0x8000_0000, 6, 0)]);
+    assert!(r.is_err_and(|e| e.contains("guard band cull")));
+}
+
+#[test]
+fn tmml_takes_a_bindless_handle_in_a_register() {
+    let plain = ampere_cs_text(&[tex2d(0xb69)]).expect("emit");
+    let ur = ampere_cs_text(&[tex2d(0xf69)]).expect("emit");
+    let reg = ampere_cs_text(&[tex2d(0x36a)]).expect("emit");
+    assert!(
+        !plain.contains("R3:2") && !plain.contains("R1:12"),
+        "{plain}"
+    );
+    assert!(ur.contains("R3:2"), "{ur}");
+    assert!(reg.contains("R1:12"), "{reg}");
+}
+
+#[test]
+fn ldg_reads_its_address_before_the_predicate_zeroes_rd() {
+    // LDG.32 R0, [R0.64] @P0 with the false-predicate zeroing of R0
+    let ldg = (0x981, 7 | 4 << 9);
+    let t = ampere_cs_text(&[ldg]).expect("emit");
+    let zero = t.find("d=R5:0, s=#0,").expect(&t);
+    let read = t.find("d=l0, s=R5:0,").expect(&t);
+    assert!(read < zero, "{t}");
+}
