@@ -143,10 +143,13 @@ fn binding(
 pub(super) fn tex(ctx: &mut Ctx) -> R {
     let x = x(ctx);
     let mut opcode = x.opcode();
-    let handle_in_b = opcode == 0x361;
-    let bindless = handle_in_b || opcode == 0xf60;
+    // 0x361, 0x364 and 0x367 (TEX, TLD4, TLD) take the handle in a register of the second source block,
+    // 0xf60, 0xf63 and 0xf6c (TEX, TLD4, TXD) in a uniform register at 40..46
+    let handle_in_b = matches!(opcode, 0x361 | 0x364 | 0x367);
+    let handle_in_ur = matches!(opcode, 0xf60 | 0xf63 | 0xf6c);
+    let bindless = handle_in_b || handle_in_ur;
     let mut bound_handle: Option<Opd> = None;
-    if opcode == 0xf60 {
+    if handle_in_ur {
         let ur = x.bits(40, 46);
         bound_handle = Some(if ur == URZ {
             c(ctx, 0)
@@ -156,7 +159,11 @@ pub(super) fn tex(ctx: &mut Ctx) -> R {
         });
     }
     if bindless {
-        opcode = 0xb60;
+        opcode = match opcode {
+            0xf63 | 0xf6c => opcode - 0x400,
+            0x364 | 0x367 => opcode + 0x7ff,
+            _ => 0xb60,
+        };
     }
     let dim = tex_dim(ctx, x.bits(61, 64))?;
     let mut ty = convert_sampler_type_dim(dim)?;
@@ -222,6 +229,9 @@ pub(super) fn tex(ctx: &mut Ctx) -> R {
     if opcode == 0xb6c {
         let n0 = coords + i32::from(is_array || offset);
         let (a, b) = tex_blocks(ctx, &x, n0, 2 * coords)?;
+        if bindless {
+            sources.push(bound_handle.ok_or("TXD: bindless without a handle")?);
+        }
         sources.extend_from_slice(&a[..coords as usize]);
         if is_1d(ty) {
             sources.push(cf(ctx, 0.0));

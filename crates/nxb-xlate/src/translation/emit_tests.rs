@@ -122,3 +122,38 @@ fn up2ur_refuses_a_mask_past_the_predicates() {
     let r = ampere_cs_text(&[up2ur(0x100)]);
     assert!(r.is_err_and(|e| e.contains("mask past the predicates")));
 }
+
+/// A 2D texture instruction of opcode `op` (Rd R4, Ra R8, Rb R12, a uniform handle in UR2 for the 0xf.. forms), all four components.
+fn tex2d(op: u64) -> (u64, u64) {
+    let lo = op | APT | 4 << 16 | 8 << 24 | 12 << 32 | 2 << 40 | 1 << 61;
+    (lo, 0xf << 8 | 7 << 17)
+}
+
+#[test]
+fn tld4_takes_a_register_handle_from_the_second_block() {
+    let plain = ampere_cs_text(&[tex2d(0xb63)]).expect("emit");
+    let t = ampere_cs_text(&[tex2d(0x364)]).expect("emit");
+    assert!(plain.contains("s=l0,l1,#0,"), "{plain}");
+    // the handle R12 comes first
+    assert!(t.contains("d=l2, s=R1:12,"), "{t}");
+    assert!(t.contains("s=l2,l0,l1,#0,"), "{t}");
+}
+
+#[test]
+fn tld4_and_txd_take_a_uniform_register_handle() {
+    let tld4 = ampere_cs_text(&[tex2d(0xf63)]).expect("emit");
+    assert!(tld4.contains("s=l0,l1,l2,#0,"), "{tld4}");
+    assert!(tld4.contains("d=l0, s=R3:2,"), "{tld4}");
+    let txd = ampere_cs_text(&[tex2d(0xf6c)]).expect("emit");
+    // the handle, then the two coordinates, then the derivatives
+    assert!(txd.contains("s=l0,l1,l2,l3,l4,l5,l6,"), "{txd}");
+    assert!(txd.contains("d=l0, s=R3:2,"), "{txd}");
+}
+
+#[test]
+fn tld_takes_a_register_handle() {
+    let (lo, hi) = tex2d(0x367);
+    let t = ampere_cs_text(&[(lo, hi | 1 << (87 - 64))]).expect("emit");
+    assert!(t.contains("d=l0, s=R1:8,"), "{t}");
+    assert!(t.contains("R1:12"), "{t}");
+}

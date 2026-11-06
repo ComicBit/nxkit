@@ -344,8 +344,44 @@ fn build() -> Tables {
     );
     x(
         t,
+        0x364,
+        InstName::Tld4,
+        AEmit::ATex,
+        props::TEX,
+        false,
+        true,
+    );
+    x(
+        t,
+        0x367,
+        InstName::Tld,
+        AEmit::ATex,
+        props::TEX,
+        false,
+        true,
+    );
+    x(
+        t,
         0xf60,
         InstName::Tex,
+        AEmit::ATex,
+        props::TEX,
+        false,
+        true,
+    );
+    x(
+        t,
+        0xf63,
+        InstName::Tld4,
+        AEmit::ATex,
+        props::TEX,
+        false,
+        true,
+    );
+    x(
+        t,
+        0xf6c,
+        InstName::Txd,
         AEmit::ATex,
         props::TEX,
         false,
