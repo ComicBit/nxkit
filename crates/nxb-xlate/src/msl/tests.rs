@@ -1,7 +1,7 @@
 //! End to end tests of the emitter on small structured programs, and the Metal compile test of the samples.
 
 use super::emit::Options;
-use super::entry::build;
+use super::library::build;
 use super::{Context, Translated};
 use crate::attr::Stage;
 use crate::codegen::props::{BufferDef, Field, MemoryDef, Props, TextureDef};
@@ -14,17 +14,17 @@ use crate::structured::{StructFunction, StructInfo};
 use crate::translation::msl_entry::Structured;
 use crate::types::SamplerType;
 
-const F4: AggType = AggType(AggType::VECTOR4.0 | AggType::FP32.0);
+pub(super) const F4: AggType = AggType(AggType::VECTOR4.0 | AggType::FP32.0);
 const ONE: i32 = 0x3f80_0000;
 
 /// A program of one function under construction.
-struct B {
-    s: Structured,
-    main: A,
+pub(super) struct B {
+    pub(super) s: Structured,
+    pub(super) main: A,
 }
 
 impl B {
-    fn new(stage: Stage, name: &str) -> B {
+    pub(super) fn new(stage: Stage, name: &str) -> B {
         let job = parse_jobs(&format!(
             r#"[{{"key": "k", "stage": "{name}", "local": [8, 1, 1]}}]"#
         ))
@@ -55,33 +55,33 @@ impl B {
         }
     }
 
-    fn k(&mut self, v: i32) -> A {
+    pub(super) fn k(&mut self, v: i32) -> A {
         self.s.info.ast.new_const(v)
     }
 
-    fn local(&mut self, ty: AggType) -> A {
+    pub(super) fn local(&mut self, ty: AggType) -> A {
         let l = self.s.info.ast.new_local(ty);
         self.s.info.functions[0].locals.push(l);
         l
     }
 
-    fn put(&mut self, n: A) {
+    pub(super) fn put(&mut self, n: A) {
         self.s.info.ast.add(self.main, n).expect("add");
     }
 
-    fn op(&mut self, inst: Inst, kind: StorageKind, index: i32, src: Vec<A>) -> A {
+    pub(super) fn op(&mut self, inst: Inst, kind: StorageKind, index: i32, src: Vec<A>) -> A {
         self.s.info.ast.new_op(inst, kind, false, index, src)
     }
 
     /// `local = op(...)` and the local.
-    fn def(&mut self, ty: AggType, op: A) -> A {
+    pub(super) fn def(&mut self, ty: AggType, op: A) -> A {
         let l = self.local(ty);
         let a = self.s.info.ast.new_assign(l, op);
         self.put(a);
         l
     }
 
-    fn load_io(
+    pub(super) fn load_io(
         &mut self,
         kind: StorageKind,
         var: IoVariable,
@@ -99,13 +99,13 @@ impl B {
     }
 
     /// A load of a scalar input builtin, which takes no component index.
-    fn load_scalar(&mut self, var: IoVariable, ty: AggType) -> A {
+    pub(super) fn load_scalar(&mut self, var: IoVariable, ty: AggType) -> A {
         let src = vec![self.k(var.0 as i32)];
         let op = self.op(Inst::Load, StorageKind::Input, 0, src);
         self.def(ty, op)
     }
 
-    fn store_io(&mut self, var: IoVariable, loc: Option<i32>, comp: i32, v: A) {
+    pub(super) fn store_io(&mut self, var: IoVariable, loc: Option<i32>, comp: i32, v: A) {
         let mut src = vec![self.k(var.0 as i32)];
         if let Some(l) = loc {
             src.push(self.k(l));
@@ -116,7 +116,7 @@ impl B {
         self.put(op);
     }
 
-    fn io(&mut self, kind: StorageKind, var: IoVariable, loc: i32) {
+    pub(super) fn io(&mut self, kind: StorageKind, var: IoVariable, loc: i32) {
         self.s.info.add_io(crate::structured::IoDef {
             storage_kind: kind,
             io_variable: var,
@@ -125,7 +125,7 @@ impl B {
         });
     }
 
-    fn translate(&self) -> Translated {
+    pub(super) fn translate(&self) -> Translated {
         let ctx = Context {
             chain: "V",
             source: "p#0".into(),
@@ -135,12 +135,12 @@ impl B {
         build(&self.s, &ctx, &Options::default()).expect("build")
     }
 
-    fn msl(&self) -> String {
+    pub(super) fn msl(&self) -> String {
         self.translate().libraries[0].msl.clone()
     }
 }
 
-fn vertex() -> B {
+pub(super) fn vertex() -> B {
     let mut b = B::new(Stage::Vertex, "vs");
     b.s.props.definitions.attribute_types = vec![0];
     b.io(StorageKind::Input, IoVariable::UserDefined, 0);
@@ -168,7 +168,7 @@ fn vertex() -> B {
     b
 }
 
-fn fragment() -> B {
+pub(super) fn fragment() -> B {
     let mut b = B::new(Stage::Fragment, "ps");
     b.s.props.definitions.imap_types = vec![[2, 2, 2, 2]];
     b.s.props.definitions.fragment_output_types = vec![F4, F4];

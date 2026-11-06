@@ -383,9 +383,12 @@ impl Em<'_> {
         let call = format!("fn{id}({})", args.join(", "));
         if ret == AggType::VOID {
             self.line(&format!("{call};"));
+            self.after_call()?;
             Ok(None)
         } else {
-            self.effect(call, ret).map(Some)
+            let v = self.effect(call, ret)?;
+            self.after_call()?;
+            Ok(Some(v))
         }
     }
 }

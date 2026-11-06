@@ -123,13 +123,17 @@ impl Em<'_> {
             }
             Inst::Discard => {
                 self.line("discard_fragment();");
+                if self.kill() && self.func != 0 {
+                    self.line(&format!("{} = true;", super::facts_ps::KILL));
+                }
                 self.return_default()?;
             }
             Inst::LoopBreak => self.line("break;"),
             Inst::LoopContinue => self.line("continue;"),
             Inst::FSIBegin | Inst::FSIEnd => {
-                if self.props.host.supports_fragment_shader_interlock {
-                    return Err("unported: fragment shader interlock".into());
+                // Metal orders the accesses of the resources in raster order group 0, which the argument buffer members carry.
+                if self.shader != Shader::Fragment {
+                    return Err("unported: fragment shader interlock outside a pixel shader".into());
                 }
             }
             Inst::Comment => {}

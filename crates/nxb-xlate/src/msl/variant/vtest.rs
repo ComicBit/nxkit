@@ -8,7 +8,7 @@ use crate::driver::Program;
 use crate::ir::{Inst, IoVariable, StorageKind};
 use crate::job::parse_jobs;
 use crate::msl::emit::Options;
-use crate::msl::entry::build;
+use crate::msl::library::build;
 use crate::msl::{Context, StageInputs, Translated, Varying};
 use crate::structured::ast::{A, BlockType};
 use crate::structured::types::AggType;
