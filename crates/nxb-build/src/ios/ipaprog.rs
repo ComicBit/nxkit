@@ -20,6 +20,7 @@ pub(crate) struct TablesCtx<'a> {
 pub(crate) struct ProgIn<'a> {
     pub game: &'a str,
     pub g: &'a Game,
+    pub guards: &'a Path,
     pub patched: &'a str,
     pub gfx: &'a str,
     pub vnacp: &'a str,
@@ -86,6 +87,44 @@ pub(crate) fn load(tsv: &str, profiles: &Profiles) -> Result<Vec<Prog>, String> 
     Ok(out)
 }
 
+/// Copy the profile's static tables and the generated guard tables checked for this program.
+fn copy_shader_tables(
+    g: &Game,
+    guards: &Path,
+    gfx: &str,
+    td: &Path,
+    say: &mut dyn FnMut(&str),
+) -> Result<(), String> {
+    for t in ["shader_map.tsv", "pso_manifest.tsv"] {
+        copy(&g.dir.join(t), &td.join(t), "copy shader tables")?;
+    }
+    if !matches!(gfx, "vulkan" | "gl") {
+        copy(
+            &guards.join("c1_full.tsv"),
+            &td.join("c1_full.tsv"),
+            "copy c1_full.tsv",
+        )?;
+        if guards.join("cb_extent.tsv").is_file() {
+            copy(
+                &guards.join("cb_extent.tsv"),
+                &td.join("cb_extent.tsv"),
+                "copy cb_extent.tsv",
+            )?;
+        } else {
+            say(&format!(
+                "no {}/cb_extent.tsv: the host copies whole uniform bindings",
+                guards.display()
+            ));
+        }
+        for f in ["shader_pairs.tsv", "pso_pairs.tsv"] {
+            if g.dir.join(f).is_file() {
+                copy(&g.dir.join(f), &td.join(f), &format!("copy {f}"))?;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// `program_tables`: one program's rewriter tables, shader tables and app binary settings into `td`, its settings.
 pub(crate) fn program_tables(
     c: &TablesCtx<'_>,
@@ -96,11 +135,11 @@ pub(crate) fn program_tables(
     let ProgIn {
         game,
         g,
+        guards,
         patched,
         gfx,
         vnacp,
     } = *p;
-    let gd = g.dir.display().to_string();
     let mut tables: Vec<PathBuf> = Vec::new();
     for suf in [".fixups.tsv", ".gates.tsv", ".cuts.tsv", ".obs.tsv"] {
         let mut m: Vec<PathBuf> = std::fs::read_dir(patched)
@@ -129,31 +168,7 @@ pub(crate) fn program_tables(
     if nro.is_file() {
         copy(&nro, &td.join("nro.tsv"), "copy the NRO table")?;
     }
-    let mut shader_tables = vec!["shader_map.tsv", "pso_manifest.tsv"];
-    if !matches!(gfx, "vulkan" | "gl") {
-        shader_tables.push("c1_full.tsv");
-    }
-    for t in &shader_tables {
-        copy(&g.dir.join(t), &td.join(t), "copy shader tables")?;
-    }
-    if !matches!(gfx, "vulkan" | "gl") {
-        if g.dir.join("cb_extent.tsv").is_file() {
-            copy(
-                &g.dir.join("cb_extent.tsv"),
-                &td.join("cb_extent.tsv"),
-                "copy cb_extent.tsv",
-            )?;
-        } else {
-            say(&format!(
-                "no {gd}/cb_extent.tsv: the host copies whole uniform bindings"
-            ));
-        }
-        for f in ["shader_pairs.tsv", "pso_pairs.tsv"] {
-            if g.dir.join(f).is_file() {
-                copy(&g.dir.join(f), &td.join(f), &format!("copy {f}"))?;
-            }
-        }
-    }
+    copy_shader_tables(g, guards, gfx, td, say)?;
     let lj = td.join("launcher.json");
     let env_of = |k: &str| -> Option<String> {
         if k == "GFXAPI" {
