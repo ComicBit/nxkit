@@ -332,14 +332,53 @@ fn assemble(
     if let Some(vx) = vx {
         msl.push_str(&variant::vertex::decls(plan, vx)?);
     }
-    for i in 1..bodies.len() {
-        let _ = writeln!(msl, "{};", em.signature(i)?);
-    }
-    for (i, b) in bodies.iter().enumerate().skip(1) {
-        let _ = write!(msl, "{}\n{{\n{b}}}\n", em.signature(i)?);
-    }
+    msl.push_str(&helper_functions(em, bodies)?);
     msl.push_str(entries);
     Ok(msl)
+}
+
+/// The helper functions `fn1` and up, each one after the functions it calls. The own front end rejects
+/// prototypes, so they are written only when the calls form a cycle, and then for every helper in index order.
+pub(crate) fn helper_functions(em: &Em<'_>, bodies: &[String]) -> R<String> {
+    let mut t = String::new();
+    let order = callee_order(bodies);
+    if order.is_none() {
+        for i in 1..bodies.len() {
+            let _ = writeln!(t, "{};", em.signature(i)?);
+        }
+    }
+    let order = order.unwrap_or_else(|| (1..bodies.len()).collect());
+    for i in order {
+        let b = bodies.get(i).ok_or("unknown function")?;
+        let _ = write!(t, "{}\n{{\n{b}}}\n", em.signature(i)?);
+    }
+    Ok(t)
+}
+
+/// The helpers `1..bodies.len()` with every callee before its callers, `None` when the calls form a cycle.
+fn callee_order(bodies: &[String]) -> Option<Vec<usize>> {
+    let n = bodies.len();
+    let calls = |i: usize, j: usize| {
+        let name = format!("fn{j}(");
+        bodies[i].match_indices(&name).any(|(at, _)| {
+            !bodies[i][..at]
+                .chars()
+                .next_back()
+                .is_some_and(|c| c.is_ascii_alphanumeric() || c == '_')
+        })
+    };
+    let mut done = vec![false; n];
+    let mut order = Vec::with_capacity(n.saturating_sub(1));
+    while order.len() + 1 < n {
+        let next =
+            (1..n).find(|&i| !done[i] && (1..n).all(|j| j == i || done[j] || !calls(i, j)))?;
+        if calls(next, next) {
+            return None;
+        }
+        done[next] = true;
+        order.push(next);
+    }
+    Some(order)
 }
 
 /// The libraries `_bv` and `_bp` of a vertex shader with the reflection fields that describe them.
@@ -408,4 +447,37 @@ fn local_size(s: &Structured) -> [u32; 3] {
             .max(1)
     };
     [at(0), at(1), at(2)]
+}
+
+#[cfg(test)]
+mod order_tests {
+    use super::callee_order;
+
+    fn bodies(b: &[&str]) -> Vec<String> {
+        b.iter().map(|s| (*s).to_string()).collect()
+    }
+
+    #[test]
+    fn callees_come_before_their_callers() {
+        let b = bodies(&["fn1();", "x = fn3(a);", "", "fn2(); dm_fn1(b);"]);
+        assert_eq!(callee_order(&b), Some(vec![2, 3, 1]));
+    }
+
+    #[test]
+    fn a_name_with_more_digits_is_another_function() {
+        let b = bodies(&["", "fn11(a);", "", "", "", "", "", "", "", "", "", ""]);
+        assert_eq!(callee_order(&b).map(|o| o[0]), Some(2));
+    }
+
+    #[test]
+    fn a_cycle_gives_no_order() {
+        assert_eq!(callee_order(&bodies(&["", "fn2();", "fn1();"])), None);
+        assert_eq!(callee_order(&bodies(&["", "fn1();"])), None);
+    }
+
+    #[test]
+    fn no_helpers_give_an_empty_order() {
+        assert_eq!(callee_order(&bodies(&["main"])), Some(vec![]));
+        assert_eq!(callee_order(&[]), Some(vec![]));
+    }
 }

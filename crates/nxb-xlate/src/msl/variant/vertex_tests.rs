@@ -78,6 +78,15 @@ fn capture_entry_writes_the_outputs_to_the_buffer() {
     );
 }
 
+// The own front end rejects `++` and `--`, so the variant loops step with `+=`.
+#[test]
+fn variant_loops_have_no_increment_operators() {
+    let t = simple().translate_with(&[partner(&[(5, "float4", "")])]);
+    let msl = &t.libraries[0].msl;
+    assert!(msl.contains("k += 1u)"));
+    assert!(!msl.contains("++") && !msl.contains("--"), "{msl}");
+}
+
 #[test]
 fn capture_covers_the_pad() {
     let t = simple().translate_with(&[partner(&[(5, "float4", "")])]);

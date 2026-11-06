@@ -153,7 +153,7 @@ pub fn decls(plan: &Plan, b: &Bodies) -> R<String> {
                 Some(len) => {
                     let _ = writeln!(
                         t,
-                        "    for (int i = 0; i < {len}; i++) r.{n}[i] = out.{n}[i];"
+                        "    for (int i = 0; i < {len}; i += 1) r.{n}[i] = out.{n}[i];"
                     );
                 }
                 None => {
@@ -178,7 +178,7 @@ fn capture_decls(plan: &Plan) -> R<String> {
     let _ = writeln!(t, "    uint w[{CAPTURE_WORDS}];");
     let _ = writeln!(
         t,
-        "    for (uint k = 0; k < {CAPTURE_WORDS}; k++) w[k] = (k == 3 || k == 4 || (k >= 19 && k % 4 == 3)) ? 0x3f800000u : 0u;"
+        "    for (uint k = 0; k < {CAPTURE_WORDS}; k += 1u) w[k] = (k == 3 || k == 4 || (k >= 19 && k % 4 == 3)) ? 0x3f800000u : 0u;"
     );
     for (k, c) in ["x", "y", "z", "w"].iter().enumerate() {
         let _ = writeln!(t, "    w[{k}] = as_type<uint>(out.gl_Position.{c});");
@@ -219,7 +219,7 @@ fn capture_decls(plan: &Plan) -> R<String> {
     }
     let _ = writeln!(
         t,
-        "    for (uint k = 0; k < {CAPTURE_WORDS}; k++) {{ short s = g.slot[k]; if (s >= 0) p[s] = w[k]; }}\n}}"
+        "    for (uint k = 0; k < {CAPTURE_WORDS}; k += 1u) {{ short s = g.slot[k]; if (s >= 0) p[s] = w[k]; }}\n}}"
     );
     Ok(t)
 }
