@@ -326,6 +326,7 @@ pub fn build(
         }
     }
     p.out_members.sort_by_key(|m| m.contains("[[color"));
+    p.frag_outs.sort_by_key(|m| m.color.is_some());
     Ok(p)
 }
 

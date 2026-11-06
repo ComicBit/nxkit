@@ -9,4 +9,5 @@
 //! No variant is written yet.
 
 pub mod pixel;
+pub mod pixel_derived;
 pub mod side;

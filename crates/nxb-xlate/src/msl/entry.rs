@@ -246,7 +246,8 @@ pub fn build(s: &Structured, ctx: &Context<'_>, opt: &Options) -> R<Translated> 
     }
     let main = bodies.first().ok_or("program without a main function")?;
     let built = if shader == Shader::Fragment {
-        variant::pixel::assemble(s, &res, &plan, main, &[])?
+        let derived = variant::pixel_derived::derived(&s.info, &plan, opt.dual_source);
+        variant::pixel::assemble(s, &res, &plan, main, &derived)?
     } else {
         let e = EntryName {
             name: "main0",

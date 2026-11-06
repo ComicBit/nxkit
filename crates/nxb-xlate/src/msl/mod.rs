@@ -146,6 +146,7 @@ pub fn translate(job: &Job, code: &[u8], ctx: &Context<'_>) -> Result<Translated
     let opt = Options {
         visibility_counter: job.stage == "vs"
             && nxb_model::sha256(code).to_hex() == VISIBILITY_COUNTER,
+        ..Options::default()
     };
     entry::build(&structured, ctx, &opt).map_err(failure)
 }
