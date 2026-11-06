@@ -50,6 +50,19 @@ const LANE: Builtin = Builtin {
     attr: "thread_index_in_simdgroup",
 };
 
+/// One member of the fragment output struct, kept as data for the entries that return a changed struct.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FragOut {
+    /// The member name (`c0`, `c1_pad`, `gl_FragDepth`).
+    pub name: String,
+    /// The MSL type.
+    pub ty: String,
+    /// The attribute text without the brackets (`color(0)`, `color(0), index(1)`, `depth(any)`).
+    pub attr: String,
+    /// The colour location, `None` for the depth.
+    pub color: Option<u32>,
+}
+
 /// The stage IO of a shader.
 #[derive(Debug, Default)]
 pub struct Plan {
@@ -67,6 +80,8 @@ pub struct Plan {
     pub vec4_outputs: Vec<String>,
     /// The fragment colour outputs.
     pub colors: Vec<u32>,
+    /// The members of the fragment output struct (colours, pads, depth).
+    pub frag_outs: Vec<FragOut>,
     /// The fragment shader reads a primitive id.
     pub primitive_id: bool,
     /// The vertex shader writes a layer.
@@ -111,7 +126,9 @@ impl Plan {
             IoVariable::PointCoord => ("in.gl_PointCoord".into(), AggType::VECTOR2 | AggType::FP32),
             IoVariable::Layer => ("in.gl_Layer".into(), AggType::U32),
             IoVariable::ViewportIndex => ("in.gl_ViewportIndex".into(), AggType::U32),
-            IoVariable::ThreadKill => ("simd_is_helper_thread()".into(), AggType::BOOL),
+            IoVariable::ThreadKill | IoVariable::HelperInvocation => {
+                ("simd_is_helper_thread()".into(), AggType::BOOL)
+            }
             IoVariable::VertexIndex => ("gl_VertexIndex".into(), AggType::U32),
             IoVariable::InstanceIndex => ("gl_InstanceIndex".into(), AggType::U32),
             IoVariable::VertexId => ("(gl_VertexIndex - gl_BaseVertex)".into(), AggType::U32),
@@ -201,7 +218,9 @@ pub fn built_in_type(v: IoVariable) -> R<AggType> {
         IoVariable::PointCoord => AggType::VECTOR2 | AggType::FP32,
         IoVariable::PointSize | IoVariable::FragmentOutputDepth => AggType::FP32,
         IoVariable::ClipDistance => AggType::FP32,
-        IoVariable::FrontFacing | IoVariable::ThreadKill => AggType::BOOL,
+        IoVariable::FrontFacing | IoVariable::ThreadKill | IoVariable::HelperInvocation => {
+            AggType::BOOL
+        }
         IoVariable::CtaId | IoVariable::GlobalId | IoVariable::ThreadId => u3,
         IoVariable::SubgroupLaneId => AggType::U32,
         IoVariable::SubgroupEqMask
@@ -294,6 +313,12 @@ pub fn build(
             if !p.colors.contains(&l) {
                 p.out_members
                     .push(format!("float4 c{l}_pad [[color({l})]];"));
+                p.frag_outs.push(FragOut {
+                    name: format!("c{l}_pad"),
+                    ty: "float4".into(),
+                    attr: format!("color({l})"),
+                    color: Some(l),
+                });
             }
         }
         if let Some(t) = top {
@@ -392,7 +417,7 @@ fn input(p: &mut Plan, props: &Props, shader: Shader, v: IoVariable, l: i32) -> 
         (Shader::Fragment, IoVariable::ViewportIndex) => p
             .in_members
             .push("uint gl_ViewportIndex [[viewport_array_index]];".into()),
-        (Shader::Fragment, IoVariable::ThreadKill) => {}
+        (Shader::Fragment, IoVariable::ThreadKill | IoVariable::HelperInvocation) => {}
         _ => builtin(p, shader, v)?,
     }
     Ok(())
@@ -435,12 +460,24 @@ fn output(
                 format!("color({l})")
             };
             p.out_members.push(format!("{t} c{l} [[{attr}]];"));
+            p.frag_outs.push(FragOut {
+                name: format!("c{l}"),
+                ty: t,
+                attr,
+                color: Some(l as u32),
+            });
             p.colors.push(l as u32);
         }
         (Shader::Fragment, IoVariable::FragmentOutputDepth) => {
             p.depth = true;
             p.out_members
                 .push("float gl_FragDepth [[depth(any)]];".into());
+            p.frag_outs.push(FragOut {
+                name: "gl_FragDepth".into(),
+                ty: "float".into(),
+                attr: "depth(any)".into(),
+                color: None,
+            });
         }
         (_, IoVariable::ViewportMask) => return Err("unported: viewport mask output".into()),
         _ => return Err(format!("unported: output variable {} in this stage", v.0)),
