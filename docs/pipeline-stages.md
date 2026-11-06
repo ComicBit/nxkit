@@ -124,8 +124,8 @@ The extract stage of `nxb build` runs it for the modules of the profile.
   The licence notice of the engine that the rules come from is in `data/rewrite-rules/NOTICE` and in `THIRD_PARTY.md`.
 - **Where the rules are found.** In this sequence: `NXB_REWRITE_RULES` (a folder), `NXB_REWRITE_PATCHES` (a snapshot), the folder `rewrite-rules` next to the binary (the release ZIP file),
   `data/rewrite-rules` above the binary or in the checkout, and last the older file `rewrite_patches.tsv` next to the script.
-- **When the port refuses.** The port gives exit code 4, and the caller runs the script, in four conditions. The first is an engine file that hashes differently from the file that the rules come from. The message gives the two hashes.
-  The second is a set `DM_GAMES_DIR`. The third is a frame step stub that the trace cannot express. The fourth is a main module that has `SwitchVirtualAddressSpaceSize`. It needs the finder `ue_region`, which is not ported.
+- **When the port refuses.** The port gives exit code 4, and the caller runs the script, in three conditions. The first is an engine file that hashes differently from the file that the rules come from. The message gives the two hashes.
+  The second is a set `DM_GAMES_DIR`. The third is a frame step stub that the trace cannot express.
   In `nxb build`, an engine that differs stops the rewrite stage with exit code 1 and the same message. A jump table that no rule knows stops with exit code 1, the address and the function name.
 - **NRO modules.** `nxb nro <RomFS image> <out dir> [<nrr name>]` collects the NRO modules that the `.nrr` files list. It has the command line of `nro_collect.py`.
   It reads the archive index of the large archive by ranges. It gives exit code 4 for an image of another format, for hashes that are left after the index (the scan of the script is not ported),
@@ -147,14 +147,13 @@ The synthetic large modules took 1 to 3.5 s against 183 to 672 s. The NRO collec
 
 The older script gave the 25 real modules and the other rows below the first row.
 The script then changed in 551 lines. Version 0.5.1 ports these changes: the acquire order of locks (`ldaxr`), the Trinity barrier, `changed.tsv`, the observation gates at each instruction that can move,
-`BACK_MIN`, the recognizers of jump tables, the proof of tail calls and the finders `ue_cvar`, `ue_malloc`, `fps_target` and `snowdrop_pools`.
+`BACK_MIN`, the recognizers of jump tables, the proof of tail calls and the finders `ue_cvar`, `ue_malloc`, `ue_region`, `fps_target` and `snowdrop_pools`.
 The rules in `data/rewrite-rules` come from the current engine (147 files). A pin holds the hash of each engine file that the rules use.
 After an engine change, make the rules again with `nxb rewrite-rules`, and compare the oracle cases again.
 
 Not tested: rules on real code of the builds that have no local sample, and modules with words that the decoder does not cover.
 Not rechecked with the current script: three more titles (their images are not extracted).
-The finders `ue_cvar`, `ue_malloc`, `fps_target` and `snowdrop_pools` have no real positive sample. The layouts of three more titles and some frame step stubs are **synthetic**.
-**Not ported:** the finder `ue_region`. A main module with `SwitchVirtualAddressSpaceSize` stops with exit code 4.
+The finders `ue_cvar`, `ue_malloc`, `ue_region`, `fps_target` and `snowdrop_pools` have no real positive sample. `ue_region` is tested on synthetic main modules (`crates/nxb-rewrite/tests/region.rs`, made by `tools/gen_synth_region.py` with the script). The layouts of three more titles and some frame step stubs are **synthetic**.
 
 ## Host stages around the app
 

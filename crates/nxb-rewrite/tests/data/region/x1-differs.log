@@ -1,0 +1,2 @@
+[RED] main: Unreal's engine region: 0 reservations in nninitStartup (0x200); 0x218: x1 is not the x8 stored at 0x214: the engine asks for its whole default region
+main {} cuts 0 obs 0 patch 0 PATCH_OFF 0x10000 slot_refs 0 gates 0

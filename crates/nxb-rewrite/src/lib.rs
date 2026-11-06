@@ -21,6 +21,7 @@ mod obs;
 mod pat;
 /// The registered patches of the engine.
 pub mod patches;
+mod region;
 mod rewrite;
 /// The registered patches as `rules/*.toml`.
 pub mod rules;

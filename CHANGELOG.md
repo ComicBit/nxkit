@@ -2,6 +2,13 @@
 
 All notable changes are in this file. The format follows Keep a Changelog. Versions follow Semantic Versioning.
 
+## Unreleased
+
+### Added
+
+- The finder `ue_region` in `nxb rewrite`. A main module with `SwitchVirtualAddressSpaceSize` no longer gives exit code 4.
+  The output is byte-identical to `dm/tools/ue_region.py` on 13 synthetic main modules (`crates/nxb-rewrite/tests/region.rs`).
+
 ## 0.5.1
 
 ### Changed (read this first)
@@ -19,7 +26,7 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 - **`nxb rewrite` follows the current engine.** The script `patch_nso.py` changed in 551 lines after 0.5.0. This release ports the changes.
   The rules in `data/rewrite-rules` come from the current engine (147 rule files). The pins give the two hashes in the message.
   `nxb build` stops at the rewrite step when the engine files differ from the pinned files. It gives exit code 1 and the message. `nxb rewrite` gives exit code 4.
-  **The finder `ue_region` is not ported.** A main module with `SwitchVirtualAddressSpaceSize` gives exit code 4.
+  The finder `ue_region` was not ported in this release.
 - `nxb build` has more inputs, more options and fixed exit codes (the next section).
 
 ### Added
