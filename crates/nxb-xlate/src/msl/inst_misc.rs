@@ -167,7 +167,9 @@ impl Em<'_> {
                 Shader::Fragment if self.plan.out_members.is_empty() => self.line("return;"),
                 s => {
                     if s == Shader::Vertex {
-                        self.line("out.gl_Position.z = fma(out.gl_Position.z, 0.5, out.gl_Position.w * 0.5);");
+                        for l in self.plan.vertex_epilogue(true) {
+                            self.line(&l);
+                        }
                     }
                     self.line("return out;");
                 }

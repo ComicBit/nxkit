@@ -7,7 +7,7 @@
 
 use super::super::args;
 use super::super::emit::{Em, R};
-use super::super::entry::{EntryName, Param, StageIn, ZFIX, entry_text};
+use super::super::entry::{EntryName, Param, StageIn, entry_text};
 use super::super::io::Plan;
 use crate::translation::msl_entry::Structured;
 use nxb_pyjson::Value;
@@ -55,11 +55,19 @@ fn array_len(m: &str) -> Option<u32> {
     t.rsplit('[').next()?.parse().ok()
 }
 
-fn emit_with(em: &mut Em<'_>, exit: &[&str]) -> R<String> {
-    em.exit = Some(exit.iter().map(|l| (*l).to_string()).collect());
+/// The body of the main function with `exit` at every return and at its end, if it ends without one.
+fn emit_with(em: &mut Em<'_>, exit: Vec<String>) -> R<String> {
+    em.exit = Some(exit.clone());
     let body = em.body(0);
     em.exit = None;
-    body
+    let mut body = body?;
+    let last = body.trim_end().lines().last().map(str::trim);
+    if !last.is_some_and(|l| l.starts_with("return")) {
+        for l in exit {
+            let _ = writeln!(body, "    {l}");
+        }
+    }
+    Ok(body)
 }
 
 /// The first integer store to a user output in the order of the text: the helper functions, then the main function.
@@ -79,9 +87,14 @@ fn layer_source(em: &Em<'_>) -> Option<(i32, i32)> {
 pub fn bodies(em: &mut Em<'_>, plan: &Plan, main: String, writes_memory: bool) -> R<Bodies> {
     let notes = em.notes.len();
     let layer_src = em.layer_src.len();
-    let z = emit_with(em, &["return out;"])?;
+    let tail = |depth_fix: bool, last: &str| {
+        let mut l = plan.vertex_epilogue(depth_fix);
+        l.push(last.to_string());
+        l
+    };
+    let z = emit_with(em, tail(false, "return out;"))?;
     let discard = if writes_memory {
-        Some(emit_with(em, &["return;"])?)
+        Some(emit_with(em, vec!["return;".to_string()])?)
     } else {
         None
     };
@@ -93,15 +106,21 @@ pub fn bodies(em: &mut Em<'_>, plan: &Plan, main: String, writes_memory: bool) -
                 ["x", "y", "z", "w"][comp as usize]
             );
             Some(Layer {
-                l: emit_with(em, &[ZFIX, &ret])?,
-                lz: emit_with(em, &[&ret])?,
+                l: emit_with(em, tail(true, &ret))?,
+                lz: emit_with(em, tail(false, &ret))?,
                 loc,
                 comp,
             })
         }
         _ => None,
     };
-    let gs = emit_with(em, &["dm_capture(dm_gs, dm_p, out);", "return;"])?;
+    let gs = emit_with(
+        em,
+        vec![
+            "dm_capture(dm_gs, dm_p, out);".to_string(),
+            "return;".to_string(),
+        ],
+    )?;
     em.notes.truncate(notes);
     em.layer_src.truncate(layer_src);
     Ok(Bodies {

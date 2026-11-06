@@ -63,6 +63,9 @@ pub struct FragOut {
     pub color: Option<u32>,
 }
 
+/// The local variable that holds a viewport mask. Metal has no such output, so the entry reads it at its end.
+pub const VIEWPORT_MASK: &str = "dm_gs_viewport_mask";
+
 /// The stage IO of a shader.
 #[derive(Debug, Default)]
 pub struct Plan {
@@ -92,6 +95,8 @@ pub struct Plan {
     pub viewport: bool,
     /// The shader writes a depth.
     pub depth: bool,
+    /// The vertex shader writes a viewport mask (the geometry reader): a zero culls the vertex.
+    pub viewport_mask: bool,
     /// The lane id is the constant zero (the visibility counter).
     pub lane_zero: bool,
     /// The locations of the user outputs of a vertex shader, in order.
@@ -161,6 +166,23 @@ impl Plan {
         Ok((s, t))
     }
 
+    /// The lines before the return of a vertex entry: a zero viewport mask moves the vertex beyond the clip planes
+    /// (Metal draws to viewport zero only, so its bit is the visibility decision), then the depth convention.
+    pub fn vertex_epilogue(&self, depth_fix: bool) -> Vec<String> {
+        let mut l = Vec::new();
+        if self.viewport_mask {
+            l.push(format!(
+                "if (({VIEWPORT_MASK} & 1u) == 0u) out.gl_Position = float4(2.0, 0.0, 0.0, 1.0);"
+            ));
+        }
+        if depth_fix {
+            l.push(
+                "out.gl_Position.z = fma(out.gl_Position.z, 0.5, out.gl_Position.w * 0.5);".into(),
+            );
+        }
+        l
+    }
+
     /// The lane id expression.
     pub fn lane(&self) -> String {
         if self.lane_zero {
@@ -198,6 +220,7 @@ impl Plan {
             IoVariable::FragmentOutputDepth => ("out.gl_FragDepth".into(), AggType::FP32),
             IoVariable::Layer => ("out.gl_Layer".into(), AggType::U32),
             IoVariable::ViewportIndex => ("out.gl_ViewportIndex".into(), AggType::U32),
+            IoVariable::ViewportMask => (VIEWPORT_MASK.into(), AggType::U32),
             other => return Err(format!("unported: output variable {}", other.0)),
         })
     }
@@ -220,6 +243,7 @@ pub fn built_in_type(v: IoVariable) -> R<AggType> {
         | IoVariable::VertexId
         | IoVariable::VertexIndex
         | IoVariable::ViewportIndex => AggType::S32,
+        IoVariable::ViewportMask => AggType::U32,
         IoVariable::FragmentCoord | IoVariable::Position => f4,
         IoVariable::PointCoord => AggType::VECTOR2 | AggType::FP32,
         IoVariable::PointSize | IoVariable::FragmentOutputDepth => AggType::FP32,
@@ -487,6 +511,7 @@ fn output(
                 color: None,
             });
         }
+        (Shader::Vertex, IoVariable::ViewportMask) => p.viewport_mask = true,
         (_, IoVariable::ViewportMask) => return Err("unported: viewport mask output".into()),
         _ => return Err(format!("unported: output variable {} in this stage", v.0)),
     }

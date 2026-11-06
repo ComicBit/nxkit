@@ -2,6 +2,7 @@
 
 use super::args::SET_NAME;
 use super::emit::{Em, R, Shader, Val};
+use super::geom;
 use super::types::scalar;
 use super::usage::is_plain_sample;
 use crate::structured::ast::{AstTex, OpData};
@@ -260,6 +261,9 @@ impl Em<'_> {
                 a.push(x.clone());
             }
             if int_coords {
+                if let Some(read) = geom::topology_read(&r.tex, coord) {
+                    return read;
+                }
                 if let Some(s) = &sample {
                     a.push(format!("uint({s})"));
                 } else if let Some(l) = &level {

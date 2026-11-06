@@ -145,3 +145,21 @@ fn index_buffer_stride_depends_on_the_input() {
     // 6 vertices plus 6 / 3 primitives of a triangle strip
     assert_eq!(d.geometry_output_index_buffer_stride_per_instance(false), 8);
 }
+
+#[test]
+fn only_a_geometry_shader_runs_as_compute() {
+    let job = parse_jobs(r#"[{"key": "t", "stage": "vs"}]"#)
+        .expect("job")
+        .remove(0);
+    let mut h = [0u32; 20];
+    h[0] = 1 << 10;
+    let mut code: Vec<u8> = h.iter().flat_map(|w| w.to_le_bytes()).collect();
+    code.extend([0u64, RET, 0, 0].iter().flat_map(|w| w.to_le_bytes()));
+    let mut acc = Accessor::new(&job);
+    let tc = TranslatorContext::create(&code, &mut acc, options_of(&job)).expect("context");
+    let e = structure_geometry_compute(&tc, &mut acc, true).expect_err("vertex");
+    assert_eq!(
+        e,
+        "unported: vertex as compute of a vertex shader, only geometry shaders run as compute"
+    );
+}
