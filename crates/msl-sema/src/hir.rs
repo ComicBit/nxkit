@@ -366,7 +366,8 @@ pub enum ExprKind {
     Splat(Box<Expr>),
     /// `as_type<T>` reinterpretation (same size).
     Bitcast(Box<Expr>),
-    /// Pointer reinterpretation (C cast between pointer types).
+    /// Pointer reinterpretation (C cast between pointer types), or a 64-bit integer to a pointer
+    /// (`reinterpret_cast`).
     PtrCast(Box<Expr>),
     /// Builds a vector from scalars and vectors of the element type.
     Vector(Vec<Expr>),

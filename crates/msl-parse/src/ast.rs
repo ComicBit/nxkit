@@ -280,6 +280,8 @@ pub enum CastKind {
     AsType,
     /// `static_cast<T>(x)`
     Static,
+    /// `reinterpret_cast<T*>(x)` from a pointer or a 64-bit integer.
+    Reinterpret,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

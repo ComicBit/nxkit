@@ -107,6 +107,9 @@ pub struct FnGen<'a> {
     pub(crate) sampler_copy: bool,
     /// Loading the texture a method is called on (clang: through `this`, tagged).
     pub(crate) tex_method: bool,
+    /// Texture addresses of the enclosing texture method calls that were computed before their
+    /// arguments (innermost last, `None` where the handle is evaluated after them).
+    pub(crate) tex_pre: Vec<Option<Addr>>,
     seq_depth: u32,
     /// The function passes textures by value to a template (dm_bs): clang's GVN merges the method's
     /// tagged handle load with the untagged copy, so no tag.
@@ -141,12 +144,15 @@ impl<'a> FnGen<'a> {
             aligns: crate::fx::HashMap::default(),
             sampler_copy: false,
             tex_method: false,
+            tex_pre: Vec::new(),
             seq_depth: 0,
             copies_texture: false,
         };
         let mut calls_template = false;
         msl_sema::hir::visit_calls(&f.body, &mut |fid| {
-            calls_template |= g.cx.funcs_template[fid]
+            // dm_pool_mark takes no texture
+            calls_template |=
+                g.cx.funcs_template[fid] && !g.cx.funcs_sig[fid].0.starts_with("_ZL12dm_pool_mark")
         });
         g.copies_texture = calls_template;
         if f.ret != Type::Void {
@@ -1180,6 +1186,15 @@ impl<'a> FnGen<'a> {
         v
     }
 
+    /// Loads a texture handle for a method call from an address computed before the call's
+    /// arguments. A pool element is never copied into a dm_bs expansion, so its load keeps the tag.
+    pub fn load_texture_at(&mut self, a: &Addr) -> R<V> {
+        self.tex_method = self.seq_depth == 0;
+        let v = self.load_from(a);
+        self.tex_method = false;
+        Ok(v)
+    }
+
     /// Loads a place.
     pub fn load(&mut self, p: &Place) -> R<V> {
         match &p.kind {
@@ -1601,8 +1616,13 @@ impl<'a> FnGen<'a> {
             ExprKind::PtrCast(x) | ExprKind::TexCast(x) => {
                 let v = self.expr(x)?;
                 let r = self.tmp();
+                let op = if matches!(v.ty, Type::Scalar(_)) {
+                    "inttoptr"
+                } else {
+                    "bitcast"
+                };
                 self.emit(format!(
-                    "{r} = bitcast {} {} to {}",
+                    "{r} = {op} {} {} to {}",
                     self.lt(&v.ty),
                     v.r,
                     self.lt(&ty)

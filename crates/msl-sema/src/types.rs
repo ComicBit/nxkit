@@ -321,6 +321,8 @@ pub struct FieldDef {
     pub offset: u32,
     /// Declared `const` (a `device const T*` member is read-only).
     pub is_const: bool,
+    /// Declared as `metal::array<T, n>` (the type is an [`Type::Array`]).
+    pub metal_array: bool,
 }
 
 /// Computes layouts, holds the module's struct definitions.
@@ -391,6 +393,7 @@ impl Types {
                 attrs,
                 offset: off,
                 is_const,
+                metal_array: false,
             });
             off += l.size;
             align = align.max(l.align);
@@ -422,6 +425,15 @@ impl Types {
                 tx.access.name()
             ),
             Type::Sampler => "sampler".into(),
+        }
+    }
+
+    /// The MSL spelling of a field's type (`array<texture2d<float, sample>, 1>` for a
+    /// `metal::array` member).
+    pub fn field_msl_name(&self, f: &FieldDef) -> String {
+        match &f.ty {
+            Type::Array(e, n) if f.metal_array => format!("array<{}, {}>", self.msl_name(e), n),
+            t => self.msl_name(t),
         }
     }
 

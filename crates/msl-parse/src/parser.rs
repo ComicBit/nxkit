@@ -979,6 +979,7 @@ impl<'a> Parser<'a> {
                     elem: Rc::new(ty),
                     n,
                     unsafe_: false,
+                    metal: false,
                 };
             }
             Ok(ty)
@@ -1000,7 +1001,8 @@ impl<'a> Parser<'a> {
                 || mat_name(v).is_some()
                 || p.structs.contains_key(v)
                 || tex_dim(v).is_some()
-                || matches!(v, "sampler" | "spvUnsafeArray" | "void" | "size_t"))
+                || matches!(v, "sampler" | "spvUnsafeArray" | "void" | "size_t")
+                || (v == "array" && p.peek_at(o + 1)? == "<"))
         })
     }
 
@@ -1086,6 +1088,26 @@ impl<'a> Parser<'a> {
                 elem: Rc::new(el),
                 n: py_int_text(n)?,
                 unsafe_: true,
+                metal: false,
+            }
+        } else if v == "array" && self.peek()? == "<" {
+            self.expect("<")?;
+            let el = self.type_()?;
+            if !matches!(el, Ty::Tex { .. } | Ty::Sampler) {
+                return reject("metal-array-elem");
+            }
+            self.expect(",")?;
+            let n = self.next()?;
+            if !is_int_literal(n, false) {
+                return reject("array-dim-nonliteral");
+            }
+            self.expect(">")?;
+            self.stat("type:metal-array")?;
+            Ty::Array {
+                elem: Rc::new(el),
+                n: py_int_text(n)?,
+                unsafe_: false,
+                metal: true,
             }
         } else if self.structs.contains_key(v) {
             Ty::Struct(self.intern(v))
@@ -2111,7 +2133,15 @@ impl<'a> Parser<'a> {
                     self.stat("call:static_cast")?;
                     CastKind::Static
                 }
-                _ => return reject("reinterpret_cast"),
+                _ => {
+                    let from_ok =
+                        matches!(f, Ty::Ptr(..)) || f == s(Scalar::Ulong) || f == s(Scalar::Long);
+                    if !matches!(to, Ty::Ptr(..)) || !from_ok {
+                        return reject("reinterpret_cast");
+                    }
+                    self.stat("call:reinterpret_cast")?;
+                    CastKind::Reinterpret
+                }
             };
             return bx(Expr {
                 kind: ExprKind::Cast {
@@ -2342,6 +2372,17 @@ impl<'a> Parser<'a> {
             }
             let ty = a[0].clone();
             return bx(mk(self, Callee::Prelude("dm_bs"), args, ty));
+        }
+        if name == "dm_pool_mark" && self.prelude.contains("dm_pool_mark") {
+            // uint dm_pool_mark(constant P* p, uint i), P deduced from the pool pointer
+            let args = self.args()?;
+            let a: Vec<Ty> = args.iter().map(|x| x.ty.strip()).collect();
+            let pool = matches!(a.first(), Some(Ty::Ptr(Space::Constant, p)) if matches!(**p, Ty::Struct(_)));
+            if a.len() != 2 || !pool || a[1] != UINT {
+                return reject("dm_pool_mark-form");
+            }
+            self.stat("call:dm_pool_mark")?;
+            return bx(mk(self, Callee::Prelude("dm_pool_mark"), args, UINT));
         }
         if name == "spvDepthCast" && self.prelude.contains("spvDepthCast") {
             let args = self.args()?;
