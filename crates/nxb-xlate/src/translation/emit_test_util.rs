@@ -46,9 +46,18 @@ pub fn ampere_vs_text(ops: &[(u64, u64)]) -> Result<String, String> {
     ampere_text("vs", ops)
 }
 
+/// The same for a compute program of a job with the extra JSON members `extra` (for example `"nvn2_cs": [..]`).
+pub fn ampere_cs_text_with(extra: &str, ops: &[(u64, u64)]) -> Result<String, String> {
+    ampere_text_with("cs", extra, ops)
+}
+
 fn ampere_text(stage: &str, ops: &[(u64, u64)]) -> Result<String, String> {
+    ampere_text_with(stage, "", ops)
+}
+
+fn ampere_text_with(stage: &str, extra: &str, ops: &[(u64, u64)]) -> Result<String, String> {
     let jobs = parse_jobs(&format!(
-        r#"[{{"key": "t", "stage": "{stage}", "local": [1, 1, 1], "arch": "sm86"}}]"#
+        r#"[{{"key": "t", "stage": "{stage}", "local": [1, 1, 1], "arch": "sm86"{extra}}}]"#
     ))?;
     let mut code = vec![0u8; if stage == "cs" { 0 } else { 0x80 }];
     if stage == "ps" {

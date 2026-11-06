@@ -12,6 +12,9 @@ type R<T> = Result<T, String>;
 
 const NVN_TEXTURE_BUFFER_INDEX: i32 = 2;
 const NVN_SLOT_ARRAY_LENGTH: i32 = 32;
+/// c[2]'s separate sampler table, 128 slots of 8 bytes. A word there is a sampler handle, never a texture's.
+const NVN_SEPARATE_SAMPLER_BASE: i32 = 0x568;
+const NVN_SEPARATE_SAMPLER_END: i32 = NVN_SEPARATE_SAMPLER_BASE + 8 * 128;
 
 #[derive(PartialEq, Eq, Clone, Copy)]
 enum Table {
@@ -133,8 +136,21 @@ fn phi_leaves(ir: &Ir, operand: Opd) -> Vec<Opd> {
     leaves
 }
 
+/// A c[2] word that can name a texture (a sampler word alone, on a path the read does not take, is no candidate).
 fn is_table_word(ir: &Ir, o: Opd) -> bool {
+    is_c2_word(ir, o) && !is_sampler_word(ir, o)
+}
+
+fn is_c2_word(ir: &Ir, o: Opd) -> bool {
     ir.ty(o) == OperandType::ConstantBuffer && ir.cbuf_slot(o) == NVN_TEXTURE_BUFFER_INDEX
+}
+
+pub(super) fn is_sampler_word(ir: &Ir, o: Opd) -> bool {
+    if !is_c2_word(ir, o) {
+        return false;
+    }
+    let offset = ir.cbuf_offset(o) * 4;
+    (NVN_SEPARATE_SAMPLER_BASE..NVN_SEPARATE_SAMPLER_END).contains(&offset)
 }
 
 fn add_candidate(ir: &Ir, found: &mut Vec<(Opd, Option<Opd>)>, texture: Opd, sampler: Option<Opd>) {
@@ -210,12 +226,18 @@ fn try_table_handle(
             let (o0, o1) = (s(ir, or_op, 0)?, s(ir, or_op, 1)?);
             for texture in phi_leaves(ir, o0) {
                 for sampler in phi_leaves(ir, o1) {
-                    if is_table_word(ir, texture)
-                        && (is_table_word(ir, sampler)
-                            || (ir.ty(sampler) == OperandType::Constant
-                                && (ir.value(sampler) & 0xfffff) == 0))
+                    // either order, as in bindless_convert
+                    let (t, sm) = if is_sampler_word(ir, texture) && !is_sampler_word(ir, sampler) {
+                        (sampler, texture)
+                    } else {
+                        (texture, sampler)
+                    };
+                    if is_table_word(ir, t)
+                        && (is_c2_word(ir, sm)
+                            || (ir.ty(sm) == OperandType::Constant
+                                && (ir.value(sm) & 0xfffff) == 0))
                     {
-                        add_candidate(ir, &mut found, texture, Some(sampler));
+                        add_candidate(ir, &mut found, t, Some(sm));
                     }
                 }
             }
