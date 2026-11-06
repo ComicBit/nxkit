@@ -78,9 +78,11 @@ fn c2_slots(h: &Handle, image: bool) -> (Option<i64>, Option<i64>) {
         });
     }
     let s = if h.ty != 3 {
-        words
-            .iter()
-            .find_map(|x| (x * 4 >= c2_smp).then(|| slot(*x, abi::C2_SAMP, h.sb)).flatten())
+        words.iter().find_map(|x| {
+            (x * 4 >= c2_smp)
+                .then(|| slot(*x, abi::C2_SAMP, h.sb))
+                .flatten()
+        })
     } else {
         None
     };
@@ -131,10 +133,8 @@ impl Decoded {
 /// `buffer` is a buffer texture, `array` is an array of handles, `dynamic` is a handle traced to no slot.
 pub fn decode(t: &TexInfo, image: bool, sampler: bool, buffer: bool, array: bool) -> Decoded {
     let h = handle(t);
-    let ubo_ok = !h.tcb
-        && in_ubo(h.tb)
-        && [0, 1, 3].contains(&h.ty)
-        && !(h.ty == 1 && !in_ubo(h.sb));
+    let ubo_ok =
+        !h.tcb && in_ubo(h.tb) && [0, 1, 3].contains(&h.ty) && !(h.ty == 1 && !in_ubo(h.sb));
     if image {
         if ubo_ok && !array {
             let mut d = Decoded::of(Kind::ImgUbo, Some(h.tb - 3));
@@ -162,7 +162,10 @@ pub fn decode(t: &TexInfo, image: bool, sampler: bool, buffer: bool, array: bool
             }
             return d;
         }
-        let mut d = Decoded::of(if buffer { Kind::TbufUbo } else { Kind::TexUbo }, Some(tex.0));
+        let mut d = Decoded::of(
+            if buffer { Kind::TbufUbo } else { Kind::TexUbo },
+            Some(tex.0),
+        );
         d.off = Some(tex.1);
         if !buffer && let Some((r, o)) = other.filter(|x| *x != tex) {
             d.soff = Some(o);

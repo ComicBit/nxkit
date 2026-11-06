@@ -7,6 +7,9 @@ use crate::structured::ast::{A, Ast, Kind};
 use crate::types::SamplerType;
 use std::collections::{BTreeMap, BTreeSet};
 
+/// `TextureFlags.IntCoords`.
+const INT_COORDS: u32 = 1 << 3;
+
 /// How an image is accessed.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ImageUse {
@@ -33,8 +36,11 @@ pub struct Usage {
     pub img: BTreeMap<(i32, i32), ImageUse>,
     /// Textures read with `get_width` (a size query).
     pub sized: BTreeSet<(i32, i32)>,
-    /// Texture `(set, binding)` pairs sampled with a plain `.sample(`, which the border emulation wraps.
-    pub plain_sample: BTreeSet<(i32, i32)>,
+    /// Samplers used by a plain `.sample(`, which the border emulation wraps: `(set, binding, separate)`. A combined
+    /// sampler is named by its texture.
+    pub plain_sample: BTreeSet<(i32, i32, bool)>,
+    /// Combined textures that need their sampler: `(set, binding)`.
+    pub sampled: BTreeSet<(i32, i32)>,
     /// The program has a threadgroup barrier.
     pub barrier: bool,
     /// The program uses a lane id (the subgroup ops).
@@ -45,6 +51,8 @@ pub struct Usage {
     pub discard: bool,
     /// The program has a loop, a switch lowering or a call.
     pub calls: bool,
+    /// Constant buffer bindings read at the constant vec4 index 100, component 1 (the base instance).
+    pub base_inst: BTreeSet<i32>,
 }
 
 /// The constant operand `a`, if it is one.
@@ -66,11 +74,20 @@ pub fn collect(info: &StructInfo) -> Usage {
     for_each_node(info, &mut |_, k| {
         let Kind::Operation(o) = k else { return };
         let inst = Inst(o.inst.0 & Inst::MASK);
-        let store_like = inst == Inst::Store || (Inst::AtomicAdd.0..=Inst::AtomicXor.0).contains(&inst.0);
+        let store_like =
+            inst == Inst::Store || (Inst::AtomicAdd.0..=Inst::AtomicXor.0).contains(&inst.0);
         match o.storage_kind {
             StorageKind::ConstantBuffer => {
                 if let Some(b) = o.sources.first().and_then(|s| const_of(ast, *s)) {
                     u.cb.insert(b);
+                    let at = |i: usize| o.sources.get(i).and_then(|s| const_of(ast, *s));
+                    if o.sources.len() == 4
+                        && inst == Inst::Load
+                        && at(2) == Some(100)
+                        && at(3) == Some(1)
+                    {
+                        u.base_inst.insert(b);
+                    }
                 }
             }
             StorageKind::StorageBuffer => {
@@ -95,14 +112,24 @@ pub fn collect(info: &StructInfo) -> Usage {
                 }
                 _ => {
                     u.tex.insert((t.set, t.binding));
-                    if t.is_separate() {
-                        u.smp.insert((t.sampler_set, t.sampler_binding));
-                    }
                     if inst == Inst::TextureQuerySize && o.index != 3 {
                         u.sized.insert((t.set, t.binding));
                     }
+                    let fetch = inst == Inst::TextureSample && t.flags & INT_COORDS != 0;
+                    if matches!(inst, Inst::TextureSample | Inst::Lod) && !fetch {
+                        if t.is_separate() {
+                            u.smp.insert((t.sampler_set, t.sampler_binding));
+                        } else {
+                            u.sampled.insert((t.set, t.binding));
+                        }
+                    }
                     if inst == Inst::TextureSample && is_plain_sample(t.flags, t.ty) {
-                        u.plain_sample.insert((t.set, t.binding));
+                        let (s, b) = if t.is_separate() {
+                            (t.sampler_set, t.sampler_binding)
+                        } else {
+                            (t.set, t.binding)
+                        };
+                        u.plain_sample.insert((s, b, t.is_separate()));
                     }
                 }
             }

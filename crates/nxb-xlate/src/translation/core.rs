@@ -12,9 +12,9 @@ use crate::codegen::props::{self as cp, Props};
 use crate::driver::{BufferInfo, Core, Program, TexInfo};
 use crate::ir::Ir;
 use crate::job::Job;
-use crate::structured::{StructInfo, StructResources};
 use crate::structured::program::{FunctionIn, make_structured_program};
 use crate::structured::types::AggType;
+use crate::structured::{StructInfo, StructResources};
 use crate::types::AttributeType;
 use AggType as Agg;
 
