@@ -28,7 +28,7 @@ fn no_pad_without_partners() {
 }
 
 /// The text of the entry `name`.
-fn entry<'a>(msl: &'a str, name: &str) -> &'a str {
+pub(super) fn entry<'a>(msl: &'a str, name: &str) -> &'a str {
     let at = msl.find(&format!(" {name}(")).expect("entry");
     let rest = &msl[at..];
     let end = rest.find("\n}\n").map_or(rest.len(), |e| e + 3);
@@ -121,7 +121,7 @@ fn discard_entry_exists_when_the_shader_writes_a_buffer() {
     );
 }
 
-fn layer_program() -> V {
+pub(super) fn layer_program() -> V {
     let mut b = V::new(&[(0, 0)]);
     b.out(1);
     b.io(StorageKind::Input, IoVariable::InstanceIndex, 0);
@@ -213,7 +213,7 @@ fn metal_compiles_the_vertex_variants() {
 }
 
 /// `position.x = attr0.x + 1` as an integer add, so the input is only read as an integer.
-fn int_use() -> V {
+pub(super) fn int_use() -> V {
     let mut b = V::new(&[(0, 0)]);
     let x = b.attr(0, 0, F32);
     let one = b.k(1);
