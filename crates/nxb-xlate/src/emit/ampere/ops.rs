@@ -15,9 +15,13 @@ type Reg = (i32, i32);
 
 const SHADOWS_COUNT: i32 = 256;
 
+/// A deferred write: the register, the shadow that holds its value and the shadow that holds the guard as it was at
+/// issue (a nonzero word when the write happens).
+type Pending = (Reg, Opd, Option<Opd>);
+
 #[derive(Default)]
 struct Scoreboard {
-    pending: [Vec<(Reg, Opd)>; 7],
+    pending: [Vec<Pending>; 7],
     used: [bool; 7],
     shadows: i32,
     free: Vec<i32>,
@@ -28,9 +32,20 @@ impl Scoreboard {
         if !self.used[barrier] {
             return;
         }
-        for (reg, value) in std::mem::take(&mut self.pending[barrier]) {
+        for (reg, value, guard) in std::mem::take(&mut self.pending[barrier]) {
             let r = ctx.ir.register(reg.0, reg.1);
-            ctx.copy_to(r, value);
+            if let Some(guard) = guard {
+                // a guarded write whose guard was false at issue writes nothing, so what was written meanwhile stays
+                let skip = ctx.ir.label();
+                let zero = ctx.ir.const_(0);
+                let taken = ctx.i_compare_not_equal(guard, zero);
+                ctx.branch_if_false(skip, taken);
+                ctx.copy_to(r, value);
+                ctx.mark_label(skip);
+                self.free.push(ctx.ir.reg_of(guard).0);
+            } else {
+                ctx.copy_to(r, value);
+            }
             self.free.push(ctx.ir.reg_of(value).0);
         }
         self.used[barrier] = false;
@@ -69,8 +84,14 @@ pub fn emit_ops_ampere(ctx: &mut EmitterContext<'_, '_>, block: &Block) -> Resul
         }
         let op_start = ctx.operations_count();
         let mut pred_skip = None;
+        let mut guard_pred = None;
         if a.pred() != 7 && a.opcode() != opc::BRA {
-            let label = if op_index == block.ops.len() - 1 && block.has_next() {
+            // the next block only when nothing waits for the end of this one's commits
+            let to_next = op_index == block.ops.len() - 1
+                && block.has_next()
+                && write_barrier >= 6
+                && sb.pending.iter().all(Vec::is_empty);
+            let label = if to_next {
                 let succ = *block.succs.first().ok_or("block without successor")?;
                 ctx.get_label(ctx.block_address(succ))
             } else {
@@ -84,6 +105,7 @@ pub fn emit_ops_ampere(ctx: &mut EmitterContext<'_, '_>, block: &Block) -> Resul
                 regtype::PREDICATE
             };
             let pred = ctx.ir.register(a.pred(), ty);
+            guard_pred = Some(pred);
             if a.pred_inv() {
                 ctx.branch_if_true(label, pred);
             } else {
@@ -104,7 +126,13 @@ pub fn emit_ops_ampere(ctx: &mut EmitterContext<'_, '_>, block: &Block) -> Resul
             ctx.mark_label(l);
         }
         if write_barrier < 6 && !op.has(props::BRA) {
-            defer_writes(ctx, op_start, &mut sb, write_barrier as usize)?;
+            defer_writes(
+                ctx,
+                op_start,
+                &mut sb,
+                write_barrier as usize,
+                guard_pred.map(|p| (p, a.pred_inv())),
+            )?;
         }
     }
     sb.commit_all(ctx);
@@ -126,6 +154,7 @@ fn defer_writes(
     op_start: usize,
     sb: &mut Scoreboard,
     barrier: usize,
+    guard: Option<(Opd, bool)>,
 ) -> Result<(), String> {
     sb.used[barrier] = true;
     let end = ctx.operations_count();
@@ -138,10 +167,7 @@ fn defer_writes(
                 && !locals.iter().any(|(r, _)| *r == reg)
             {
                 if sb.free.is_empty() && sb.shadows == SHADOWS_COUNT {
-                    return Err(
-                        "Ampere: more deferred register writes pending at once than shadow registers"
-                            .into(),
-                    );
+                    return Err(too_many_shadows());
                 }
                 let idx = sb.free.pop().unwrap_or_else(|| {
                     sb.shadows += 1;
@@ -172,26 +198,63 @@ fn defer_writes(
             }
         }
     }
-    for ((reg, local), at) in locals.into_iter().zip(op_start..) {
+    let mut at = op_start;
+    for (reg, local) in locals {
         let r = ctx.ir.register(reg.0, reg.1);
         let copy = ctx
             .ir
             .new_op(Inst::Copy, StorageKind::None, Some(local), &[r]);
         ctx.insert_operation(at, copy);
-        // a register written again before its earlier deferred write landed: the later write wins, the earlier shadow is free
-        for list in &mut sb.pending {
-            let mut k = 0;
-            while k < list.len() {
-                if list[k].0 == reg {
-                    let v = list.remove(k).1;
-                    let idx = ctx.ir.reg_of(v).0;
-                    sb.free.push(idx);
-                } else {
-                    k += 1;
+        at += 1;
+        let mut guard_shadow = None;
+        if let Some((pred, inv)) = guard {
+            if sb.free.is_empty() && sb.shadows == SHADOWS_COUNT {
+                return Err(too_many_shadows());
+            }
+            // the guard as it is at issue, as a nonzero word (a float's bits, which a flush would keep), not 1
+            let idx = sb.free.pop().unwrap_or_else(|| {
+                sb.shadows += 1;
+                sb.shadows - 1
+            });
+            let g = ctx.ir.register(idx, regtype::SHADOW);
+            let (on, off) = if inv {
+                (0, 0x3f80_0000)
+            } else {
+                (0x3f80_0000, 0)
+            };
+            let (on, off) = (ctx.ir.const_(on), ctx.ir.const_(off));
+            let select = ctx.ir.new_op(
+                Inst::ConditionalSelect,
+                StorageKind::None,
+                Some(g),
+                &[pred, on, off],
+            );
+            ctx.insert_operation(at, select);
+            at += 1;
+            guard_shadow = Some(g);
+        } else {
+            // a register written again before its earlier deferred write landed: the later write wins, the earlier
+            // shadow is free. A guarded later write may not happen, so the earlier one stays
+            for list in &mut sb.pending {
+                let mut k = 0;
+                while k < list.len() {
+                    if list[k].0 == reg {
+                        let (_, v, g) = list.remove(k);
+                        sb.free.push(ctx.ir.reg_of(v).0);
+                        if let Some(g) = g {
+                            sb.free.push(ctx.ir.reg_of(g).0);
+                        }
+                    } else {
+                        k += 1;
+                    }
                 }
             }
         }
-        sb.pending[barrier].push((reg, local));
+        sb.pending[barrier].push((reg, local, guard_shadow));
     }
     Ok(())
+}
+
+fn too_many_shadows() -> String {
+    "Ampere: more deferred register writes pending at once than shadow registers".into()
 }

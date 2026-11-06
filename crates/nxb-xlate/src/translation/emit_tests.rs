@@ -330,3 +330,23 @@ fn stage_output_store_outside_a_task_or_mesh_shader_is_refused() {
     let e = ampere_cs_text(&[ast, AEXIT]).expect_err("fail");
     assert!(e.contains("outside a task or mesh shader"), "{e}");
 }
+
+#[test]
+fn a_guarded_deferred_write_is_copied_back_only_when_its_guard_held_at_issue() {
+    // @P0 LDG.32 R0, [R2.64] with write barrier 0, then EXIT waiting for it
+    let ldg = (0x981 | 2 << 24, 4 << 9);
+    let exit = (0x94d | APT | 1 << 23, 1 << 52);
+    let t = ampere_cs_text(&[ldg, exit]).expect("emit");
+    // the guard is kept in a shadow as a nonzero word, taken before the guard's branch
+    let keep = t
+        .find("op 2a 0 0 0 d=R5:1, s=R2:0,#3f800000,#0,")
+        .expect(&t);
+    let branch = t.find("op 19 0 0 0 d=L1, s=R2:0,").expect(&t);
+    assert!(keep < branch, "{t}");
+    // the copy back is skipped when it is zero
+    let test = t.find("op 29 0 0 0 d=l3, s=R5:1,#0,").expect(&t);
+    let skip = t.find("op 19 0 0 0 d=L2, s=l3,").expect(&t);
+    let copy = t.find("op 35 0 0 0 d=R1:0, s=R5:0,").expect(&t);
+    let mark = t.find("op 53 0 0 0 d=L2, s=").expect(&t);
+    assert!(test < skip && skip < copy && copy < mark, "{t}");
+}
