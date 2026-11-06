@@ -40,7 +40,7 @@ pub const NXB: &[Cmd] = &[
         "extract",
         "Stages",
         "extract a package (NSP, NSZ, XCI, NUP, merged, dump)",
-        "usage: nxb extract --keys <prod.keys> --base <base.nsp> --out <dir> [--update <update.nsp> <dir>]... [--threads N] [--mem-mib N] [--cache-mib N] [--digests <tsv>] [--allow-damaged] [--manifest] | --keys <prod.keys> --aoc <dlc.nsp> [<title ID>] --out <dir> | --nup <game.nup> [--work <dir>] [--version N] [--discard-images]",
+        "usage: nxb extract --keys <prod.keys> --base <base.nsp> --out <dir> [--update <update.nsp> <dir>]... [--threads N] [--mem-mib N] [--cache-mib N] [--digests <tsv>] [--allow-damaged] [--manifest] [--program <title ID>] | --keys <prod.keys> --aoc <dlc.nsp> [<title ID>] --out <dir> | --nup <game.nup> [--work <dir>] [--version N] [--discard-images]",
     ),
     c(
         "split",
