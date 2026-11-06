@@ -267,3 +267,16 @@ fn nvn2_compute_c0_maps_separate_textures_and_samplers() {
     assert_eq!(at(0x20), "168");
     assert_eq!(at(0x28), "568");
 }
+
+#[test]
+fn red_f32_add_is_a_compare_and_swap_loop() {
+    // RED.E.ADD.F32.FTZ.RN [R0.64], R2
+    let red = (0x98e | APT | 2 << 32, 3 << 9);
+    let t = ampere_cs_text(&[red, AEXIT]).expect("emit");
+    let retry = t.find("op 53 0 0 0 d=L1,").expect(&t);
+    let load = t.find("op 4a 11 0 0 d=l0,").expect(&t);
+    let add = t.find("op 10002 0 0 0 d=l1, s=l0,").expect(&t);
+    let cas = t.find("op 5 11 0 0 d=l2,").expect(&t);
+    let back = t.find("op 1a 0 0 0 d=L1, s=l3,").expect(&t);
+    assert!(retry < load && load < add && add < cas && cas < back, "{t}");
+}
