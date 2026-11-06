@@ -480,28 +480,78 @@ fn side_effect(op: &Op) -> bool {
     }
 }
 
+fn collect_ref<'a>(v: &'a Val, out: &mut Vec<&'a str>) {
+    match v {
+        Val::Local(n) => out.push(n),
+        Val::Aggregate(items) => items.iter().for_each(|(_, x)| collect_ref(x, out)),
+        Val::Cast(_, inner, _) => collect_ref(&inner.1, out),
+        _ => {}
+    }
+}
+
+fn local_refs<'a>(op: &'a Op, out: &mut Vec<&'a str>) {
+    for v in vals(op) {
+        collect_ref(v, out);
+    }
+}
+
+/// Removes results nobody uses, repeatedly: use counts and a work list instead of rounds over the function.
 fn dce(f: &mut Function) {
-    loop {
-        let mut used: HashSet<String> = HashSet::default();
-        for (_, insts) in &f.blocks {
-            for i in insts {
-                let mut u = Vec::new();
-                locals(&i.op, &mut u);
-                used.extend(u);
+    let removable = |i: &Inst| i.res.is_some() && !side_effect(&i.op);
+    let mut dead: Vec<Vec<bool>> = f.blocks.iter().map(|b| vec![false; b.1.len()]).collect();
+    {
+        let mut uses: HashMap<&str, u32> = HashMap::default();
+        let mut def: HashMap<&str, (usize, usize)> = HashMap::default();
+        let mut buf: Vec<&str> = Vec::new();
+        for (b, (_, insts)) in f.blocks.iter().enumerate() {
+            for (k, i) in insts.iter().enumerate() {
+                if let Some(r) = &i.res {
+                    def.insert(r, (b, k));
+                }
+                buf.clear();
+                local_refs(&i.op, &mut buf);
+                for x in &buf {
+                    *uses.entry(x).or_default() += 1;
+                }
             }
         }
-        let mut removed = false;
-        for (_, insts) in &mut f.blocks {
-            let before = insts.len();
-            insts.retain(|i| match &i.res {
-                Some(r) => side_effect(&i.op) || used.contains(r),
-                None => true,
-            });
-            removed |= insts.len() != before;
+        let mut work: Vec<(usize, usize)> = Vec::new();
+        for (b, (_, insts)) in f.blocks.iter().enumerate() {
+            for (k, i) in insts.iter().enumerate() {
+                if let (true, Some(r)) = (removable(i), &i.res) {
+                    if uses.get(r.as_str()).copied().unwrap_or(0) == 0 {
+                        work.push((b, k));
+                    }
+                }
+            }
         }
-        if !removed {
-            break;
+        while let Some((b, k)) = work.pop() {
+            if dead[b][k] {
+                continue;
+            }
+            dead[b][k] = true;
+            buf.clear();
+            local_refs(&f.blocks[b].1[k].op, &mut buf);
+            for x in &buf {
+                let Some(c) = uses.get_mut(x) else { continue };
+                *c -= 1;
+                if *c > 0 {
+                    continue;
+                }
+                if let Some(&(b2, k2)) = def.get(x) {
+                    if !dead[b2][k2] && removable(&f.blocks[b2].1[k2]) {
+                        work.push((b2, k2));
+                    }
+                }
+            }
         }
+    }
+    for (b, (_, insts)) in f.blocks.iter_mut().enumerate() {
+        let mut k = 0;
+        insts.retain(|_| {
+            k += 1;
+            !dead[b][k - 1]
+        });
     }
 }
 

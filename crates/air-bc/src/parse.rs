@@ -17,11 +17,14 @@ enum Tok<'a> {
     Attr(u32),
     Word(Cow<'a, str>),
     Int(i128),
-    Str(Vec<u8>),
+    Str(Cow<'a, [u8]>),
     P(char),
 }
 
-fn unescape(s: &[u8]) -> Vec<u8> {
+fn unescape(s: &[u8]) -> Cow<'_, [u8]> {
+    if !s.contains(&b'\\') {
+        return Cow::Borrowed(s);
+    }
     let mut out = Vec::new();
     let mut i = 0;
     while i < s.len() {
@@ -38,7 +41,7 @@ fn unescape(s: &[u8]) -> Vec<u8> {
         out.push(s[i]);
         i += 1;
     }
-    out
+    Cow::Owned(out)
 }
 
 fn lex(line: &str) -> R<Vec<Tok<'_>>> {
@@ -954,7 +957,7 @@ pub fn parse(text: &str) -> R<Module> {
                             Some(Tok::P('!')) => {
                                 p.i += 1;
                                 if let Tok::Str(s) = p.next()? {
-                                    ops.push(MdOp::Str(s));
+                                    ops.push(MdOp::Str(s.into_owned()));
                                 }
                             }
                             Some(Tok::MetaNum(k)) => {

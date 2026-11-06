@@ -2,8 +2,20 @@
 
 use msl_sema::types::{Scalar, Type};
 
+use crate::fx::HashMap;
 use crate::meta::{s, Md};
 use crate::ModCx;
+
+/// Node numbers already built. Metadata nodes are only ever appended and deduplicated, so a
+/// node built once keeps its number for the whole module.
+#[derive(Default)]
+pub struct Cache {
+    char: Option<usize>,
+    named: HashMap<String, usize>,
+    structs: HashMap<usize, usize>,
+    wrappers: HashMap<String, usize>,
+    tags: HashMap<(usize, usize, u32), usize>,
+}
 
 fn root(cx: &mut ModCx) -> usize {
     cx.meta.node(&[s("Simple C++ TBAA")])
@@ -11,16 +23,28 @@ fn root(cx: &mut ModCx) -> usize {
 
 /// `omnipotent char`
 pub fn char(cx: &mut ModCx) -> usize {
+    if let Some(n) = cx.tbaa.char {
+        return n;
+    }
     let r = root(cx);
-    cx.meta
-        .node(&[s("omnipotent char"), Md::Node(r), Md::Raw("i64 0".into())])
+    let n = cx
+        .meta
+        .node(&[s("omnipotent char"), Md::Node(r), Md::Raw("i64 0".into())]);
+    cx.tbaa.char = Some(n);
+    n
 }
 
 /// A named scalar node under `omnipotent char`.
 pub fn named(cx: &mut ModCx, name: &str) -> usize {
+    if let Some(n) = cx.tbaa.named.get(name) {
+        return *n;
+    }
     let c = char(cx);
-    cx.meta
-        .node(&[s(name), Md::Node(c), Md::Raw("i64 0".into())])
+    let n = cx
+        .meta
+        .node(&[s(name), Md::Node(c), Md::Raw("i64 0".into())]);
+    cx.tbaa.named.insert(name.to_string(), n);
+    n
 }
 
 /// The node of a scalar type (signedness does not count).
@@ -50,6 +74,9 @@ fn member(cx: &mut ModCx, t: &Type) -> usize {
 
 /// The struct type node `_ZTS<len><name>` with its members and offsets.
 pub fn structure(cx: &mut ModCx, sid: usize) -> usize {
+    if let Some(n) = cx.tbaa.structs.get(&sid) {
+        return *n;
+    }
     let st = cx.types.structs[sid].clone();
     let mut ops = vec![s(&format!("_ZTS{}{}", st.name.len(), st.name))];
     for f in &st.fields {
@@ -57,16 +84,23 @@ pub fn structure(cx: &mut ModCx, sid: usize) -> usize {
         ops.push(Md::Node(n));
         ops.push(Md::Raw(format!("i64 {}", f.offset)));
     }
-    cx.meta.node(&ops)
+    let n = cx.meta.node(&ops);
+    cx.tbaa.structs.insert(sid, n);
+    n
 }
 
 /// An access tag (base type, access type, offset).
 pub fn tag(cx: &mut ModCx, base: usize, access: usize, off: u32) -> usize {
-    cx.meta.node(&[
+    if let Some(n) = cx.tbaa.tags.get(&(base, access, off)) {
+        return *n;
+    }
+    let n = cx.meta.node(&[
         Md::Node(base),
         Md::Node(access),
         Md::Raw(format!("i64 {off}")),
-    ])
+    ]);
+    cx.tbaa.tags.insert((base, access, off), n);
+    n
 }
 
 fn handle_name(t: &Type) -> String {
@@ -100,9 +134,15 @@ fn wrapper(cx: &mut ModCx, t: &Type) -> usize {
         }
         _ => "_ZTSN5metal7samplerE".to_string(),
     };
+    if let Some(n) = cx.tbaa.wrappers.get(&name) {
+        return *n;
+    }
     let h = named(cx, &handle_name(t));
-    cx.meta
-        .node(&[s(&name), Md::Node(h), Md::Raw("i64 0".into())])
+    let n = cx
+        .meta
+        .node(&[s(&name), Md::Node(h), Md::Raw("i64 0".into())]);
+    cx.tbaa.wrappers.insert(name, n);
+    n
 }
 
 /// Scalar tag on the handle type itself (what a by-value copy's `!tbaa.struct` names).

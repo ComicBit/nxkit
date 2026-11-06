@@ -179,6 +179,7 @@ pub struct ModCx {
     pub vec_tbaa_char: bool,
     /// [`Target::read_sampler`].
     pub read_sampler: bool,
+    tbaa: tbaa::Cache,
 }
 
 impl ModCx {
@@ -343,6 +344,7 @@ pub fn emit(m: &Module, t: &Target, source_name: &str) -> Result<String, Error> 
         kernel: Vec::new(),
         vec_tbaa_char: t.vec_tbaa_char,
         read_sampler: t.read_sampler,
+        tbaa: tbaa::Cache::default(),
     };
     // constant arrays, as clang emits them: a long run of trailing zeros becomes a packed struct
     // { [nonzero x T], [rest x T] zeroinitializer } that accesses reach through a bitcast
