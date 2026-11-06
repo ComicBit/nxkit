@@ -6,7 +6,7 @@ use super::buffers;
 use super::emit::{Em, R, Shader, Val};
 use super::types::{msl_type, scalar};
 use crate::ir::{Inst, IoVariable, StorageKind};
-use crate::structured::ast::OpData;
+use crate::structured::ast::{A, Kind, OpData};
 use crate::structured::types::AggType;
 
 /// The address space of a place.
@@ -255,6 +255,30 @@ impl Em<'_> {
             space: Space::Thread,
             skip,
         })
+    }
+
+    /// A load that is a lane of a wide load. The first lane reads the whole run.
+    pub(super) fn wide_lane(&mut self, a: A) -> R<Option<Val>> {
+        let Some(l) = self.shared.wide.get(&a).copied() else {
+            return Ok(None);
+        };
+        if l.lane == 0 {
+            let Kind::Operation(o) = self.info.ast.kind(a).clone() else {
+                return Ok(None);
+            };
+            let p = self.place(Inst::Load, &o)?;
+            self.pre.push(format!(
+                "packed_uint{n} dw{r} = *(const device packed_uint{n}*)&{};",
+                p.s,
+                n = l.len,
+                r = l.run
+            ));
+        }
+        let v = Val::new(
+            format!("dw{}.{}", l.run, ["x", "y", "z", "w"][l.lane as usize]),
+            AggType::U32,
+        );
+        Ok(Some(self.as_type(v, l.ty)))
     }
 
     /// Loads, stores and atomics.

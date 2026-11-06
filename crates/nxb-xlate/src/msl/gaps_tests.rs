@@ -12,7 +12,7 @@ use crate::ir::{Inst, IoVariable, StorageKind};
 use crate::structured::ast::{A, BlockType};
 use crate::structured::types::AggType;
 
-fn translate(b: &B) -> Translated {
+pub(super) fn translate(b: &B) -> Translated {
     let ctx = Context {
         chain: "V",
         source: "p#0".into(),
@@ -21,7 +21,7 @@ fn translate(b: &B) -> Translated {
     build(&b.s, &ctx, &Options::default()).expect("build")
 }
 
-fn msl(b: &B) -> String {
+pub(super) fn msl(b: &B) -> String {
     translate(b).libraries.remove(0).msl
 }
 
@@ -97,7 +97,7 @@ fn shared_memory_within_the_limit_stays_in_the_threadgroup() {
 }
 
 /// A compute shader of local size 8x1x1 with the storage buffer `fp_s0`, and no statements.
-fn bare_compute() -> B {
+pub(super) fn bare_compute() -> B {
     let mut b = B::new(Stage::Compute, "cs");
     b.s.props.definitions.compute_local_size = [8, 1, 1];
     b.io(StorageKind::Input, IoVariable::ThreadId, 0);
@@ -208,12 +208,7 @@ fn hmma_sample() -> B {
     let main = b.s.info.ast.new_block(BlockType::Main, None);
     let (id, zero) = (b.k(0), b.k(0));
     let t = b.local(AggType::U32);
-    let st = b.op(
-        Inst::Store,
-        StorageKind::SharedMemory,
-        0,
-        vec![id, zero, t],
-    );
+    let st = b.op(Inst::Store, StorageKind::SharedMemory, 0, vec![id, zero, t]);
     b.s.info.ast.add(main, st).expect("add");
     b.s.info.functions.push(crate::structured::StructFunction {
         main_block: main,
@@ -253,6 +248,7 @@ fn gaps_metal_compiles_the_samples() {
         ("cs_spill_wg", big_shared_with_workgroup_id()),
         ("cs_first_store", first_store_sample(false)),
         ("cs_hmma", hmma_sample()),
+        ("cs_wide", super::wide_tests::wide_sample(&[0, 1, 2, 5], 0)),
     ];
     for (n, b) in samples {
         let src = dir.join(format!("gaps_{n}.metal"));

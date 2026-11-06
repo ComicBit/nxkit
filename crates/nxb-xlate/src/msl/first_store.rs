@@ -11,11 +11,11 @@
 
 use super::args::Res;
 use super::usage::const_of;
-use nxb_pyjson::Value;
 use crate::ir::{Inst, IoVariable, OperandType, StorageKind};
 use crate::structured::StructInfo;
 use crate::structured::ast::{A, Ast, BlockType, Kind, OpData};
 use crate::structured::types::AggType;
+use nxb_pyjson::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// The most stores the host makes.
@@ -213,7 +213,12 @@ fn store_of(ast: &Ast, res: &Res, o: &OpData) -> Option<(i32, u32, A)> {
     let binding = const_of(ast, o.sources[0])?;
     let field = const_of(ast, o.sources[1])?;
     let word = u32::try_from(const_of(ast, o.sources[2])?).ok()?;
-    let f = res.sbs.get(&binding)?.def.fields.get(usize::try_from(field).ok()?)?;
+    let f = res
+        .sbs
+        .get(&binding)?
+        .def
+        .fields
+        .get(usize::try_from(field).ok()?)?;
     let plain = f.ty.0 & AggType::ELEMENT_COUNT_MASK == 0;
     (res.sbs.get(&binding)?.def.layout == 1 && plain).then_some((binding, word, o.sources[3]))
 }

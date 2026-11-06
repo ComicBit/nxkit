@@ -6,7 +6,7 @@ use super::refl::Reflection;
 use super::spill::{self, Spill};
 use super::types::{msl_type, scalar};
 use super::usage::{self, Usage};
-use super::{Context, Library, Translated, facts, first_store, io, prelude};
+use super::{Context, Library, Translated, facts, first_store, io, prelude, wide};
 use crate::codegen::props::MemoryDef;
 use crate::translation::msl_entry::Structured;
 use std::fmt::Write;
@@ -195,6 +195,7 @@ pub fn build(s: &Structured, ctx: &Context<'_>, opt: &Options) -> R<Translated> 
     if let Some(f) = &first {
         shared.skip = f.skip.clone();
     }
+    shared.wide = wide::plan(&s.info, &res, &shared.skip);
     let mut em = Em::new(&s.info, &s.props, &res, opt, &shared, &plan, shader);
     let mut bodies = Vec::new();
     for i in 0..s.info.functions.len() {

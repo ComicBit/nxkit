@@ -19,6 +19,8 @@ pub mod emit;
 pub mod entry;
 pub mod facts;
 pub mod first_store;
+#[cfg(test)]
+mod gaps_tests;
 pub mod handles;
 pub mod hmma;
 pub mod inst_alu;
@@ -32,13 +34,14 @@ pub mod prelude;
 pub mod refl;
 pub mod spill;
 #[cfg(test)]
-mod gaps_tests;
-#[cfg(test)]
 mod tests;
 pub mod types;
 pub mod usage;
 pub mod variant;
 pub mod walk;
+pub mod wide;
+#[cfg(test)]
+mod wide_tests;
 
 use crate::job::Job;
 use crate::translation::msl_entry::structure_job;
