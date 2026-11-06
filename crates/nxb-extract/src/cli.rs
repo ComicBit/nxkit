@@ -192,6 +192,7 @@ pub fn main(args: &[String]) -> i32 {
         discard_images,
         allow_damaged,
         manifest,
+        progress: None,
     };
     match crate::extract(&req) {
         Ok(mut s) => {

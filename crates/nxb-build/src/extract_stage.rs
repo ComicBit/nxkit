@@ -3,6 +3,9 @@
 //! (`<work>/aoc/<index>.img`, index = DLC title ID - base title ID - 0x1000, the host mounts them by index).
 
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use crate::Args;
 use crate::events::{Progress, Update};
@@ -158,6 +161,7 @@ fn dlc(a: &Args, b: &Build, p: &Progress) -> Result<Option<String>, String> {
 /// Extracts the packages of the input (and the split in the same pass).
 fn packages(a: &Args, b: &Build, p: &Progress) -> Result<usize, String> {
     let out = |v: &str| b.work.join("extract").join(v);
+    let counter = Arc::new(nxb_extract::Counter::default());
     let req = nxb_extract::Request {
         keys: keys(a)?,
         base: b.base.clone(),
@@ -179,9 +183,37 @@ fn packages(a: &Args, b: &Build, p: &Progress) -> Result<usize, String> {
         allow_damaged: a.allow_damaged,
         manifest: false,
         split: Some((b.profile.0.join("game.tsv"), split_outputs(b))),
+        progress: Some(counter.clone()),
     };
     p.say("extract and shader split in one pass (nxb-extract)");
-    let s = nxb_extract::extract(&req).map_err(|e| damaged(p, &e))?;
+    // the bytes written, as the script's poll of the extract folder reports them: a determinate bar with an ETA
+    let stop = AtomicBool::new(false);
+    let s = std::thread::scope(|sc| {
+        sc.spawn(|| {
+            let mut last = None;
+            while !stop.load(Ordering::Relaxed) {
+                let (done, total) = (
+                    counter.done.load(Ordering::Relaxed),
+                    counter.total.load(Ordering::Relaxed),
+                );
+                if total > 0 && last != Some(done) {
+                    last = Some(done);
+                    p.set(Update {
+                        step: Some("extracting"),
+                        done: Some(done),
+                        total: Some(total),
+                        unit: Some("B"),
+                        ..Default::default()
+                    });
+                }
+                std::thread::sleep(Duration::from_millis(250));
+            }
+        });
+        let r = nxb_extract::extract(&req);
+        stop.store(true, Ordering::Relaxed);
+        r
+    })
+    .map_err(|e| damaged(p, &e))?;
     Ok(s.images.len())
 }
 
