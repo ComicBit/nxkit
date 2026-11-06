@@ -437,8 +437,17 @@ mod tests {
                 break;
             }
         }
+        let raw = (
+            nxb_sys::system::cpu_ticks(),
+            nxb_sys::system::memory_used(),
+            nxb_sys::system::memsize(),
+            nxb_sys::system::memory_pressure(),
+        );
         if cfg!(target_os = "macos") {
-            assert!(s.cpu.is_some() && s.mem_used.is_some() && s.mem_total.is_some());
+            assert!(
+                s.cpu.is_some() && s.mem_used.is_some() && s.mem_total.is_some(),
+                "{s:?}, raw {raw:?}"
+            );
         }
     }
 }
