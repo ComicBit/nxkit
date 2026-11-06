@@ -38,7 +38,6 @@ The documents use Simplified Technical English (ASD-STE100). The terms below are
 | Rust translator | The translator in the crates `nxb-xlate` and `nxb-maxwell`. It writes MSL directly and runs in the process of the shader step. |
 | rewrite rules | The registered patches for code modules (cuts, observation gates, frame step stubs and others), kept as data in `data/rewrite-rules`. |
 | reuse key | A digest of all inputs of a stage. If the key does not change, the stage uses its previous output. |
-| ShaderInterface | The typed description of the bindings and the inputs and outputs of one translated shader. The Rust translator writes it as `<key>.iface.json`. |
 | shader step | The stage that translates and compiles the shaders of a game into libraries. The command is `nxb shaders`. |
 | survey | The examination of the files of a game that has no profile. It writes `survey.md` and the values of the provisional profile. Use `--survey-only` to stop after it. |
 | stage | One part of the build: extract, rewrite, split, shader step, pipeline archive, pack, sign. |
@@ -64,7 +63,7 @@ These verbs are computer-process verbs (rule 1.12). The documents use them only 
 | sign | Add a code signature to a file. |
 | split | Find the shaders in the game files and write them into package records. |
 | rewrite | Change the code of a game module so that it runs on the target. Also the name of the stage. |
-| translate | Change machine code of the game GPU into SPIR-V and MSL. |
+| translate | Change machine code of the game GPU into MSL. |
 
 ## Number labels
 
