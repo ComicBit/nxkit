@@ -104,13 +104,18 @@ fn the_side_entries_are_entry_functions() {
 
 /// Compile a translation with metal and make a library of it. The bytes of the library.
 fn metal_library(name: &str, t: &Translated) -> Vec<u8> {
+    metal_text(name, &t.libraries[0].msl)
+}
+
+/// Compile MSL text with metal and make a library of it. The bytes of the library.
+pub(super) fn metal_text(name: &str, msl: &str) -> Vec<u8> {
     use std::ffi::OsStr;
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scratch");
     std::fs::create_dir_all(&dir).expect("scratch");
     let src = dir.join(format!("{name}.metal"));
     let air = dir.join(format!("{name}.air"));
     let lib = dir.join(format!("{name}.metallib"));
-    std::fs::write(&src, &t.libraries[0].msl).expect("write");
+    std::fs::write(&src, msl).expect("write");
     let run = |args: &[&OsStr]| {
         let o = std::process::Command::new("xcrun")
             .args(["-sdk", "macosx"])
@@ -121,7 +126,7 @@ fn metal_library(name: &str, t: &Translated) -> Vec<u8> {
             o.status.success(),
             "{name}: {}\n{}",
             String::from_utf8_lossy(&o.stderr),
-            t.libraries[0].msl
+            msl
         );
     };
     run(&[

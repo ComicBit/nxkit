@@ -152,6 +152,7 @@ pub fn assemble(
             &EntryName {
                 name: "main0",
                 body: false,
+                extra: &[],
             },
             Shader::Fragment,
             res,
@@ -168,6 +169,7 @@ pub fn assemble(
         &EntryName {
             name: "main0",
             body: true,
+            extra: &[],
         },
         Shader::Fragment,
         res,
