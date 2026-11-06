@@ -125,6 +125,13 @@ impl Progress {
         }
     }
 
+    /// `plan_more(n)`: `n` more stages after those begun so far (the numbering goes on).
+    pub fn plan_more(&self, n: usize) {
+        if let Ok(mut g) = self.state.lock() {
+            g.1 = g.0 + n;
+        }
+    }
+
     /// `stage(name, step)`: ends the current stage, starts the next.
     pub fn stage(&self, name: &str, step: &str) {
         self.end("", true);
@@ -173,12 +180,17 @@ impl Progress {
 
     /// `end(summary, ok)`.
     pub fn end(&self, summary: &str, ok: bool) {
+        self.end_with(summary, ok, None);
+    }
+
+    /// `end(summary, ok)` with the stage's own running time when it ran beside others (`None`: since its `stage` event).
+    pub fn end_with(&self, summary: &str, ok: bool, took: Option<f64>) {
         let cur = match self.state.lock() {
             Ok(mut g) => g.2.take(),
             Err(_) => None,
         };
         let Some(c) = cur else { return };
-        let el = c.t0.elapsed().as_secs_f64();
+        let el = took.unwrap_or_else(|| c.t0.elapsed().as_secs_f64());
         match self.mode {
             Mode::Json => self.json(
                 if ok {

@@ -101,6 +101,15 @@ fn vertex_matches_python() {
     .and_then(|t| nxb_pyjson::parse(&t).ok())
     .and_then(|v| v.get("chain_compiler").cloned())
     .unwrap();
+    let chain_of = |out: &std::path::Path| -> String {
+        let f = std::fs::read_dir(out)
+            .unwrap()
+            .flatten()
+            .find(|e| e.file_name().to_string_lossy().ends_with("_b.json"))
+            .unwrap();
+        let v = nxb_pyjson::parse(&std::fs::read_to_string(f.path()).unwrap()).unwrap();
+        v.get("chain").and_then(|c| c.as_str()).unwrap().to_string()
+    };
     let (mut ok_src, mut ok_refl, mut bad) = (0usize, 0usize, Vec::new());
     for e in std::fs::read_dir(&w).unwrap().flatten() {
         let name = e.file_name().to_string_lossy().into_owned();
@@ -144,6 +153,7 @@ fn vertex_matches_python() {
                 inputs.pc_of.get(key).map_or("", String::as_str),
                 nxb_model::to_hex(&job.c1),
             ),
+            &chain_of(&out),
             None,
         );
         let want_src = std::fs::read_to_string(out.join(format!("{key}_b.metal"))).unwrap();

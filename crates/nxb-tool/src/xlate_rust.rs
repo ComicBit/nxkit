@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Mutex;
 
-/// Environment switch of the stage layer: `NXB_XLATE_RUST=0` turns this bridge off (it is on by default).
+/// Environment switch of the stage layer: `NXB_XLATE_RUST=1` turns this bridge on (it is off by default).
 pub const ENV_SWITCH: &str = "NXB_XLATE_RUST";
 
 /// The Rust translator with an optional fall back for the keys it cannot do.

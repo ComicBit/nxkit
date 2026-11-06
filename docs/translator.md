@@ -3,15 +3,16 @@
 This document gives the translator part of the shader step and the plan to replace it. The study is from 2026-11-05.
 It is a read-only survey. Numbers with the label "estimate" are not measured.
 
-## Status in version 0.4.0
+## Status in version 0.5.1
 
 Two of the three phases of the plan are done. The study below is the state before this work. The estimates in it are not updated.
+**Since 0.5.1, the Rust translator is off by default.** The documents of 0.4.0 and 0.5.0 said that it is on by default. That is not correct for 0.5.1.
 
 | phase | state | evidence |
 |---|---|---|
 | S1: translator host (option a, the host) | done and the default when its binary is found | 802 of 802 results equal to the process bridge. Translation of 802 jobs: 1.0 to 1.7 s against 6.3 to 8.4 s (measured) |
 | S1: server for `spirv-cross` | not done | |
-| S2: Rust translator (option b) | done for Maxwell and Ampere. On by default. The C# translator does the keys that it cannot do | byte-identical for all keys of three titles and for 42,299 of 42,331 keys of a Switch 2 title (measured, first-attempt jobs) |
+| S2: Rust translator (option b) | done for Maxwell and Ampere, for the engine version of the port. **Off by default.** `--xlate-rust on` or `NXB_XLATE_RUST=1` turns it on. The C# translator does the keys that it cannot do | byte-identical for all keys of three titles and for 42,299 of 42,331 keys of a Switch 2 title (measured, first-attempt jobs, engine version of the port). **Not byte-identical on the current engine** (see below) |
 | S3: Rust `spirv-cross` or direct MSL (options c and d) | not done | |
 
 The Rust translator is in the crates `nxb-maxwell` (the decoders for Maxwell and Ampere), `nxb-xlate` (the translation) and `nxb-spvgen` (the SPIR-V generator).
@@ -20,6 +21,17 @@ geometry, tessellation, transform feedback, vertex shaders as compute, the inter
 No local title has the first four, thus nobody tested them. The C# translator and `spirv-cross` stay necessary.
 In a subset run, the Rust translator gave no gain in wall time (17 s against 16 s), because the Metal compile dominates (measured, one run). The gain is that the shader step needs no .NET process for most keys.
 Refer to [shader-step.md](shader-step.md) for the choice between the three ways to translate and for the `ShaderInterface` file.
+
+Why it is off: the Rust translator does not follow the changes of the engine translator after the port. One known example is the Maxwell denormal flush.
+Thus its output differs from the output of the C# translator on the current engine. Nobody measured how many keys differ.
+To make it the default again, do these steps:
+
+1. Compare the sources of the engine translator (`dmsh_xlate` and the Ryujinx fork) with the ported version.
+2. Port the changes.
+3. Compare again on the reference title, on the other two Maxwell titles and on the Switch 2 corpus.
+4. Change the default.
+
+The same limits are in the list of known limits of the README. The Ampere path is checked on one title only. The jobs of that path come from the new Rust job writer. Nobody compared them with the job writer of the reference scripts.
 
 ## Function
 

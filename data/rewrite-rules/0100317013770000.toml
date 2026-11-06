@@ -9,60 +9,6 @@ row = ["build", "v393216", "1.6.2225577", "main=5b76a43b231e0640521ac66203f7c178
 binding = "build"
 kind = "cut"
 build = "5b76a43b231e0640521ac66203f7c178"
-offset = 1458888
-old = "2800c0d2"
-new = "0800a4d2"
-why = "Snowdrop allocator: initialize the three range-size fields to 512 MB (mov x8,#0x20000000); the large range is overridden to 2 GB below"
-
-[[rule]]
-binding = "build"
-kind = "cut"
-build = "5b76a43b231e0640521ac66203f7c178"
-offset = 1458940
-old = "7600c0d2"
-new = "1600b8d2"
-why = "Snowdrop allocator: combined virtual range end uses 3 GB instead of 12 GB (mov x22,#0xc0000000)"
-
-[[rule]]
-binding = "build"
-kind = "cut"
-build = "5b76a43b231e0640521ac66203f7c178"
-offset = 1458944
-old = "e1031f2a"
-new = "0100b0d2"
-why = "Snowdrop allocator: prepare 2 GB for the large range (mov x1,#0x80000000); AllocateAddressRegion wrapper discards incoming x1"
-
-[[rule]]
-binding = "build"
-kind = "cut"
-build = "5b76a43b231e0640521ac66203f7c178"
-offset = 1458952
-old = "6000c0d2"
-new = "0000b8d2"
-why = "Snowdrop allocator: reserve 3 GB instead of 12 GB (mov x0,#0xc0000000)"
-
-[[rule]]
-binding = "build"
-kind = "cut"
-build = "5b76a43b231e0640521ac66203f7c178"
-offset = 1458956
-old = "e2031faa"
-new = "615600f9"
-why = "Snowdrop allocator: override the large range-size field to 2 GB (str x1,[x19,#0xa8]); AllocateAddressRegion wrapper never reads x2"
-
-[[rule]]
-binding = "build"
-kind = "cut"
-build = "5b76a43b231e0640521ac66203f7c178"
-offset = 1459000
-old = "2500a052"
-new = "05009052"
-why = "Snowdrop large allocator: maximum 64 KB page count 65536 -> 32768, matching its 2 GB range (mov w5,#0x8000)"
-
-[[rule]]
-binding = "build"
-kind = "cut"
-build = "5b76a43b231e0640521ac66203f7c178"
 offset = 607060
 old = "0108a052"
 new = "2100a052"

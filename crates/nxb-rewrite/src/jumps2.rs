@@ -6,7 +6,7 @@ use std::collections::HashSet;
 use nxb_a64::{Insn, Reg};
 
 use crate::jumps::{An, add3, and_imm, cmp_imm, mov_ww, wr_named, xnum};
-use crate::pat::{is_direct_branch, ldrsw_idx, nops, pimm, preg, tx, wname};
+use crate::pat::{is_direct_branch, ldrsw_idx, nops, pimm, preg, tx, writes_reg, written_w};
 use crate::rw::R;
 
 impl An<'_> {
@@ -183,9 +183,7 @@ impl An<'_> {
             if matches!(p.mn, "bl" | "blr") && xnum(reg) <= 18 {
                 return true;
             }
-            p.writes
-                .iter()
-                .any(|r| r.name().replacen('w', "x", 1) == reg)
+            writes_reg(p, reg)
         };
         let (idt, entt, baset) = (tx(idx), tx(ent), tx(base));
         if ctx[km + 1..kl].iter().any(|p| writes(p, &idt))
@@ -267,19 +265,20 @@ impl An<'_> {
                 if let Some((x, y)) = mov_ww(p)
                     && idx.contains(&x)
                 {
+                    idx.remove(&x);
                     idx.insert(y);
                     continue;
                 }
-                if let Some((cn, _)) = cmp_imm(p, false)
+                // a check of the full xN index bounds the same table
+                if let Some((cn, _)) = cmp_imm(p, true)
                     && idx.contains(&cn)
                 {
                     cmp = Some(p);
                     break;
                 }
-                if p.writes
+                if written_w(p)
                     .iter()
-                    .filter_map(wname)
-                    .any(|x| idx.contains(&(x as u8)) && x < 256)
+                    .any(|x| idx.contains(&(*x as u8)) && *x < 256)
                 {
                     return Ok(None);
                 }

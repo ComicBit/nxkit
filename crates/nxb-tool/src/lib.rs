@@ -29,7 +29,7 @@ pub use frontend::{
     WithFallback,
 };
 pub use invocation::{Completed, DEFAULT_MAX_STDERR, Invocation};
-pub use process::{ProcessRegistry, run_process};
+pub use process::{ProcessRegistry, kill_everything, run_process};
 pub use tool::{ProcessTool, Tool, ToolId};
 pub use toolchain::{MissingSdk, Resolver, SdkRoots};
 pub use translator::{Translator, XlateFailure, XlateJob, XlateOutput, XlateResult};

@@ -4,8 +4,8 @@
 //! with the tool: `rewrite-rules` next to the executable (the release archive), or `data/rewrite-rules` of a checkout.
 //! `NXB_REWRITE_RULES` (a folder of rule files) and `NXB_REWRITE_PATCHES` (the snapshot they come from, made by
 //! `tools/gen_rewrite_patches.py`) override them, and a `rewrite_patches.tsv` beside `patch_nso.py` is the last
-//! resort. The port refuses (exit code 4, the caller runs the reference script) when the engine is not the one this port was
-//! checked against: the rewriter's Python files, the patch files and `game.tsv` must hash as the snapshot says,
+//! resort. The port refuses (exit code 4, the caller runs the reference script, and `nxb build` stops at the rewrite with
+//! the same message) when the engine is not the one this port was checked against: the rewriter's Python files, the patch files and `game.tsv` must hash as the snapshot says,
 //! `DM_GAMES_DIR` must be empty, and an unreplayable frame step stub is
 //! unsupported. A game with `.nrr` files gets its collected NROs rewritten too (see [`ensure`]).
 
@@ -14,11 +14,15 @@ use std::path::{Path, PathBuf};
 use nxb_model::sha256;
 use nxb_rewrite::{Options, RewriteError, patches::PatchTable, rewrite};
 
-/// The SHA-256 of the engine files this port was checked against (`dm/tools`, engine commit ee6648cb).
-const PINNED: [(&str, &str); 6] = [
+/// The SHA-256 of the engine files (`dm/tools`) this port was checked against: the engine at its pinned commit
+/// (nxnative `e5ab7c5d`). The first `SOURCES` of them are the ones `build_src.sha256` lists, in the script's order.
+/// When one differs, `nxb rewrite` stops with exit code 4 naming the file and both hashes, and `nxb build` stops at
+/// the rewrite with the same message: the rewriter is checked against the new engine files (diff them, port what
+/// changed, run the oracle on real modules) and these pins are updated with it, never skipped.
+const PINNED: [(&str, &str); 12] = [
     (
         "patch_nso.py",
-        "bf157ead8721deb0fa0578bb83a00b9b1d0132ed9a1b85f3cedd69f775ba60d2",
+        "fcc8e43c055c2edb8288d8e32686fdc875711638f3290e8207bc2c59f2b54b84",
     ),
     (
         "nso.py",
@@ -33,6 +37,30 @@ const PINNED: [(&str, &str); 6] = [
         "ae1b3d83bec3720fd6c806b2c8caa559a5652ac333ad44c5e3e6ef091deb7d20",
     ),
     (
+        "ue_cvar.py",
+        "8f6c2129316be791376a84a57595d870cdcf23950213a772a6233c28f57e4220",
+    ),
+    (
+        "ue_malloc.py",
+        "9c2d28076b79cff87c0f30295e4e9a8c32ba2194c0c2620522eb4cd60ee66c3c",
+    ),
+    (
+        "fps_target.py",
+        "9ca20da648881beab2f94e4194dfbafcece9fa79655623ce15166704bf012647",
+    ),
+    (
+        "ue_region.py",
+        "3b2a12e97839a3505e68614ede5faf3f411f262fe527675f87c8c1a43105b675",
+    ),
+    (
+        "snowdrop_pools.py",
+        "3c1cca822fbe3f0b3614489d3a50da23dd5dace6a00c4d639a9a0e4fc2095b0c",
+    ),
+    (
+        "loader_census.py",
+        "1de24790659556b4b7d14fae4ad0347cc02898920fb32db6966e67711501f81f",
+    ),
+    (
         "nso_match.py",
         "e0fe79a5bda7d587f53a4b262b9ca6ec3c0e1df69edcb38e4bfc11af948be829",
     ),
@@ -41,6 +69,9 @@ const PINNED: [(&str, &str); 6] = [
         "5d2c5c0437f9578050382a561e93f78738b368d85ba4b04dc3bd2ef1a9c9bcb2",
     ),
 ];
+
+/// How many of [`PINNED`] go into `build_src.sha256`.
+const SOURCES: usize = 10;
 
 /// Exit code of a rewrite outside this port's contract (the script runs instead).
 pub const UNSUPPORTED: i32 = 4;
@@ -129,6 +160,8 @@ pub struct Engine {
     table: PatchTable,
     /// `(SHA-256, path relative to dm/tools)` as `build_src.sha256` lists them.
     sources: Vec<(String, String)>,
+    /// The engine's profile folders (`dm/games`), for the profile keys the rewriter reads.
+    games: PathBuf,
 }
 
 /// Why a rewrite did not happen.
@@ -168,13 +201,15 @@ impl Engine {
             }
         };
         for (rel, want) in PINNED {
-            if file_sha(&tools.join(rel)).map_err(un)? != want {
+            let have = file_sha(&tools.join(rel)).map_err(un)?;
+            if have != want {
                 return Err(un(format!(
-                    "{rel} differs from the version this rewriter was checked against"
+                    "{rel} of the engine ({}) differs from the version this rewriter was checked against (pinned sha256 {want}, engine sha256 {have}): the engine changed, the rewriter must be checked against it and the pins updated",
+                    tools.display()
                 )));
             }
         }
-        let mut sources: Vec<(String, String)> = PINNED[..4]
+        let mut sources: Vec<(String, String)> = PINNED[..SOURCES]
             .iter()
             .map(|(r, h)| ((*h).to_string(), (*r).to_string()))
             .collect();
@@ -200,7 +235,11 @@ impl Engine {
                 }
             }
         }
-        Ok(Engine { table, sources })
+        Ok(Engine {
+            table,
+            sources,
+            games: engine.join("dm/games"),
+        })
     }
 
     /// Rewrites one module file into `out`.`profile` is the game profile's folder name (`DM_GAME`'s base name).
@@ -218,11 +257,26 @@ impl Engine {
             v.strip_prefix("0x")
                 .map_or_else(|| v.parse().ok(), |h| u64::from_str_radix(h, 16).ok())
         });
+        // the pool sizes of Snowdrop's allocator (`snowdrop_pools.profile_sizes`): the profile's key, else a default
+        let (snowdrop_words, snowdrop_from) = if profile.is_empty() {
+            (Vec::new(), "default, no DM_GAME")
+        } else if let Ok(g) = crate::host::profile::Game::open(&self.games.join(profile)) {
+            let w = g.words_or("snowdrop_pools", "");
+            if w.is_empty() {
+                (w, "default, the profile has no snowdrop_pools")
+            } else {
+                (w, "profile")
+            }
+        } else {
+            (Vec::new(), "default, no profile")
+        };
         let opts = Options {
             name: name.into(),
             patch_front,
             profile: profile.into(),
             source_hashes: self.sources.clone(),
+            snowdrop_words,
+            snowdrop_from: snowdrop_from.into(),
         };
         let o = rewrite(&data, &opts, &self.table).map_err(|e| match e {
             RewriteError::Unsupported(m) => Fail::Unsupported(m),
@@ -371,11 +425,19 @@ fn collected_nros(dir: &Path) -> Option<Vec<(String, PathBuf)>> {
     Some(v)
 }
 
+/// The message of a build that stops at the rewrite: the rewriter has no answer for this engine or module, and a
+/// later stage would need the patched modules, so there is no fallback.
+fn stopped(why: &str) -> String {
+    format!("nxb rewrite: unsupported: {why}")
+}
+
 /// The rewrite stage of `nxb build`: makes `<work>/patched_<package>` from the extracted ExeFS when it is not there.
 /// A game with `.nrr` files in its RomFS also gets its NROs rewritten (`nro0.patched.bin` and so on, and the
 /// manifest `nro.tsv` beside them, as the script does) when the script has collected them into `nro_<package>`
-/// before or `nxb-nro` collects them now (the script's collection, ported, its unsupported cases leave the work to the script). Returns a note for the console, or `None` when the script's output is reused or this
-/// port does not apply (the work folder is then taken as before).
+/// before or `nxb-nro` collects them now (the script's collection, ported). Returns a note for the console, or `None`
+/// when the work folder already holds the patched modules. A case this port does not support (an engine whose
+/// pinned files differ, a module outside the rewriter's contract) is an error: the build stops here with the message
+/// of `nxb rewrite` (exit code 4 there), it does not go on without the patched modules.
 pub fn ensure(
     engine: &Path,
     profile_dir: &Path,
@@ -392,13 +454,15 @@ pub fn ensure(
             // the first build: the collection of the script, in Rust (`nxb-nro`)
             match nxb_nro::collect(&ex.join("RomFS.img"), &dir, None) {
                 Ok(_) => {}
-                Err(nxb_nro::Fail::Unsupported(_)) => return Ok(None),
+                Err(nxb_nro::Fail::Unsupported(m)) => {
+                    return Err(stopped(&format!("nro collection: {m}")));
+                }
                 Err(nxb_nro::Fail::Error(m)) => return Err(format!("nro collection: {m}")),
             }
         }
         match collected_nros(&dir) {
             Some(n) => n,
-            None => return Ok(None),
+            None => return Err(stopped("the NRO collection is incomplete")),
         }
     } else {
         Vec::new()
@@ -412,7 +476,7 @@ pub fn ensure(
     }
     let eng = match Engine::open(engine) {
         Ok(e) => e,
-        Err(Fail::Unsupported(_)) => return Ok(None),
+        Err(Fail::Unsupported(m)) => return Err(stopped(&m)),
         Err(Fail::Error(m)) => return Err(m),
     };
     let profile = profile_dir
@@ -429,9 +493,9 @@ pub fn ensure(
     for (m, file) in &todo {
         match eng.module(file, &tmp, m, &profile) {
             Ok(_) => {}
-            Err(Fail::Unsupported(_)) => {
+            Err(Fail::Unsupported(m)) => {
                 let _ = std::fs::remove_dir_all(&tmp);
-                return Ok(None);
+                return Err(stopped(&format!("{m} ({m_name})", m_name = file.display())));
             }
             Err(Fail::Error(e)) => return Err(format!("rewrite of {m}: {e}")),
         }

@@ -1,7 +1,7 @@
 //! Vertex shader steps of `dmsh_build.finish` (ports of `int_inputs`, `vs_init`, `vs_layer`, `vs_base_instance`,
 //! `vs_pad`, `vs_depth`, `vs_writes`, `vs_discard`, `vs_layer_entry`.`dmsh_geometry.capture` is in `capture.rs`).
 
-use super::text::is_word;
+use super::text::{is_word, word_starts};
 use nxb_pyjson::Value;
 use std::collections::BTreeSet;
 
@@ -196,20 +196,80 @@ fn drop_point_size_writes(s: &str) -> String {
     out
 }
 
+fn ws(r: &str) -> Option<&str> {
+    let t = r.trim_start();
+    (t.len() < r.len()).then_some(t)
+}
+
+/// The last `\bvertex\s+\w+\s+\w+\s*\(` match that starts before `use_at`: (start, end of the match).
+fn vertex_fn_before(s: &str, use_at: usize) -> Option<(usize, usize)> {
+    let word = |r: &str| {
+        let n = r.len() - r.trim_start_matches(is_word).len();
+        (n > 0).then_some(n)
+    };
+    let (mut best, mut at) = (None, 0);
+    for i in word_starts(s, "vertex") {
+        if i >= use_at || i < at {
+            continue;
+        }
+        let Some(r) = ws(&s[i + 6..]) else { continue };
+        let Some(n) = word(r) else { continue };
+        let Some(r) = ws(&r[n..]) else { continue };
+        let Some(n) = word(r) else { continue };
+        let r = &r[n..];
+        let t = r.trim_start();
+        if t.starts_with('(') {
+            at = s.len() - t.len() + 1;
+            best = Some((i, at));
+        }
+    }
+    best
+}
+
+/// `drop_point_size(src)`: the writes of the point size go. A function that takes the output by reference still needs
+/// something to write: the vertex function gets a local float for it.
+fn drop_point_size(src: &str) -> Result<String, String> {
+    let mut src = drop_point_size_writes(src);
+    while let Some(use_at) = src.find("out.gl_PointSize") {
+        let (_, aend) = vertex_fn_before(&src, use_at)
+            .ok_or("[RED] a point size output used outside a vertex function")?;
+        let b = src[aend..]
+            .find('{')
+            .map(|k| aend + k)
+            .ok_or("[RED] a vertex function without a body")?;
+        let (mut depth, mut e) = (0i64, src.len() - 1);
+        for (k, ch) in src[b..].char_indices() {
+            depth += i64::from(ch == '{') - i64::from(ch == '}');
+            if depth == 0 {
+                e = b + k;
+                break;
+            }
+        }
+        src = format!(
+            "{}\n    float dmsh_point_size = 1.0;{}{}",
+            &src[..=b],
+            src[b + 1..e].replace("out.gl_PointSize", "dmsh_point_size"),
+            &src[e..]
+        );
+    }
+    Ok(src)
+}
+
 /// `vs_layer(src)`.
-pub fn vs_layer(src: &str) -> String {
+pub fn vs_layer(src: &str) -> Result<String, String> {
+    let ok = |s: &str| Ok(s.to_string());
     let Some(i) = src.find("struct main0_out\n{\n") else {
-        return src.to_string();
+        return ok(src);
     };
     let Some(j) = src[i..].find("\n};").map(|k| i + k) else {
-        return src.to_string();
+        return ok(src);
     };
     let st = &src[i..j];
     if !st.contains("[[render_target_array_index]]") || !st.contains("[[point_size]]") {
-        return src.to_string();
+        return ok(src);
     }
     let st2 = st.replacen("\n    float gl_PointSize [[point_size]];", "", 1);
-    drop_point_size_writes(&format!("{}{st2}{}", &src[..i], &src[j..]))
+    drop_point_size(&format!("{}{st2}{}", &src[..i], &src[j..]))
 }
 
 const VP_BASE_INSTANCE: &str = "(*spvDescriptorSet0.vp_c0)._m0[100].y";
@@ -408,16 +468,16 @@ pub fn vs_discard(src: &str) -> Result<String, String> {
 }
 
 /// `vs_layer_entry(full)` → (source, `{loc, comp}` or `None`).
-pub fn vs_layer_entry(full: &str) -> (String, Option<Value>) {
+pub fn vs_layer_entry(full: &str) -> Result<(String, Option<Value>), String> {
     let none = (full.to_string(), None);
     let Some(i) = full.find("struct main0_out\n{\n") else {
-        return none;
+        return Ok(none);
     };
     let Some(j) = full[i..].find("\n};").map(|k| i + k) else {
-        return none;
+        return Ok(none);
     };
     if !full.contains("gl_InstanceIndex") || full[i..j].contains("[[render_target_array_index]]") {
-        return none;
+        return Ok(none);
     }
     let st = &full[i..j];
     let mut locs: Vec<(String, i64)> = Vec::new();
@@ -441,7 +501,9 @@ pub fn vs_layer_entry(full: &str) -> (String, Option<Value>) {
             && locs.iter().any(|(n, _)| n == name);
         ok.then(|| (name.to_string(), c))
     });
-    let Some((name, comp)) = hit else { return none };
+    let Some((name, comp)) = hit else {
+        return Ok(none);
+    };
     let st_full = &full[i..j + 3];
     let st2 = st_full
         .replace("\n    float gl_PointSize [[point_size]];", "")
@@ -453,10 +515,10 @@ pub fn vs_layer_entry(full: &str) -> (String, Option<Value>) {
     let mut add = format!("\n{st2}\n");
     for (ep, new) in [("main0", "main0_l"), ("main0_z", "main0_lz")] {
         let Some((a, aend)) = vertex_fn(full, ep) else {
-            return none;
+            return Ok(none);
         };
         let Some(b) = full[aend..].find('{').map(|k| aend + k) else {
-            return none;
+            return Ok(none);
         };
         let mut depth = 0i64;
         let mut e = b;
@@ -472,7 +534,7 @@ pub fn vs_layer_entry(full: &str) -> (String, Option<Value>) {
             &format!(" {new}("),
             1,
         );
-        let f = drop_point_size_writes(&f);
+        let f = drop_point_size(&f)?;
         add.push_str(&format!(
             "\n{}\n",
             f.replace(
@@ -482,11 +544,11 @@ pub fn vs_layer_entry(full: &str) -> (String, Option<Value>) {
         ));
     }
     let loc = locs.iter().find(|(n, _)| *n == name).map_or(0, |x| x.1);
-    (
+    Ok((
         format!("{full}{add}"),
         Some(Value::obj([
             ("loc", Value::Int(loc)),
             ("comp", Value::str(comp.to_string())),
         ])),
-    )
+    ))
 }

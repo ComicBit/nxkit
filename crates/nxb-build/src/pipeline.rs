@@ -20,7 +20,11 @@ fn dotnet_root(a: &Args) -> Result<PathBuf, String> {
     if let Some(d) = std::env::var_os("DOTNET_ROOT") {
         return Ok(d.into());
     }
-    let out = std::process::Command::new("dotnet")
+    // `dotnet` is searched in the script's tool folders first (an app started from the Finder has no Homebrew in its PATH)
+    let dotnet = crate::host::Runner::from_parent()
+        .and_then(|r| r.which("dotnet"))
+        .unwrap_or_else(|_| PathBuf::from("dotnet"));
+    let out = std::process::Command::new(dotnet)
         .arg("--list-runtimes")
         .output()
         .map_err(|e| {
@@ -44,7 +48,7 @@ fn dotnet_root(a: &Args) -> Result<PathBuf, String> {
 pub fn shader_config(a: &Args, b: &Build) -> Result<BuildConfig, String> {
     let tools = b.engine.join("dm/gfx/tools");
     let chain = nxb_shader::chain::version(&b.engine)?;
-    let inputs = nxb_shader::chain::inputs(&b.profile.0)?;
+    let inputs = nxb_shader::chain::inputs_of(&b.engine, &b.profile.0)?;
     let sh = b.work.join("shader");
     let manifest = match &a.manifest {
         Some(f) => nxb_sched::UseManifest::read(f)?.keys().to_vec(),
@@ -125,6 +129,8 @@ pub struct Outcome {
     pub shaders: String,
     /// The archive's summary (when one was built).
     pub archive: Option<String>,
+    /// Why the archive failed: the script treats that as no archive for the app, not as a failed build.
+    pub archive_error: Option<String>,
     /// The library folder.
     pub lib: PathBuf,
 }
@@ -172,13 +178,18 @@ pub fn shaders_and_archive(a: &Args, b: &Build, p: &Arc<Progress>) -> Result<Out
     }
     if let Some(s) = &stream {
         cfg.order = s.key_order();
-        let s = s.clone();
-        let total = p.clone();
+    }
+    {
+        // the total is reported with or without an archive: the app binary shows a percent bar and an ETA from it
+        let (s, total) = (stream.clone(), p.clone());
         cfg.on_start = Some(nxb_stages::build::OnStart(Arc::new(
             move |keys: &[String]| {
-                s.building(&keys.iter().cloned().collect());
+                if let Some(s) = &s {
+                    s.building(&keys.iter().cloned().collect());
+                }
                 total.set(Update {
                     total: Some(keys.len() as u64),
+                    done: Some(0),
                     ..Default::default()
                 });
             },
@@ -190,7 +201,7 @@ pub fn shaders_and_archive(a: &Args, b: &Build, p: &Arc<Progress>) -> Result<Out
         ..Default::default()
     });
     let (shaders, archive) = std::thread::scope(
-        |scope| -> Result<(String, Option<String>), String> {
+        |scope| -> Result<(String, Option<Result<String, String>>), String> {
             let job = match (&stream, acfg) {
                 (Some(s), Some(c)) => {
                     let (s, sinp) = (s.clone(), sinp.clone());
@@ -239,29 +250,55 @@ pub fn shaders_and_archive(a: &Args, b: &Build, p: &Arc<Progress>) -> Result<Out
                         step: Some("archive batches still running"),
                         ..Default::default()
                     });
-                    let ((rep, bases), c) = j.join().map_err(|_| "archive thread panicked")??;
-                    let arch = arch.clone().unwrap_or_default();
-                    write_archive_stamps(b, &lib, &c, &arch, &text, zero, bases)?;
-                    let tail = partial
-                        .filter(|_| a.partial)
-                        .map_or(String::new(), |st| format!("; {}", st.note()));
-                    Some(format!(
-                        "{bases} bases, {} MB, {} batches ({} reused), streamed beside the shader step{tail}",
-                        rep.size >> 20,
-                        rep.batches.len(),
-                        rep.batches.iter().filter(|x| x.reused).count()
-                    ))
+                    let done = j
+                        .join()
+                        .map_err(|_| "archive thread panicked".to_string())
+                        .and_then(|r| r)
+                        .and_then(|((rep, bases), c)| {
+                            let arch = arch.clone().unwrap_or_default();
+                            write_archive_stamps(b, &lib, &c, &arch, &text, zero, bases)?;
+                            Ok((rep, bases))
+                        });
+                    match done {
+                        Ok((rep, bases)) => {
+                            let tail = partial
+                                .filter(|_| a.partial)
+                                .map_or(String::new(), |st| format!("; {}", st.note()));
+                            Some(Ok(format!(
+                                "{bases} bases, {} MB, {} batches ({} reused), streamed beside the shader step{tail}",
+                                rep.size >> 20,
+                                rep.batches.len(),
+                                rep.batches.iter().filter(|x| x.reused).count()
+                            )))
+                        }
+                        Err(e) => Some(Err(archive_failure(&e))),
+                    }
                 }
                 None => None,
             };
             Ok((shaders, archive))
         },
     )?;
+    let (archive, archive_error) = match archive {
+        Some(Ok(s)) => (Some(s), None),
+        Some(Err(e)) => (None, Some(e)),
+        None => (None, None),
+    };
     Ok(Outcome {
         shaders,
         archive,
+        archive_error,
         lib,
     })
+}
+
+/// An archive failure in words: the common one, no pair with libraries of the chain, says what it means.
+pub(crate) fn archive_failure(e: &str) -> String {
+    if e.contains("not enough input files") {
+        "the pipeline archive has no base to pack: no shader pair has libraries of this build's chain (their `_b.json` names another chain than the folder `b-<chain>`) or the profile has no usable pairs".into()
+    } else {
+        e.to_string()
+    }
 }
 
 /// The minimum OS of the Mac archive: this Mac's major version (`sw_vers`), as `pso_offline.py`.
@@ -376,4 +413,16 @@ pub(crate) fn stage_pso(b: &Build, arch: &str) -> Result<String, String> {
         r.size >> 20,
         r.batches.len()
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::archive_failure;
+
+    #[test]
+    fn archive_failures_in_words() {
+        let raw = "metal-pack: ToolError { stderr_head: \"metal-pack: error: not enough input files\\n\" }";
+        assert!(archive_failure(raw).starts_with("the pipeline archive has no base to pack"));
+        assert_eq!(archive_failure("disk full"), "disk full");
+    }
 }

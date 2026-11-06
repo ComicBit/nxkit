@@ -2,6 +2,79 @@
 
 All notable changes are in this file. The format follows Keep a Changelog. Versions follow Semantic Versioning.
 
+## 0.5.1
+
+### Changed (read this first)
+
+- **The Rust translator is off by default.** The entries of 0.4.0 and 0.5.0 said that it is on by default. That is not correct for this release.
+  The Rust translator does not follow the current engine translator, for example its Maxwell denormal flush.
+  Its output can thus differ from the output of the C# translator on the current engine.
+  `--xlate-rust on` (for `nxb shaders build`) or `NXB_XLATE_RUST=1` (also for `nxb build`) turns it on.
+  In the default mode, the translator host does the work, and the process bridge is the fallback. Both are C# programs, thus the .NET runtime is necessary.
+  The Rust translator was byte-identical to the C# translator only on the engine version that it was ported from. Nobody compared it again with the current engine.
+- **The chain value in each `_b.json` file is the computed value.** In 0.5.0, the vertex shader files had the constant `0ad559cdbb28`.
+  The folder name had the computed value, and the two values were not equal. As a result, the pipeline archive found no base library.
+  In a full Mac run with the 0.5.0 code, the archive step gave an error. The build packed the app without an archive.
+  The computed value uses the engine files that `dmsh_chain.py` names.
+- **`nxb rewrite` follows the current engine.** The script `patch_nso.py` changed in 551 lines after 0.5.0. This release ports the changes.
+  The rules in `data/rewrite-rules` come from the current engine (147 rule files). The pins give the two hashes in the message.
+  `nxb build` stops at the rewrite step when the engine files differ from the pinned files. It gives exit code 1 and the message. `nxb rewrite` gives exit code 4.
+  **The finder `ue_region` is not ported.** A main module with `SwitchVirtualAddressSpaceSize` gives exit code 4.
+- `nxb build` has more inputs, more options and fixed exit codes (the next section).
+
+### Added
+
+- Port of two changes of the MSL and the reflection step: the point size and the kinds of bindless handles.
+- Rewrite step: the order of lock acquires (`ldaxr`), the Trinity barrier, `changed.tsv` as the sixth output and the observation gates at each instruction that can move.
+  Also `BACK_MIN`, the recognizers of jump tables, the proof of tail calls and the finders `ue_cvar`, `ue_malloc`, `fps_target` and `snowdrop_pools`.
+- The split reads NSO segments with ZBIC compression. The decoder is in `nxb-codec::zbic`.
+- `nxb build`:
+  - With `--progress json`, standard output has NDJSON events only.
+  - The exit codes are 0, 1, 2, 3, 4, 6 and 130 (130 for SIGINT and SIGTERM).
+  - The Mac host stage makes the font file. The shader stage reports `total` from its first progress event.
+  - New inputs: NSZ, XCZ, XCI, merged packages (`--app`), `.nup` (`--nup`), dump folders (`--dump`) and DLC (`--aoc`).
+  - New options: `--env-file`, `--motion`, `--seen-shaders`, `--allow-other-metal`, `--mac-sign`, `--romfs`, `--keep-extracted` and `--show-fps`.
+  - The iOS options are connected to the iOS stages: `--team-id`, `--framework`, `--shell-framework`, `--prepare-xcode` and `--xcode-workspace`.
+  - `--gpu` has a default: the GPU architecture of this Mac. `--gpu none` skips the pipeline archive.
+    If the archive gives an error, the build writes a `[RED]` line and packs the app without an archive. The exit code is 0.
+  - Provisional profiles. A game without a registered profile gets a survey and a provisional profile.
+    The options are `--provisional`, `--survey-only`, `--no-heap-check` and `--profile-out`.
+    A game that has a heap check, a region check or a shader capture gives exit code 4. The message names `--no-heap-check`.
+- The command `nxb profile` with `guess`, `show`, `check` and `manifest`.
+
+### Checked
+
+All results are **measured**.
+
+- Libraries and `_b.json` of a full Wonder run (C# translator, `NXB_OWN_FRONT=0`) against a Python build of the same current engine:
+  0 of 41,883 libraries differ in a sample. 5 shaders are stubs that the Python run itself left.
+- Rewrite: 111 of 111 modules are byte-identical to the current `patch_nso.py` (9 real modules of 3 titles, 4 synthetic main modules and 98 NRO modules).
+- Profile files: 1,115 of 1,115 tables of 145 profiles are identical. The guess reports are identical in 11 of 11 cases.
+  The survey reports and provisional profiles are identical in 6 of 6 cases. The checks of registered profiles are identical in 10 of 10 cases.
+- The survey of the Switch 2 package, the profile, the rewrite (3 modules), the split (35,732 shaders) and the Mac host stage passed with `--no-heap-check`.
+- A run that was stopped with SIGTERM after 4 s ended with exit code 130.
+- The check script of the repository passes.
+
+### Not checked
+
+- **Nobody ran the shader step, the pipeline archive and the app stage on the Switch 2 package.** The checks above stop at the Mac host stage.
+  Thus the shader step for a NUP package is not tested.
+- The new inputs (XCI, XCZ, merged packages, dump folders and DLC) were checked on synthetic fixtures only. The NSZ block mode was not checked on real data.
+- The iOS options and `nxb build --platform ios` were not run on a device. Each stage was checked with a real `xcodebuild`, but not in one run.
+- `--mac-sign` was not run with a real identity.
+- The complete `nxb build` was not run again after the fix of the chain value. A cold full run was not timed.
+- The rewrite step was not checked again with the current script on TotK, BotW and the Smash main module (the images are not extracted).
+  The finders `ue_cvar`, `ue_malloc`, `fps_target` and `snowdrop_pools` have no real positive sample.
+- The exit-code-4 paths of the unified commands have no test.
+
+### Not ported (open items)
+
+- The Rust translator must follow the current engine translator before it can be the default again.
+- The paths that go to the C# translator (geometry, tessellation, vertex shaders as compute, transform feedback, task and mesh shaders, `SharedStoreSmallIntCas`) stay open. Refer to the README.
+- The census of the rewrite sites, and `--program N` for N more than 0.
+- The heap check, the region check and the shader captures of the survey. They start the game.
+- DLC shader content is not split. The shader step does not write cache entries at this time.
+
 ## 0.5.0
 
 ### Changed (read this first)
@@ -70,7 +143,7 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 - The exit code for an unsupported input is now 4 for `nxb extract`, `nxb-extract`, `nxb-split`, `nxb rewrite`, `nxb nro`, `nxb-ios` and `nxb build`. Exit code 3 means damaged data.
   The 0.3.0 text said that `nxb-ios` returned 3. The signer binary `nxb-pack` still returns 3 for an unsupported input.
 - The translator host is the default when its binary is next to the translator (`--xlate-host off` turns it off).
-  The Rust translator is on by default (`--xlate-rust off` or `NXB_XLATE_RUST=0` turns it off).
+  The Rust translator is on by default (`--xlate-rust off` or `NXB_XLATE_RUST=0` turns it off). **Version 0.5.1 reverses this: it is off by default.**
 - Events have two new fields, `code` and `severity`. The old fields do not change, and `t` stays last.
 
 ### Added

@@ -97,6 +97,7 @@ Since version 0.4.0, the split reads many more container families. A format that
 | SARC, BNSH, BAHS, NSO, GLSLC outputs, NARC, sized frames, gzip files | ported. Compared with the reference functions on real or synthetic files |
 | zstd dictionaries (standard format) | ported. Files of one real title are byte-identical to the output of `zstd -D` |
 | archive families that the reference split reads by ranges (a large archive, zip, KPKA, CPK, dvdbnd, ARH, LINKDATA, Unreal packages and others) | ported. The split reads the archive by ranges from the image. A 17.6 GB archive is never in memory |
+| NSO segments with ZBIC compression (flag bit 7) | ported. The decoder is `nxb-codec::zbic`. The split and the rewrite use it. The four modules of the Switch 2 package were read and each segment hash was checked. A synthetic NSO also passes |
 | Unity bundles and serialized files (LZMA, LZ4, stored blocks, format 17 to 22, type trees) | ported. Compared on synthetic files only, because no real Unity title was available |
 | Needle, Sumo, Phyre, MGFX, XNB, SLCT, Monolith, Snowdrop, SDF, MT Framework and some more | ported. Compared on synthetic files |
 | formats that need Oodle (some packs, Frostbite roots, some Unreal blocks) | not ported. Exit code 4 |
@@ -110,7 +111,7 @@ The reference scripts read approximately 35 container formats, and the port cove
 
 `nxb-rewrite` decodes each AArch64 instruction of each code module with the own decoder `nxb-a64`. It changes `x18`,
 `tpidr*`, `svc`, `cntpct_el0`, misaligned `sp`, lock acquires, spin loops, cuts and observation gates. It writes
-`.patched.bin` and five TSV tables. The command is `nxb rewrite <module> <out dir> <name>`. It has the command line of `patch_nso.py`.
+`.patched.bin` and six TSV tables (`changed.tsv` is the sixth). The command is `nxb rewrite <module> <out dir> <name>`. It has the command line of `patch_nso.py`.
 The extract stage of `nxb build` runs it for the modules of the profile.
 
 - **Input.** NSO and NRO modules. The loader reads LZ4 segments and ZBIC segments (a zstd variant, with an own decoder), and it checks the SHA-256 of each segment.
@@ -123,16 +124,18 @@ The extract stage of `nxb build` runs it for the modules of the profile.
   The licence notice of the engine that the rules come from is in `data/rewrite-rules/NOTICE` and in `THIRD_PARTY.md`.
 - **Where the rules are found.** In this sequence: `NXB_REWRITE_RULES` (a folder), `NXB_REWRITE_PATCHES` (a snapshot), the folder `rewrite-rules` next to the binary (the release ZIP file),
   `data/rewrite-rules` above the binary or in the checkout, and last the older file `rewrite_patches.tsv` next to the script.
-- **When the port refuses.** The port gives exit code 4, and the caller runs the script, in three conditions. The first is an engine file that hashes differently from the file that the rules come from.
-  The second is a set `DM_GAMES_DIR`. The third is a frame step stub that the trace cannot express. A jump table that no rule knows stops with exit code 1, the address and the function name.
+- **When the port refuses.** The port gives exit code 4, and the caller runs the script, in four conditions. The first is an engine file that hashes differently from the file that the rules come from. The message gives the two hashes.
+  The second is a set `DM_GAMES_DIR`. The third is a frame step stub that the trace cannot express. The fourth is a main module that has `SwitchVirtualAddressSpaceSize`. It needs the finder `ue_region`, which is not ported.
+  In `nxb build`, an engine that differs stops the rewrite stage with exit code 1 and the same message. A jump table that no rule knows stops with exit code 1, the address and the function name.
 - **NRO modules.** `nxb nro <RomFS image> <out dir> [<nrr name>]` collects the NRO modules that the `.nrr` files list. It has the command line of `nro_collect.py`.
   It reads the archive index of the large archive by ranges. It gives exit code 4 for an image of another format, for hashes that are left after the index (the scan of the script is not ported),
   and for a damaged `.nrr` file.
 
-Results (measured, the reference script as oracle, all five tables and `.patched.bin` byte-identical unless a line says synthetic):
+Results (measured, the reference script as oracle, all six tables and `.patched.bin` byte-identical unless a line says synthetic):
 
 | input | result |
 |---|---|
+| 0.5.1: the script of the current engine. 9 real modules (the reference title, a second title and the Switch 2 package), 4 synthetic main modules and 98 NRO modules | 111 of 111 identical (`.patched.bin`, the six tables and `build_src.sha256`) |
 | 25 real modules, including a Switch 2 title with ZBIC segments, modules with NRO tables and modules with frame step stubs | 25 of 25 identical |
 | 98 NRO modules of one title | 98 of 98 identical, and `nro.tsv` identical |
 | synthetic modules with text of 100, 125.3 and 185.6 MB, and the two re-run cases | identical. Only the layout code and the registered rows are tested |
@@ -142,7 +145,16 @@ Results (measured, the reference script as oracle, all five tables and `.patched
 Time (measured, release build, machine not quiet): a 29 MB main module took 3.4 s against 63 s for the script. A larger module took 8.9 s against 121 s.
 The synthetic large modules took 1 to 3.5 s against 183 to 672 s. The NRO collection took 3.5 s against 4.5 s, because the archive table dominates both times.
 
+The older script gave the 25 real modules and the other rows below the first row.
+The script then changed in 551 lines. Version 0.5.1 ports these changes: the acquire order of locks (`ldaxr`), the Trinity barrier, `changed.tsv`, the observation gates at each instruction that can move,
+`BACK_MIN`, the recognizers of jump tables, the proof of tail calls and the finders `ue_cvar`, `ue_malloc`, `fps_target` and `snowdrop_pools`.
+The rules in `data/rewrite-rules` come from the current engine (147 files). A pin holds the hash of each engine file that the rules use.
+After an engine change, make the rules again with `nxb rewrite-rules`, and compare the oracle cases again.
+
 Not tested: rules on real code of the builds that have no local sample, and modules with words that the decoder does not cover.
+Not rechecked with the current script: three more titles (their images are not extracted).
+The finders `ue_cvar`, `ue_malloc`, `fps_target` and `snowdrop_pools` have no real positive sample. The layouts of three more titles and some frame step stubs are **synthetic**.
+**Not ported:** the finder `ue_region`. A main module with `SwitchVirtualAddressSpaceSize` stops with exit code 4.
 
 ## Host stages around the app
 
@@ -168,8 +180,9 @@ Some conversions approximate Python behavior. The code documents them: the `repr
 and the replacement of `DMSH_CHAIN` line by line. The tools do not get `DEVELOPER_DIR`.
 When you set it, the `clang --version` text of the reference script can be different.
 
-`nxb build` runs these stages. This complete path (`nxb build` end to end with the new stages) was not run on a real title.
-The test compared each stage alone. One title gave a test of the overlap of these stages in version 0.3.0 (refer to the next section).
+`nxb build` runs these stages. One run of the full path was made on one title with the 0.5.0 code (Mac app, load average about 15, not a timing run).
+The pipeline archive gave an error in that run because of the chain value (refer to the shader step). The fix is in 0.5.1. Nobody ran the full build again after the fix.
+The tests compared each stage alone. One title gave a test of the overlap of these stages in version 0.3.0 (refer to the next section).
 
 ## Stage overlap in `nxb build`
 
@@ -224,6 +237,90 @@ and 4 KiB for x86_64, tvOS and iOS before 16.0 (measured against `codesign`). Fo
 The oracle tests in `tests/oracle.rs` compare the output with `codesign` for many Mach-O and bundle types. All outputs pass `codesign --verify --deep --strict`.
 On the reference title (58,207 sealed files, 4.99 GB), `CodeResources` and the two executables were byte-identical to the `codesign` output (measured).
 
+
+## `nxb build`: inputs, options and exit codes
+
+`nxb build` is the one command for the full build. The first argument is a folder of packages, a `.nup` file or a dump folder.
+Since 0.5.1, it takes the inputs and the options of the reference script that the table below lists.
+The default platform is `ios`, as in the reference script. Use `--platform mac-app` for a Mac app.
+`nxb help build` shows the usage.
+
+| input | how to give it | test condition |
+|---|---|---|
+| NSP | in the folder | real data (one title, Mac app) |
+| NSZ, XCI, XCZ | in the folder | the readers are the readers of `nxb extract`. One real NSZ file was checked there. XCI and XCZ were checked on synthetic fixtures only. **Synthetic or untested** through `nxb build` |
+| merged package | in the folder, with `--app` or `--title-id` | **synthetic** |
+| NUP | `--nup FILE`, or the only `.nup` in the folder | the extract was checked on one real package. The build was run on it up to the Mac host stage (refer to the survey section) |
+| dump folder | `--dump FOLDER`, or found by its layout | **synthetic.** A run on a fixture wrote the images and reached the rewrite stage |
+| DLC | `--aoc PACKAGE` (more than one time), or DLC packages in the folder | **synthetic.** The split does not read the shader content of DLC |
+
+| option | function | test condition |
+|---|---|---|
+| `--env-file`, `--motion`, `--no-motion` | write `work/build_env.txt` as the script does | tested by unit tests only |
+| `--seen-shaders` | makes the keys of the playtest lists and of the host logs, as a manifest build with `--partial` | tested by unit tests only |
+| `--allow-damaged`, `--allow-other-metal` | the options of the script. The second option lets a newer Metal compiler of the same generation go on | tested by unit tests only |
+| `--mac-sign IDENTITY` | signs the staged app again, the host first, then the bundle | **not run with a real identity** |
+| `--romfs bundle\|separate` | the position of the RomFS. `separate` is for iOS. Exit code 2 for a Mac app | tested by unit tests only |
+| `--keep-extracted` | deletes the extraction after the IPA. It has an effect for iOS only | not run |
+| `--show-fps` | iOS only. On by default, as in the script | not run |
+| `--gpu ARCH\|none` | the GPU architecture of the pipeline archive. The default is the architecture of this Mac. `none` skips the archive | measured on one Mac (M2 Max) |
+| `--team-id`, `--framework`, `--shell-framework`, `--prepare-xcode`, `--xcode-workspace` | the iOS options. They call the code of `nxb ios` | **no device test.** Each stage was checked with a real `xcodebuild`. Nobody ran the stages in one run |
+| `--provisional`, `--survey-only`, `--no-heap-check`, `--profile-out` | the survey options (refer to the next section) | see the next section |
+| `--allow-shader-regressions` | accepted, no effect. No regression check is in the build | not applicable |
+| `--program N` for N more than 0, `--platform mac` | exit code 4 | not ported |
+
+The pipeline archive is an optimization. If it gives an error, the build writes a `[RED]` line and packs the app without an archive. The exit code is 0.
+The Mac host stage makes the font file `nintendo_ext.ttf`. The shader stage reports `total` from its first progress event.
+
+With `--progress json`, standard output has NDJSON events only. All other text goes to standard error.
+In a test of three runs with an error, each line of standard output was an event (measured).
+
+| exit code | meaning |
+|---|---|
+| 0 | done |
+| 1 | error. Also the stop of the rewrite stage when the engine files differ from the files that the rules come from. The message names the two hashes |
+| 2 | incorrect arguments |
+| 3 | damaged data |
+| 4 | not supported. The caller runs the reference step |
+| 6 | a key is missing |
+| 130 | interrupted by SIGINT or SIGTERM |
+
+A run that was stopped with SIGTERM after 4 s ended with exit code 130 (measured, one run).
+The exit-code-4 paths of the unified commands have no test.
+
+### Games without a registered profile
+
+A game that has no profile in the engine gets a survey. `nxb build` examines the files of the game, writes `survey.md`
+and a provisional profile, and then builds with this profile. The profile is in `<work>/profile/<title ID>/`, or in `D/<title ID>/` with `--profile-out D`.
+`--provisional` does the same for a game that has a profile. The app name then ends with `-provisional`.
+`--survey-only` writes `survey.md` and stops with exit code 0. Without a profile, it writes no profile.
+
+Some checks of the reference script start the game on the Mac. `nxb build` does not start the game. These checks are not ported:
+
+- The heap check and the region check. A game that has one of them stops with exit code 4. The build writes the profile first. The message names `--no-heap-check`.
+  With `--no-heap-check`, the build omits the two checks and keeps the memory layout that the survey guessed. **A run of the game did not check this layout.**
+- The shader captures (Vulkan, OpenGL, `glslc`, Unreal decode and others). The build writes a `[RED]` line for each capture that it leaves out.
+- The census of the rewrite sites in the survey report. The report says that it did not run.
+- The source checks at build time (Unreal paks, Frostbite headers).
+
+`nxb profile` has four commands: `guess`, `show`, `check` and `manifest`. `guess` writes the values of the survey, `show` shows a profile,
+`check` compares the guess with a registered profile, and `manifest` lists a RomFS image.
+
+Results (measured, the reference scripts as oracle):
+
+| part | compared on | result |
+|---|---|---|
+| profile tables, read and write | 1,115 tables of 145 profiles | 1,115 of 1,115 byte-identical |
+| facts and guess of `profile_guess.py` | 11 extractions | 11 of 11 reports identical |
+| registered profile check | 10 registered profiles | 10 of 10 identical |
+| survey report and provisional profile | 6 extractions | 6 of 6 identical |
+| `set_keys` and refinement after the rewrite | 60 synthetic cases | 60 of 60 identical |
+
+The Switch 2 package (the only package without a profile here) was the real test. The survey took 8:00 (measured). The 26 GB image write was 7:27 of that time, and the disk was slow.
+With `--no-heap-check` and an empty folder of libraries, the survey, the profile, the rewrite (3 modules, 11 s), the split (68 s, 35,732 shaders)
+and the Mac host (17 s) passed. The app stage then stopped because the folder had no libraries.
+**The shader step, the pipeline archive and the app stage were not run for this package.** In `nxb build`, nobody translated its 35,732 shaders.
+The Switch 2 package has the file name of one game and the RomFS folders of the engine of a different game. Thus these documents call it "the Switch 2 package".
 
 ## iOS stages
 

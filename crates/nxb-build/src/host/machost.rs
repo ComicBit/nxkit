@@ -267,14 +267,46 @@ pub fn build(
     Ok(true)
 }
 
+/// The button-icon font the host gives a game for the Nintendo extension shared font (`make_ext_font.py`): written to
+/// `<work>/font/nintendo_ext.ttf` by [`crate::ios::extfont`], made again when the tool's script or `SOURCE_DATE_EPOCH`
+/// changed (the font's header carries a creation time: with the variable set the file is the same on every build).
+/// True when the font was made, false when it was reused.
+pub fn font(engine: &Path, work: &Path) -> Result<bool, String> {
+    let dir = work.join("font");
+    let (ttf, kf) = (dir.join("nintendo_ext.ttf"), dir.join("nintendo_ext.key"));
+    let script = engine.join("dm/tools/make_ext_font.py");
+    let mut h = nxb_model::Sha256::new();
+    h.update(b"nxb extfont 1\0");
+    h.update(&std::fs::read(&script).unwrap_or_default());
+    h.update(b"\0");
+    h.update(
+        std::env::var("SOURCE_DATE_EPOCH")
+            .unwrap_or_default()
+            .as_bytes(),
+    );
+    let key = format!("{}\n", h.finalize().to_hex());
+    if ttf.is_file() && std::fs::read_to_string(&kf).is_ok_and(|k| k == key) {
+        return Ok(false);
+    }
+    let _ = std::fs::remove_file(&kf);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let part = dir.join("nintendo_ext.ttf.part");
+    crate::ios::extfont::make(&part, None)
+        .map_err(|e| format!("the button-icon font (make_ext_font): {e}"))?;
+    std::fs::rename(&part, &ttf).map_err(|e| format!("{}: {e}", ttf.display()))?;
+    std::fs::write(&kf, key).map_err(|e| format!("{}: {e}", kf.display()))?;
+    Ok(true)
+}
+
 /// The stage "Mac host" of `nxb build`: the host for the profile into `<work>/tools/dmhost` (the work folder
-/// resolved, as the script resolves it). The button-icon font is `ios::extfont`.
+/// resolved, as the script resolves it), then the button-icon font ([`font`]).
 pub fn stage(engine: &Path, work: &Path, game: &str) -> Result<String, String> {
     std::fs::create_dir_all(work).map_err(|e| format!("{}: {e}", work.display()))?;
     let work = std::fs::canonicalize(work).map_err(|e| format!("{}: {e}", work.display()))?;
     let r = Runner::from_parent()?;
     let out = work.join("tools/dmhost");
     let built = build(&r, engine, &out, game, &work.join("logs"))?;
+    font(engine, &work)?;
     Ok(format!(
         "{}{}",
         out.display(),
@@ -331,6 +363,28 @@ mod tests {
         assert_eq!(suffix("a."), "");
         assert_eq!(suffix("x.tar.inc"), ".inc");
         assert!(code_bytes(b"not a mach-o").is_none());
+    }
+
+    /// The font step writes `font/nintendo_ext.ttf` and a key, and leaves both alone while the script is unchanged.
+    #[test]
+    fn font_step_makes_then_reuses() {
+        if !Path::new(crate::ios::extfont::LETTER_FONT).is_file() {
+            return;
+        }
+        let d = std::env::temp_dir().join(format!("nxb-font-step-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(d.join("engine/dm/tools")).unwrap();
+        std::fs::write(d.join("engine/dm/tools/make_ext_font.py"), "# v1\n").unwrap();
+        let (eng, work) = (d.join("engine"), d.join("work"));
+        assert!(font(&eng, &work).unwrap());
+        let ttf = work.join("font/nintendo_ext.ttf");
+        let first = std::fs::read(&ttf).unwrap();
+        assert!(first.len() > 1000 && work.join("font/nintendo_ext.key").is_file());
+        assert!(!font(&eng, &work).unwrap());
+        assert_eq!(std::fs::read(&ttf).unwrap(), first);
+        std::fs::write(d.join("engine/dm/tools/make_ext_font.py"), "# v2\n").unwrap();
+        assert!(font(&eng, &work).unwrap());
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     /// Oracle: `NXB_ORACLE_ENGINE`, `NXB_ORACLE_GAME` and `NXB_ORACLE_HOST` (a `dmhost` the NSP script's

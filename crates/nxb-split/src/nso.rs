@@ -17,11 +17,8 @@ pub fn image(d: &[u8]) -> Result<Vec<u8>, SplitError> {
         return Err(err("not an NSO (or an NRO, not read yet)".into()));
     }
     let flags = u32le(d, 0xc);
-    if flags & (1 << 6) != 0 {
-        return Err(SplitError::Unsupported(
-            "zstd-compressed NSO segments".into(),
-        ));
-    }
+    // ZBIC (flag bit 7, system 22.0.0 on): the compressed segments are Nintendo's zstd variant
+    let zbic = flags & (1 << 7) != 0;
     let stored: Vec<(usize, usize, usize)> = (0..3)
         .map(|i| {
             (
@@ -45,7 +42,16 @@ pub fn image(d: &[u8]) -> Result<Vec<u8>, SplitError> {
         let raw = d
             .get(fo..fo + c)
             .ok_or_else(|| err(format!("NSO segment {i} past the end of the file")))?;
-        let seg = if flags >> i & 1 != 0 {
+        let seg = if flags >> i & 1 != 0 && zbic {
+            let v = nxb_codec::zbic::decompress(raw, sz).map_err(SplitError::Format)?;
+            if v.len() != sz {
+                return Err(err(format!(
+                    "NSO segment {i} decompresses to {} bytes, not {sz}",
+                    v.len()
+                )));
+            }
+            v
+        } else if flags >> i & 1 != 0 {
             crate::lz4::block(raw, sz)?
         } else {
             raw.to_vec()
