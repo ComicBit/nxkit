@@ -2,6 +2,26 @@
 
 All notable changes are in this file. The format follows Keep a Changelog. Versions follow Semantic Versioning.
 
+## 0.6.3
+
+### Fixed
+
+- `nxb build` stopped in the Mac shader step with "own front end: .../data/own-front: No such file or directory" in every release binary.
+  The default verdicts folder is a path on the build machine, and the step read it as a verdict file.
+- Without an own-identical allow list for this front end and toolchain, the own front end stays on and only the raw path runs, as the README says.
+  Before, a missing list turned off all own tiers, and Apple's front end made every library. A verdict file given with `--own-front <file>` must still exist.
+- Measured on one title (16,268 shaders, cold store, M2 Max): the shader step took 5.2 minutes with the raw path and 10.3 minutes without it.
+  The shader step and the pipeline archive together took 7.3 minutes instead of 11. The pipeline archive is 7 % larger.
+  The game looked the same in a check by eye. This is not a GPU test.
+- The vertex variants step their loops with `+= 1` instead of `++`. The own front end rejects `++` and `--`, so the raw path sent these shaders to Apple.
+  `TRANSLATOR_ID` is `msl-2.3`, so the store translates the shaders again.
+- The translator writes the helper functions with every callee before its callers and without prototypes. The own front end rejects prototypes.
+  Prototypes stay only when the calls form a cycle.
+- The own front end accepts `#pragma clang fp contract(off)` at file scope and at the start of a block. It writes no `llvm.fmuladd` where the pragma is in effect, as clang does.
+  On 2 shaders with the pragma, the IR after `air-opt -O1` had the same counts of `fmuladd`, `fadd` and `fmul` as Apple's front end. `air_front::FORMAT` is 7.
+- A scan of all 31,433 translated libraries of one title found 11,729 rejects by the own front end: 10,148 with `++`, 1,016 with prototypes and 867 with the pragma.
+  63 rejects remain (`front_facing`, `point_coord`, a `threadgroup` value and `texture2d_ms`).
+
 ## 0.6.2
 
 ### Changed
