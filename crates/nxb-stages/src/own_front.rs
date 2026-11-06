@@ -1,4 +1,4 @@
-//! The optional own front end for `build` (off unless `--own-front <verdicts>` is given).
+//! The own front end for `build` (on by default, `--own-front off` or `NXB_OWN_FRONT=0` turns it off).
 //!
 //! A shader whose MSL has an allowed verdict goes through `nxb_tool::airfront` (in-process front, `air-opt`, `metallib`).
 //! every other shader, every reject and every own failure goes to Apple's `metal -c` + `metallib`. The cache keys carry
@@ -14,7 +14,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// Settings of the own front end.
 #[derive(Clone, Debug)]
 pub struct OwnFrontConfig {
-    /// The JSONL verdict file (`source_sha256`, `verdict`).
+    /// The JSONL verdict file (`source_sha256`, `verdict`), or a verdicts folder before [`resolve`].
+    /// An empty path is no verdict list: the identical path takes no shader and only the raw tier runs.
     pub verdicts: PathBuf,
     /// Verdicts that select the own front end (default `own-identical`).
     pub allow: Vec<String>,
@@ -64,38 +65,43 @@ pub fn resolve(
     if std::env::var(KILL_SWITCH).is_ok_and(|v| v == "0") {
         return (None, format!("own front end off ({KILL_SWITCH}=0)"));
     }
-    let raw = crate::own_raw::mode().1;
-    if !cfg.verdicts.is_dir() {
+    let (raw_mode, raw) = crate::own_raw::mode();
+    // The verdicts folder holds the identical path's list for this front end and toolchain. The default folder is a
+    // path of the build machine and is missing in a release binary. Without a list only the raw tier runs.
+    let file = if cfg.verdicts.is_dir() {
+        let Some(id) = front_id() else {
+            return (
+                None,
+                "own front end off (built without the air-front feature)".into(),
+            );
+        };
+        cfg.verdicts
+            .join(&id)
+            .join(format!("{}.tsv", toolchain_tag(compiler_id)))
+    } else if cfg.verdicts == Path::new(DATA_DIR) {
+        PathBuf::new()
+    } else {
+        // a verdict file the caller gave: a wrong path fails the build instead of turning the identical path off
         let note = format!(
             "own front end on, verdicts {}; {raw}",
             cfg.verdicts.display()
         );
         return (Some(cfg.clone()), note);
-    }
-    let Some(id) = front_id() else {
-        return (
-            None,
-            "own front end off (built without the air-front feature)".into(),
-        );
     };
-    let file = cfg
-        .verdicts
-        .join(&id)
-        .join(format!("{}.tsv", toolchain_tag(compiler_id)));
     if file.is_file() {
         let mut c = cfg.clone();
         c.verdicts = file.clone();
-        (
+        return (
             Some(c),
             format!("own front end on, verdicts {}; {raw}", file.display()),
-        )
-    } else {
-        let note = format!(
-            "own front end off: no verdicts for {id} and this toolchain ({} missing)",
-            file.display()
         );
-        (None, note)
     }
+    if raw_mode.is_none() {
+        return (None, format!("own front end off: no verdicts and {raw}"));
+    }
+    let mut c = cfg.clone();
+    c.verdicts = PathBuf::new();
+    (Some(c), format!("own front end on, no verdicts; {raw}"))
 }
 
 /// The Mac compiler identity as the build computes it (resolves `metal` and `metallib` through xcrun).
@@ -178,8 +184,11 @@ impl OwnFront {
         resolver: &Resolver,
     ) -> Result<OwnFront, String> {
         let allow: Vec<&str> = cfg.allow.iter().map(String::as_str).collect();
-        let text =
-            std::fs::read(&cfg.verdicts).map_err(|e| format!("{}: {e}", cfg.verdicts.display()))?;
+        let text = if cfg.verdicts.as_os_str().is_empty() {
+            Vec::new()
+        } else {
+            std::fs::read(&cfg.verdicts).map_err(|e| format!("{}: {e}", cfg.verdicts.display()))?
+        };
         let verdicts =
             nxb_tool::airfront::Verdicts::parse(&String::from_utf8_lossy(&text), &allow)?;
         let air_opt = tools
@@ -344,4 +353,39 @@ pub fn compile_link(
         .link(&air, io)
         .map_err(|e| format!("metallib failed: {e}"))?;
     Ok((lib, c, l))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn without_verdicts_only_the_raw_tier_runs() {
+        if Path::new(DATA_DIR).is_dir() || std::env::var_os(KILL_SWITCH).is_some() {
+            eprintln!("skipped: this tree has verdicts or the environment sets {KILL_SWITCH}");
+            return;
+        }
+        let (cfg, note) = resolve(Some(&default_config()), "id");
+        match crate::own_raw::mode().0 {
+            Some(_) => {
+                let cfg = cfg.expect(&note);
+                assert!(cfg.verdicts.as_os_str().is_empty(), "{note}");
+                assert!(note.starts_with("own front end on, no verdicts"), "{note}");
+            }
+            None => assert!(cfg.is_none(), "{note}"),
+        }
+    }
+
+    #[test]
+    fn a_given_verdicts_path_stays_on() {
+        if std::env::var(KILL_SWITCH).is_ok_and(|v| v == "0") {
+            return;
+        }
+        let c = OwnFrontConfig {
+            verdicts: PathBuf::from("/nonexistent/verdicts.tsv"),
+            allow: vec!["own-identical".into()],
+        };
+        let (cfg, _) = resolve(Some(&c), "id");
+        assert_eq!(cfg.map(|c| c.verdicts), Some(c.verdicts));
+    }
 }

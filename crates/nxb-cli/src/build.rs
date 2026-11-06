@@ -47,7 +47,7 @@ pub(crate) fn main(args: &[String], out: &mut dyn Write, err: &mut dyn Write) ->
         manifest: Vec::new(),
         partial: false,
         ios_out: opt.get("ios").map(PathBuf::from),
-        // on by default (own-identical, the shipped verdicts).`--own-front off` or NXB_OWN_FRONT=0 turns it off
+        // on by default (the raw tier, and own-identical shaders when verdicts exist). `--own-front off` or NXB_OWN_FRONT=0 turns it off
         own_front: match opt.get("own-front").map(String::as_str) {
             Some("off") => None,
             v => Some(nxb_stages::own_front::OwnFrontConfig {

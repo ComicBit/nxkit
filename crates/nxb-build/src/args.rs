@@ -43,7 +43,7 @@ pub struct Args {
     pub companion: Option<PathBuf>,
     /// Worker threads.
     pub threads: usize,
-    /// `--own-front on|off|<verdicts>`: the own front end (default on: the shipped own-identical verdicts.
+    /// `--own-front on|off|<verdicts>`: the own front end (default on: the raw tier, and own-identical shaders when verdicts exist.
     /// `NXB_OWN_FRONT=0` turns it off).
     pub own_front: String,
     /// `--also-ios`: the iOS shader libraries too, from the same translation (`<work>/shader/ios/b-<V>`, the NSP
