@@ -44,6 +44,7 @@ pub fn dispatch(ctx: &mut EmitterContext<'_, '_>, e: AEmit) -> Result<(), String
         AFrnd => float::frnd(ctx),
         AF2f => float::f2f(ctx),
         AF2fp => float::f2fp(ctx),
+        AF2ip => float::f2ip(ctx),
         AFswzadd => float::fswzadd(ctx),
         AHadd2 => half::hadd2(ctx),
         AHmul2 => half::hmul2(ctx),

@@ -415,6 +415,39 @@ pub(super) fn f2fp(ctx: &mut Ctx) -> R {
     Ok(())
 }
 
+/// F2IP.U8 Rd, a, b: a and b as saturated bytes, a in byte 1 and b in byte 0.
+pub(super) fn f2ip(ctx: &mut Ctx) -> R {
+    let x = x(ctx);
+    if x.bits(72, 78) != 4 || x.rc() != RZ {
+        return Err(fail(ctx, "F2IP form"));
+    }
+    let (a, b) = second(ctx, &x, false, true, false)?;
+    let mode = RoundMode2(x.bits(78, 80));
+    let u = is_uniform(ctx);
+    let byte = |ctx: &mut Ctx, f: Opd| {
+        let f = match mode {
+            RoundMode2::Round => ctx.fp_round(f),
+            RoundMode2::Floor => ctx.fp_floor(f),
+            RoundMode2::Ceil => ctx.fp_ceiling(f),
+            _ => ctx.fp_truncate(f),
+        };
+        let zero = cf(ctx, 0.0);
+        let top = cf(ctx, 255.0);
+        let lo = ctx.fp_maximum(f, zero);
+        let clamped = ctx.fp_minimum(lo, top);
+        ctx.fp32_convert_to_u32(clamped)
+    };
+    let fa = float(ctx, &a)?;
+    let fb = float(ctx, &b)?;
+    let high = byte(ctx, fa);
+    let low = byte(ctx, fb);
+    let k = c(ctx, 8);
+    let shifted = ctx.shift_left(high, k);
+    let v = ctx.bitwise_or(shifted, low);
+    set(ctx, &x, v, u);
+    Ok(())
+}
+
 pub(super) fn fswzadd(ctx: &mut Ctx) -> R {
     let x = x(ctx);
     let a = gpr(ctx, x.ra());
