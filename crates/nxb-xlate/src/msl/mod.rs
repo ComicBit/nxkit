@@ -28,6 +28,9 @@ pub mod inst_tex;
 pub mod io;
 pub mod prelude;
 pub mod refl;
+pub mod spill;
+#[cfg(test)]
+mod gaps_tests;
 #[cfg(test)]
 mod tests;
 pub mod types;
