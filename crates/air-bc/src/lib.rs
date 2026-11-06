@@ -8,6 +8,7 @@
 
 pub mod ast;
 pub mod bits;
+pub mod fx;
 pub mod opt;
 pub mod parse;
 pub mod split;

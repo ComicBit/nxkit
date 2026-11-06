@@ -1,7 +1,7 @@
 //! LLVM 14 era bitcode writer (typed pointers, relative value ids, string table) for the parsed
 //! module. Records are written unabbreviated, local values and blocks have no names.
 
-use std::collections::HashMap;
+use crate::fx::HashMap;
 
 use crate::ast::*;
 use crate::bits::{signed, Bits};
@@ -231,7 +231,7 @@ fn is_const(v: &Val) -> bool {
 /// Writes the module as bitcode.
 pub fn write(m: &Module) -> R<Vec<u8>> {
     let mut types = Types {
-        ids: HashMap::new(),
+        ids: HashMap::default(),
         recs: Vec::new(),
         named: m.types.iter().cloned().collect(),
         visiting: Vec::new(),
@@ -241,8 +241,8 @@ pub fn write(m: &Module) -> R<Vec<u8>> {
         types.id(&Ty::Named(n.clone()))?;
     }
     // module value ids: globals, then functions
-    let mut gids: HashMap<String, u64> = HashMap::new();
-    let mut gtys: HashMap<String, Ty> = HashMap::new();
+    let mut gids: HashMap<String, u64> = HashMap::default();
+    let mut gtys: HashMap<String, Ty> = HashMap::default();
     for g in &m.globals {
         gids.insert(g.name.clone(), gids.len() as u64);
         gtys.insert(g.name.clone(), Ty::Ptr(Box::new(g.ty.clone()), g.space));
@@ -722,7 +722,7 @@ fn function_code(
 ) -> R<FuncCode> {
     // value numbering: module values, args, function constants, instructions
     let nargs = f.params.len() as u64;
-    let mut locals: HashMap<String, (u64, Ty)> = HashMap::new();
+    let mut locals: HashMap<String, (u64, Ty)> = HashMap::default();
     for (k, p) in f.params.iter().enumerate() {
         if let Some(n) = &p.name {
             locals.insert(n.clone(), (module_vals + k as u64, p.ty.clone()));

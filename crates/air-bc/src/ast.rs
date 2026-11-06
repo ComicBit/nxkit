@@ -32,7 +32,7 @@ pub enum Ty {
 }
 
 /// A value operand.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Val {
     /// `%x`
     Local(String),
@@ -79,7 +79,7 @@ pub struct Inst {
 }
 
 /// Operations.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Op {
     /// alloca T, align A
     Alloca(Ty, u32),
