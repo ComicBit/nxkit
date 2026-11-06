@@ -44,6 +44,7 @@ the library suffixes and the fields of `_b.json`. The facts in `_b.json` come fr
 `msl/entry.rs` writes one function around a translated body. `EntryName` names it: the function name, its `Form`, the return type, the stage input (`StageIn`), extra `Param`s and prologue statements. The form is an entry function or a `static` body function `dm_body_<name>` with the parameters but no attributes.
 The shared memory of a body function is a parameter, because its caller owns it. `msl/library.rs` builds the libraries: `_b` with its reflection, `_bv` and `_bp` for a vertex shader, and `_bf` and the side units for a pixel shader.
 A variant writes its entries with `EntryName { field: .., ..EntryName::new("main0") }`.
+Pixel entries and the wrapper of a task or mesh shader call a body function. The end of a vertex entry comes from `Plan::vertex_epilogue`: the viewport mask, then the depth conversion. `main0_z` and `main0_lz` keep the depth range of the source.
 
 ## Vertex variants
 
@@ -95,6 +96,20 @@ The passes `opt/double_to_float.rs` and `xform/softfloat.rs` then lower them to 
 
 The MSL is not byte-identical to the output of the former C# translator and `spirv-cross`. GPU tests validate it.
 The own front end and the Apple tools compile the MSL as before.
+
+## Geometry, task and mesh shaders
+
+A geometry shader runs as a compute kernel. One job of stage `gs` gives the libraries `_b` (a copy of `_bg0`), `_bg0` to `_bg4` and `_bgv`. Each has its own `.json`.
+The kernels `_bg0` to `_bg4` are one per input topology. They write the output vertices and the index buffer. The library `_bgv` draws that output.
+The `.json` of a kernel has the member `geometry` (`vertices`, `invocations`, `output`, `index_stride`, `stride` in words). The `.json` of `_bgv` has `geometry_reader`, `geometry_output` and `entry_z`.
+
+A task or mesh shader is a job of stage `cs` with the member `mesh_stage`. The code has no SPH. The job carries `stage_memory`, `shared` and `local` as the engine lays them out,
+and the translator refuses a job whose layout differs. The body of the shader is one function. The wrapper is a Metal `[[object]]` function for `ts` and a `[[mesh]]` function for `ms`.
+The `.json` has `stage` `ts` or `ms`, `msl_entry_kind` null and `mesh_stage` (`kind`, `threads`, `payload`, `task`). A mesh function also has `entry_z`.
+The translator fails with `mesh stage failed` when the shader uses shared memory of its own or the sizes do not fit Metal.
+
+Tessellation, transform feedback and vertex as compute are not ported. Each gives `Failure` with the reason `not ported` and a detail that names the stage.
+The lean geometry kernels `_bl0`, `_bl1` and `_bl3` are not emitted.
 
 ## Open points
 

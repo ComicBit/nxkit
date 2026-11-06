@@ -3,13 +3,13 @@
 //! A vertex shader adds `_bv` and `_bp`. A pixel shader adds `_bf` and the side units. The entries of each stage are
 //! written by `variant::vertex` and `variant::pixel`. `entry` writes the functions.
 
-use super::args::{self};
+use super::args;
 use super::emit::{Em, Options, R, Shader};
-use super::entry::{EntryName, StageIn, entry_text, shared_params};
+use super::entry::{EntryName, Form, StageIn, entry_text, params, shared_params};
 use super::refl::Reflection;
 use super::usage::{self, Usage};
 use super::variant::pixel::Built;
-use super::{Context, Library, Translated, facts, io, prelude, variant};
+use super::{Context, Library, Translated, facts, io, mesh, prelude, variant};
 use crate::translation::msl_entry::Structured;
 use nxb_pyjson::Value;
 use std::fmt::Write;
@@ -56,17 +56,27 @@ fn build_with(s: &Structured, ctx: &Context<'_>, opt: &Options, ints: &[u32]) ->
     let shader = match job.stage.as_str() {
         "vs" => Shader::Vertex,
         "ps" => Shader::Fragment,
-        "cs" => Shader::Compute,
+        "cs" | "gs" => Shader::Compute,
         other => return Err(format!("unported: {other} stage")),
     };
-    if s.props.definitions.transform_feedback_enabled {
-        return Err("unported: transform feedback".into());
+    // A task or mesh shader is a compute job, and its tables and reflection are those of its own stage.
+    let stage_name = job
+        .mesh_stage
+        .as_ref()
+        .map_or(job.stage.as_str(), |m| m.kind.as_str());
+    if job.tf || s.props.definitions.transform_feedback_enabled {
+        let what = if job.stage == "vs" {
+            "vertex"
+        } else {
+            stage_name
+        };
+        return Err(format!("unported: transform feedback of a {what} shader"));
     }
     if shader == Shader::Compute && tg_bytes(s) > i64::from(super::abi::TG_MAX) {
         return Err("unported: threadgroup memory past 32 KB (tg_spill)".into());
     }
     let usage: Usage = usage::collect(&s.info);
-    let res = args::build(props, &s.program, &usage, &job.stage, &s.notes, &s.fetch1d)?;
+    let res = args::build(props, &s.program, &usage, stage_name, &s.notes, &s.fetch1d)?;
     let base_instance = shader == Shader::Vertex
         && res
             .cbs
@@ -149,9 +159,24 @@ fn build_with(s: &Structured, ctx: &Context<'_>, opt: &Options, ints: &[u32]) ->
                 Err(e) => notes.push(format!("no fetch variant: {e}")),
             }
         }
-        (None, _) => {
-            entries.text = entry_text(s, &EntryName::new("main0"), shader, &res, &plan, main)?;
-        }
+        (None, _) => match &job.mesh_stage {
+            Some(m) => {
+                let body = EntryName {
+                    form: Form::Body { inline: true },
+                    ..EntryName::new("main0")
+                };
+                entries.text = entry_text(s, &body, shader, &res, &plan, main)?;
+                let words = (job.shared.max(0) + 3) / 4;
+                let shared = s.props.properties.shared_memories.len();
+                entries.text.push('\n');
+                entries
+                    .text
+                    .push_str(&mesh::wrap(m, &params(&res, &plan), shared, words)?);
+            }
+            None => {
+                entries.text = entry_text(s, &EntryName::new("main0"), shader, &res, &plan, main)?;
+            }
+        },
     }
     let msl = assemble(
         s,
@@ -193,13 +218,13 @@ fn build_with(s: &Structured, ctx: &Context<'_>, opt: &Options, ints: &[u32]) ->
         dm_ctl: job.key.clone(),
         source: ctx.source.clone(),
         pc_paired: ctx.pc_paired.to_string(),
-        stage: job.stage.clone(),
+        stage: stage_name.to_string(),
         entry: "main0".into(),
         msl_entry_kind: kind(shader).into(),
         threadgroup_size: (shader == Shader::Compute).then(|| local_size(s)),
         c1: facts::hex(&job.c1),
         notes,
-        drv_unfillable: super::refl::unfillable(&reads, &job.stage),
+        drv_unfillable: super::refl::unfillable(&reads, stage_name),
         drv_reads: reads,
         bindings: res.bindings.clone(),
         vertex_inputs: facts::vertex_inputs(&plan),
@@ -209,6 +234,9 @@ fn build_with(s: &Structured, ctx: &Context<'_>, opt: &Options, ints: &[u32]) ->
     };
     for (k, v) in entries.extra {
         r.set_extra(&k, v);
+    }
+    if let Some(m) = &job.mesh_stage {
+        mesh::reflect(m, &mut r);
     }
     r.raster = if shader == Shader::Vertex {
         super::facts_vs::raster(&s.info, props, &plan, &res)
@@ -220,7 +248,7 @@ fn build_with(s: &Structured, ctx: &Context<'_>, opt: &Options, ints: &[u32]) ->
     varyings.sort_by_key(|v| v.location);
     Ok(Translated {
         key: job.key.clone(),
-        stage: job.stage.clone(),
+        stage: stage_name.to_string(),
         libraries,
         inputs: super::StageInputs { varyings },
         side,

@@ -3,7 +3,9 @@
 
 use super::context::TranslatorContext;
 use super::core::structure_context;
+use super::geometry::{structure_geometry_compute, structure_geometry_reader};
 use super::pipeline::options_of;
+use crate::accessor::Accessor;
 use crate::codegen::props::Props;
 use crate::driver::{Program, retry};
 use crate::job::Job;
@@ -29,13 +31,18 @@ pub struct Structured {
 
 /// Run the front end of one job to the structured program.
 pub fn structure_job(job: &Job, code: &[u8]) -> Result<Structured, String> {
-    if job.geometry_topology.is_some() {
-        return Err("unported: geometry translation".into());
+    let geometry = job.stage == "gs";
+    if geometry && job.geometry_topology.is_none() {
+        return Err("geometry job without an input topology".into());
     }
     let r = retry(job, &|j: &Job, acc| {
         let tc = TranslatorContext::create(code, acc, options_of(j))?;
         let debug = tc.options.debug_mode;
-        let (info, props, program) = structure_context(&tc, acc, debug)?;
+        let (info, props, program) = if geometry {
+            structure_geometry_compute(&tc, acc, debug)?
+        } else {
+            structure_context(&tc, acc, debug)?
+        };
         let fp64 = uses_float64(&info);
         Ok(((info, props), program, fp64))
     })?;
@@ -47,5 +54,24 @@ pub fn structure_job(job: &Job, code: &[u8]) -> Result<Structured, String> {
         program: r.program,
         notes: r.notes,
         fetch1d: r.fetch1d,
+    })
+}
+
+/// Run the front end of the vertex shader that draws the vertices of a geometry compute job
+/// (`GenerateVertexPassthroughForCompute`). The reader has no textures, so it needs no retry.
+pub fn structure_geometry_reader_job(job: &Job, code: &[u8]) -> Result<Structured, String> {
+    let mut acc = Accessor::new(job);
+    let tc = TranslatorContext::create(code, &mut acc, options_of(job))?;
+    let debug = tc.options.debug_mode;
+    let (info, props) = structure_geometry_reader(&tc, &mut acc, debug)?;
+    let mut reader = job.clone();
+    reader.stage = "vs".into();
+    Ok(Structured {
+        job: reader,
+        info,
+        props,
+        program: Program::default(),
+        notes: acc.notes.clone(),
+        fetch1d: BTreeSet::new(),
     })
 }

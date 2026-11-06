@@ -26,7 +26,17 @@ pub fn structure_geometry_compute(
     debug_mode: bool,
 ) -> Result<(StructInfo, Props, Program), String> {
     if tc.stage() != Stage::Geometry {
-        return Err("unported: vertex as compute for this stage".into());
+        let kind = match tc.stage() {
+            Stage::Vertex => "a vertex shader",
+            Stage::TessellationControl => "a tessellation control shader",
+            Stage::TessellationEvaluation => "a tessellation evaluation shader",
+            Stage::Fragment => "a fragment shader",
+            Stage::Compute => "a compute shader",
+            Stage::Geometry => "a geometry shader",
+        };
+        return Err(format!(
+            "unported: vertex as compute of {kind}, only geometry shaders run as compute"
+        ));
     }
     let mut t = run_to_xform_mode(tc, acc, true)?;
     let defs = definitions_for(&compute_definitions(tc, acc));

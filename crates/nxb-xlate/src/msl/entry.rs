@@ -9,11 +9,9 @@ use super::facts_ps::{self, KILL};
 use super::io;
 use super::types::{msl_type, scalar};
 use crate::codegen::props::MemoryDef;
+use crate::structured::types::AggType;
 use crate::translation::msl_entry::Structured;
 use std::fmt::Write;
-
-/// The statement that ends a vertex entry in the depth convention of GL: the depth range is converted to Metal's.
-pub const ZFIX: &str = "out.gl_Position.z = fma(out.gl_Position.z, 0.5, out.gl_Position.w * 0.5);";
 
 /// One parameter of a function.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -134,9 +132,18 @@ fn kind(s: Shader) -> &'static str {
     }
 }
 
-/// The element type and length of a memory.
-fn memory(m: &MemoryDef) -> R<(String, i32)> {
-    Ok((msl_type(scalar(m.ty))?, m.array_length.max(1)))
+/// The element type of a memory and its length, `None` for a scalar.
+fn memory(m: &MemoryDef) -> R<(String, Option<i32>)> {
+    let len = m.ty.has(AggType::ARRAY).then(|| m.array_length.max(1));
+    Ok((msl_type(scalar(m.ty))?, len))
+}
+
+/// The declaration of a memory variable and the parameter that passes it on, without the address space.
+fn memory_decl(ty: &str, name: &str, len: Option<i32>) -> (String, String) {
+    match len {
+        Some(n) => (format!("{ty} {name}[{n}]"), format!("{ty} (&{name})[{n}]")),
+        None => (format!("{ty} {name}"), format!("{ty}& {name}")),
+    }
 }
 
 /// The parameters every function of the program takes besides its own.
@@ -166,16 +173,16 @@ pub(super) fn shared_params(
     }
     for m in &s.props.properties.local_memories {
         let (t, n) = memory(m)?;
-        p.params.push(d(
-            &format!("thread {t} (&lm{})[{n}]", m.id),
-            &format!("lm{}", m.id),
-        ));
+        let name = format!("lm{}", m.id);
+        p.params
+            .push(d(&format!("thread {}", memory_decl(&t, &name, n).1), &name));
     }
     for m in &s.props.properties.shared_memories {
         let (t, n) = memory(m)?;
+        let name = format!("sm{}", m.id);
         p.params.push(d(
-            &format!("threadgroup {t} (&sm{})[{n}]", m.id),
-            &format!("sm{}", m.id),
+            &format!("threadgroup {}", memory_decl(&t, &name, n).1),
+            &name,
         ));
     }
     Ok(p)
@@ -231,7 +238,8 @@ pub(super) fn entry_text(
             let mut decls: Vec<String> = ps.iter().map(|p| p.decl.clone()).collect();
             for m in &s.props.properties.shared_memories {
                 let (ty, n) = memory(m)?;
-                decls.push(format!("threadgroup {ty} (&sm{})[{n}]", m.id));
+                let p = memory_decl(&ty, &format!("sm{}", m.id), n).1;
+                decls.push(format!("threadgroup {p}"));
             }
             let inline = if inline {
                 " inline __attribute__((always_inline))"
@@ -259,15 +267,22 @@ pub(super) fn entry_text(
         for p in &plan.pads {
             let _ = writeln!(t, "    {}", p.init());
         }
+        if plan.viewport_mask {
+            let _ = writeln!(t, "    uint {} = 1u;", io::VIEWPORT_MASK);
+        }
     }
     for m in &s.props.properties.local_memories {
         let (ty, n) = memory(m)?;
-        let _ = writeln!(t, "    {ty} lm{}[{n}];", m.id);
+        let _ = writeln!(t, "    {};", memory_decl(&ty, &format!("lm{}", m.id), n).0);
     }
     if !body_fn {
         for m in &s.props.properties.shared_memories {
             let (ty, n) = memory(m)?;
-            let _ = writeln!(t, "    threadgroup {ty} sm{}[{n}];", m.id);
+            let _ = writeln!(
+                t,
+                "    threadgroup {};",
+                memory_decl(&ty, &format!("sm{}", m.id), n).0
+            );
         }
     }
     t.push_str(body);
@@ -277,7 +292,9 @@ pub(super) fn entry_text(
         return Ok(t);
     }
     if shader == Shader::Vertex {
-        let _ = writeln!(t, "    {ZFIX}");
+        for l in plan.vertex_epilogue(true) {
+            let _ = writeln!(t, "    {l}");
+        }
     }
     if has_out {
         t.push_str("    return out;\n");
