@@ -6,7 +6,10 @@
 //! [`refl::Reflection`] writes it. Refer to `docs/translator.md`.
 
 pub mod abi;
+pub mod handles;
 pub mod refl;
+pub mod types;
+pub mod usage;
 pub mod walk;
 
 use crate::job::Job;
