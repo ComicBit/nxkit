@@ -299,13 +299,13 @@ A game that has no profile in the engine gets a survey. `nxb build` examines the
 and a provisional profile, and then builds with this profile. The profile is in `<work>/profile/<title ID>/`, or in `D/<title ID>/` with `--profile-out D`.
 `--provisional` does the same for a game that has a profile. The app name then ends with `-provisional`.
 `--survey-only` writes `survey.md` and stops with exit code 0. Without a profile, it writes no profile.
+The survey report has the census of the rewrite sites (`nxb_rewrite::census`) of every module except `rtld`.
 
 Some checks of the reference script start the game on the Mac. `nxb build` does not start the game. These checks are not ported:
 
 - The heap check and the region check. A game that has one of them stops with exit code 4. The build writes the profile first. The message names `--no-heap-check`.
   With `--no-heap-check`, the build omits the two checks and keeps the memory layout that the survey guessed. **A run of the game did not check this layout.**
 - The shader captures (Vulkan, OpenGL, `glslc`, Unreal decode and others). The build writes a `[RED]` line for each capture that it leaves out.
-- The census of the rewrite sites in the survey report. The report says that it did not run.
 - The source checks at build time (Unreal paks, Frostbite headers).
 
 `nxb profile` has four commands: `guess`, `show`, `check` and `manifest`. `guess` writes the values of the survey, `show` shows a profile,

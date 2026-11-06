@@ -17,6 +17,8 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 - `nxb extract --program <title ID>` picks the Program NCA of one program of a multi-program application.
 - The finder `ue_region` in `nxb rewrite`. A main module with `SwitchVirtualAddressSpaceSize` no longer gives exit code 4.
   The output is byte-identical to `dm/tools/ue_region.py` on 13 synthetic main modules (`crates/nxb-rewrite/tests/region.rs`).
+- The census of the rewrite sites (`dm/tools/insn_census.py`) as `nxb_rewrite::census`. The survey report of `nxb build` and `--census` of `nxb profile guess` have it now.
+  The output is identical to the script on 3 synthetic modules. The `--sites` file of the script is not ported.
 
 ## 0.5.1
 

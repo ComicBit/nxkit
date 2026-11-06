@@ -123,7 +123,7 @@ limits it. The own front end is not byte-identical in the validated mode.
 - XCI, merged packages, dump folders, NSZ block mode and DLC were checked with synthetic files only. One real NSZ file was checked. `nxb build` does not split the shader content of DLC.
 - `nxb build` was run with a registered profile on one title (Mac app). A game without a profile gets a provisional profile. The heap check, the region check and the shader captures start the game, and they are not ported.
   Without `--no-heap-check`, such a game stops with exit code 4. With it, the memory layout is a guess. Nobody checked it with a run. The shader step and the stages after it were **not** run for the Switch 2 package.
-- Not ported in `nxb build`: the census of the rewrite sites and the source checks of Unreal paks and Frostbite headers.
+- Not ported in `nxb build`: the source checks of Unreal paks and Frostbite headers.
   `--platform mac` (the development build) ends with the command that runs the game on the Mac. It does not run the pipeline prebuild, which starts the host. It does not set `DM_JIT_CAPTURE` either.
   `--program N` and the other programs of a multi-program profile are built for `--platform mac` and `mac-app`. They were checked with synthetic files only. An iOS build of a profile with `programs` packs the first program only. `--allow-shader-regressions` has no effect. `--mac-sign` was not run with a real identity.
 - iOS: no device test. The IPA writer is serial.
