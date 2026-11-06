@@ -264,6 +264,15 @@ mod tests {
     }
 
     #[test]
+    fn raw_library_with_code_after_return() {
+        // the second return is an unreachable block that stores to the promoted return slot
+        let msl = b"#include <metal_stdlib>\nusing namespace metal;\nstatic int pick(int a, float b)\n{\n    float s = b * 2.0;\n    if (s > 1.0)\n    {\n        return a;\n    }\n    return int(s);\n    return 0;\n}\nfragment float4 f(float4 p [[position]])\n{\n    return float4(float(pick(int(p.x), p.y)));\n}\n";
+        let lib = build_raw(msl, &Target::macos()).expect("raw library");
+        let parsed = air_lib::parse(&lib).expect("metallib");
+        assert_eq!(parsed.functions[0].name(), b"f");
+    }
+
+    #[test]
     fn rejects_garbage() {
         assert!(compile(b"this is not msl {", &Target::macos()).is_err());
     }

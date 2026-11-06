@@ -8,6 +8,14 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 - `airc rawcheck` writes the reason of a reject or a failed build (`error`) and the SHA-256 of each library (`lib_sha256`).
 
+### Fixed
+
+- The raw path failed with "unknown %v1" for a function with code after its last `return`.
+  `mem2reg` removed the variable but kept its loads and stores in the block that no path reaches.
+  These blocks now lose their accesses to promoted variables, and their loads read `undef`.
+  On one title 180 shaders went to Apple's `metal` for this reason, on another 1,017. All of them now take the raw path and pass `air-validate`.
+  The other raw libraries stay byte-identical.
+
 ## 0.6.4
 
 ### Changed
