@@ -5,7 +5,7 @@ use super::emit::{Em, Options, R, Shader, Shared};
 use super::refl::Reflection;
 use super::types::{msl_type, scalar};
 use super::usage::{self, Usage};
-use super::{Context, Library, Translated, facts, io, prelude};
+use super::{Context, Library, Translated, facts, io, prelude, variant};
 use crate::codegen::props::MemoryDef;
 use crate::translation::msl_entry::Structured;
 use std::fmt::Write;
@@ -114,6 +114,9 @@ fn entry_text(
         for m in &plan.vec4_outputs {
             let _ = writeln!(t, "    out.{m} = float4(0.0, 0.0, 0.0, 1.0);");
         }
+        for p in &plan.pads {
+            let _ = writeln!(t, "    {}", p.init());
+        }
     }
     for m in &s.props.properties.local_memories {
         let (ty, n) = memory(m)?;
@@ -166,7 +169,7 @@ pub fn build(s: &Structured, ctx: &Context<'_>, opt: &Options) -> R<Translated> 
             .values()
             .any(|b| b.name == "vp_c0" && usage.base_inst.contains(&b.def.binding));
     let lane_zero = shader == Shader::Vertex && opt.visibility_counter;
-    let plan = io::build(
+    let mut plan = io::build(
         &s.info,
         &s.props,
         shader,
@@ -174,6 +177,11 @@ pub fn build(s: &Structured, ctx: &Context<'_>, opt: &Options) -> R<Translated> 
         base_instance,
         lane_zero,
     )?;
+    let vs_pad = if shader == Shader::Vertex {
+        variant::vertex_pad::apply(&mut plan, ctx.partners)
+    } else {
+        Vec::new()
+    };
     let shared = shared_params(s, &res, &plan, shader)?;
     let mut em = Em::new(&s.info, &s.props, &res, opt, &shared, &plan, shader);
     let mut bodies = Vec::new();
@@ -229,6 +237,7 @@ pub fn build(s: &Structured, ctx: &Context<'_>, opt: &Options) -> R<Translated> 
         drv_reads: reads,
         bindings: res.bindings.clone(),
         vertex_inputs: facts::vertex_inputs(&plan),
+        vs_pad,
         ..Reflection::default()
     };
     r.raster = facts::raster(shader, &plan, usage.discard, &r.bindings);
