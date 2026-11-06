@@ -1,6 +1,7 @@
 //! The translator job of one shader (port of `dmsh_build.job_for` with `vertex_ab`, `early_fragment_tests`,
 //! `tf_layout`): the code area handed to the translator, its c1 segment, and the job object of `dmsh_xlate`'s job file.
 
+use crate::mesh;
 use nxb_pyjson::Value;
 
 /// The control section's magic (`34127698` in the record).
@@ -227,11 +228,6 @@ pub fn job_for(
     if nvn2 {
         // Switch 2 (dmsh_ampere.py): Ampere code, a 0x80-byte SPH for the graphics stages, then the instructions
         // (control +0x38 long), c1 lies between control +0x40 and +0x44 of the code area.
-        if stage == "ts" || stage == "ms" {
-            return Err(JobError(format!(
-                "{key}: NVN2 task and mesh shaders are not ported yet"
-            )));
-        }
         let (a, e) = (
             u32_at(ctl, 0x40).unwrap_or(0) as usize,
             u32_at(ctl, 0x44).unwrap_or(0) as usize,
@@ -241,8 +237,27 @@ pub fn job_for(
         } else {
             Vec::new()
         };
+        let area = code.clone();
         code.truncate(u32_at(ctl, 0x38).unwrap_or(0) as usize);
         extra.push(("arch", Value::str("sm86")));
+        if stage == "ts" || stage == "ms" {
+            // A task or mesh shader is a compute job with its SPH taken off and its stage memory in shared memory.
+            let m = mesh::info(key, ctl, &area)?;
+            let (lay, size) = m.memory();
+            let refused = mesh::own_shared(sl(&code, 0x80, code.len())) || size > mesh::MAX_SHARED;
+            extra.push(("mesh_stage", m.to_value(refused)));
+            extra.push((
+                "stage_memory",
+                Value::List(lay.iter().map(|w| Value::Int(*w)).collect()),
+            ));
+            extra.push((
+                "local",
+                Value::List(vec![Value::Int(m.threads()), Value::Int(1), Value::Int(1)]),
+            ));
+            extra.push(("shared", Value::Int(size)));
+            code = sl(&code, 0x80, code.len()).to_vec();
+            stage = "cs".to_string();
+        }
         if stage == "cs" {
             let b = |o: usize| Value::Int(i64::from(ctl.get(o).copied().unwrap_or(0)));
             extra.push((
@@ -288,7 +303,7 @@ pub fn job_for(
     if !nvn2 && stage == "ps" && early_fragment_tests(ctl, &code) {
         extra.push(("early_fragment_tests", Value::Bool(true)));
     }
-    let _ = &mut stage;
+    let mesh_job = extra.iter().any(|(k, _)| *k == "mesh_stage");
     let mut j = Value::obj([
         ("key", Value::str(key)),
         ("stage", Value::str(stage)),
@@ -304,7 +319,9 @@ pub fn job_for(
     }
     j.set("debug", Value::Bool(opts.debug));
     j.set("reduced", Value::Bool(opts.reduced));
-    match facts {
+    // A task or mesh job takes its threads and memory from its control section, not from the answer table.
+    match facts.filter(|_| !mesh_job) {
+        None if mesh_job => {}
         None => j.set("no_facts", Value::Bool(true)),
         Some(Value::Object(m)) => {
             for (k, v) in m {

@@ -13,6 +13,7 @@ pub mod chain;
 
 pub mod guards;
 pub mod job;
+pub(crate) mod mesh;
 
 /// Shader keys and compile-input keys.
 pub mod keys {}

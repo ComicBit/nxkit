@@ -58,6 +58,8 @@ The step does this for each key:
 3. For each `Library`, it writes `<key><suffix>.metal`, compiles it and writes `<key><suffix>.metallib`. A library with a `Reflection` also gets `<key><suffix>.json`. The step writes `_b.json` last.
 4. When the translation has a `Side`, the step compiles `_b` and cuts it into `_b` and `_bx` at the metallib level. The cut keeps the alpha test entries and the logic op entries in `_bx`.
 5. The variant libraries `_bf`, `_bp` and `_bv` are optional. If one does not compile, the step skips it and removes its field from `_b.json`.
+6. A geometry shader (`gs`) needs no `geometry_topology` in its job. The translator makes the kernels for all input topologies, so the step writes `_b`, `_bg0` to `_bg4` and `_bgv`, each with its own `.json`.
+7. The job of an NVN2 task or mesh shader (`ts`, `ms`) has stage `cs`, the code without its 0x80 byte SPH, `mesh_stage`, `stage_memory`, `local` and `shared`. It has no answer-table members. A job whose shader has shared memory of its own, or whose stage memory is past Metal's limit, carries `refused` in `mesh_stage`.
 
 The reasons of a failure are the reason strings of the reference build scripts (`translation failed`, `metal failed` and the reasons that the translator names).
 A panic and a job that the step cannot read are `translation failed`. The step counts each reason. The run report and the `shaders done` event have the counters `xlate_hits` (translations from the store) and `xlate_refused` (an object of reasons and counts).
