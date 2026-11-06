@@ -198,3 +198,19 @@ fn metal_compiles_the_geometry_libraries() {
         );
     }
 }
+
+#[test]
+fn transform_feedback_of_a_vertex_shader_is_not_ported() {
+    let j = parse_jobs(r#"[{"key": "v", "stage": "vs", "tf": [null, null, null, null]}]"#)
+        .expect("job")
+        .remove(0);
+    let mut c: Vec<u8> = [1u32 << 10; 1]
+        .iter()
+        .flat_map(|w| w.to_le_bytes())
+        .collect();
+    c.resize(0x50, 0);
+    c.extend([0u64, RET, 0, 0].iter().flat_map(|w| w.to_le_bytes()));
+    let e = run(&j, &c).expect_err("tf");
+    assert_eq!(e.reason, "not ported");
+    assert_eq!(e.detail, "unported: transform feedback of a vertex shader");
+}

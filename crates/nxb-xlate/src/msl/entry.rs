@@ -241,7 +241,7 @@ pub fn build(s: &Structured, ctx: &Context<'_>, opt: &Options) -> R<Translated> 
         .mesh_stage
         .as_ref()
         .map_or(job.stage.as_str(), |m| m.kind.as_str());
-    if s.props.definitions.transform_feedback_enabled {
+    if job.tf || s.props.definitions.transform_feedback_enabled {
         return Err(format!(
             "unported: transform feedback of a {} shader",
             if job.stage == "vs" {
