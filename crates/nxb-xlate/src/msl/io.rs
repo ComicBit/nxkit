@@ -5,6 +5,7 @@
 
 use super::Varying;
 use super::emit::{R, Shader};
+use super::ioidx;
 use super::types::msl_type;
 use crate::codegen::props::Props;
 use crate::ir::{IoVariable, StorageKind};
@@ -77,6 +78,14 @@ pub struct Plan {
     pub depth: bool,
     /// The lane id is the constant zero (the visibility counter).
     pub lane_zero: bool,
+    /// The locations that a register indexes in the input, one member of `main0_in` each.
+    pub ia: Vec<i32>,
+    /// The locations that a register indexes in the output, one member of `main0_out` each.
+    pub oa: Vec<i32>,
+    /// The vertex shader writes a viewport mask, which becomes the viewport index.
+    pub viewport_mask: bool,
+    /// Facts about the plan that the reflection reports as notes.
+    pub notes: Vec<String>,
 }
 
 impl Plan {
@@ -116,6 +125,7 @@ impl Plan {
             IoVariable::InstanceIndex => ("gl_InstanceIndex".into(), AggType::U32),
             IoVariable::VertexId => ("(gl_VertexIndex - gl_BaseVertex)".into(), AggType::U32),
             IoVariable::InstanceId => ("(gl_InstanceIndex - gl_BaseInstance)".into(), AggType::U32),
+            IoVariable::DrawIndex => ("0u".into(), AggType::U32),
             IoVariable::BaseVertex => ("gl_BaseVertex".into(), AggType::U32),
             IoVariable::BaseInstance => ("gl_BaseInstance".into(), AggType::U32),
             IoVariable::ThreadId => (
@@ -175,6 +185,7 @@ impl Plan {
             IoVariable::FragmentOutputDepth => ("out.gl_FragDepth".into(), AggType::FP32),
             IoVariable::Layer => ("out.gl_Layer".into(), AggType::U32),
             IoVariable::ViewportIndex => ("out.gl_ViewportIndex".into(), AggType::U32),
+            IoVariable::ViewportMask => ("out.gl_ViewportIndex".into(), AggType::U32),
             other => return Err(format!("unported: output variable {}", other.0)),
         })
     }
@@ -196,7 +207,8 @@ pub fn built_in_type(v: IoVariable) -> R<AggType> {
         | IoVariable::SampleId
         | IoVariable::VertexId
         | IoVariable::VertexIndex
-        | IoVariable::ViewportIndex => AggType::S32,
+        | IoVariable::ViewportIndex
+        | IoVariable::ViewportMask => AggType::S32,
         IoVariable::FragmentCoord | IoVariable::Position => f4,
         IoVariable::PointCoord => AggType::VECTOR2 | AggType::FP32,
         IoVariable::PointSize | IoVariable::FragmentOutputDepth => AggType::FP32,
@@ -227,9 +239,6 @@ pub fn build(
     lane_zero: bool,
 ) -> R<Plan> {
     let d = &props.definitions;
-    if d.ia_indexing || d.oa_indexing {
-        return Err("unported: indexed attribute access".into());
-    }
     let mut p = Plan {
         lane_zero,
         ..Plan::default()
@@ -262,6 +271,7 @@ pub fn build(
         }
     }
     users.sort_unstable();
+    users.dedup();
     for l in &users {
         p.out_members
             .push(format!("float4 loc{l} [[user(locn{l})]];"));
@@ -300,6 +310,7 @@ pub fn build(
             p.colors = (0..=t).collect();
         }
     }
+    ioidx::finish(&mut p);
     p.out_members.sort_by_key(|m| m.contains("[[color"));
     Ok(p)
 }
@@ -312,6 +323,10 @@ fn builtin(p: &mut Plan, shader: Shader, v: IoVariable) -> R<()> {
         (Shader::Vertex, IoVariable::InstanceId) => &[INSTANCE_ID, BASE_INSTANCE],
         (Shader::Vertex, IoVariable::BaseVertex) => &[BASE_VERTEX],
         (Shader::Vertex, IoVariable::BaseInstance) => &[BASE_INSTANCE],
+        (Shader::Vertex, IoVariable::DrawIndex) => {
+            ioidx::draw_index(p);
+            return Ok(());
+        }
         (Shader::Compute, IoVariable::ThreadId) => &[Builtin {
             name: "gl_LocalInvocationID",
             ty: "uint3",
@@ -345,9 +360,29 @@ fn builtin(p: &mut Plan, shader: Shader, v: IoVariable) -> R<()> {
     Ok(())
 }
 
+/// The member of a pixel shader input at a location, with the interpolation its map names.
+pub(super) fn varying(p: &mut Plan, imap: &[u8; 4], l: i32) {
+    let iq = imap.iter().copied().find(|x| *x != 0).unwrap_or(imap[3]);
+    let (attr, interp) = match iq {
+        1 => (", flat", "flat"),
+        3 => (", center_no_perspective", "center_no_perspective"),
+        _ => ("", ""),
+    };
+    p.in_members
+        .push(format!("float4 loc{l} [[user(locn{l}){attr}]];"));
+    p.varyings.push(Varying {
+        location: l as u32,
+        msl_type: "float4".into(),
+        interpolation: interp.into(),
+    });
+}
+
 fn input(p: &mut Plan, props: &Props, shader: Shader, v: IoVariable, l: i32) -> R<()> {
     let d = &props.definitions;
     match (shader, v) {
+        (Shader::Vertex | Shader::Fragment, IoVariable::UserDefined) if d.ia_indexing => {
+            ioidx::input_members(p, d, shader)?
+        }
         (Shader::Vertex, IoVariable::UserDefined) => {
             let t = io_ty(d.user_defined_type(l, false)?)?;
             p.in_members.push(format!("{t} loc{l} [[attribute({l})]];"));
@@ -355,19 +390,7 @@ fn input(p: &mut Plan, props: &Props, shader: Shader, v: IoVariable, l: i32) -> 
         }
         (Shader::Fragment, IoVariable::UserDefined) => {
             let imap = d.imap_types.get(l as usize).ok_or("imap type missing")?;
-            let iq = imap.iter().copied().find(|x| *x != 0).unwrap_or(imap[3]);
-            let (attr, interp) = match iq {
-                1 => (", flat", "flat"),
-                3 => (", center_no_perspective", "center_no_perspective"),
-                _ => ("", ""),
-            };
-            p.in_members
-                .push(format!("float4 loc{l} [[user(locn{l}{attr})]];"));
-            p.varyings.push(Varying {
-                location: l as u32,
-                msl_type: "float4".into(),
-                interpolation: interp.into(),
-            });
+            varying(p, imap, l);
         }
         (Shader::Fragment, IoVariable::FragmentCoord) => p
             .in_members
@@ -409,6 +432,9 @@ fn output(
 ) -> R<()> {
     let d = &props.definitions;
     match (shader, v) {
+        (Shader::Vertex, IoVariable::UserDefined) if d.oa_indexing => {
+            ioidx::output_members(p, users)
+        }
         (Shader::Vertex, IoVariable::UserDefined) => users.push(l),
         (Shader::Vertex, IoVariable::Position) => {}
         (Shader::Vertex, IoVariable::PointSize) => p
@@ -442,7 +468,7 @@ fn output(
             p.out_members
                 .push("float gl_FragDepth [[depth(any)]];".into());
         }
-        (_, IoVariable::ViewportMask) => return Err("unported: viewport mask output".into()),
+        (Shader::Vertex, IoVariable::ViewportMask) => ioidx::viewport_mask(p),
         _ => return Err(format!("unported: output variable {} in this stage", v.0)),
     }
     Ok(())
