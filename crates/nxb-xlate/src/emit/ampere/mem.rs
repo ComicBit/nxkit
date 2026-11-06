@@ -167,6 +167,13 @@ pub(super) fn ldg(ctx: &mut Ctx) -> R {
             pred_op = Some(if x.bit(67) { ctx.bitwise_not(pr) } else { pr });
         }
     }
+    // The address is read before any result is written, the zeros of a false predicate too: the destination may be the
+    // address register (LDG.128 R0, [R0.64])
+    let mut addrs = Vec::new();
+    for index in 0..count {
+        let (lo, hi) = global_address(ctx, &x, 90, 32, index * 4);
+        addrs.push((ctx.copy(lo), ctx.copy(hi)));
+    }
     let mut skip = None;
     if let Some(p) = pred_op {
         let mut index = 0;
@@ -179,10 +186,6 @@ pub(super) fn ldg(ctx: &mut Ctx) -> R {
         let l = ctx.ir.label();
         skip = Some(l);
         ctx.branch_if_false(l, p);
-    }
-    let mut addrs = Vec::new();
-    for index in 0..count {
-        addrs.push(global_address(ctx, &x, 90, 32, index * 4));
     }
     for (index, (lo, hi)) in addrs.into_iter().enumerate() {
         let index = index as i32;
