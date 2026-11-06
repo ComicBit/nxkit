@@ -145,9 +145,16 @@ fn failure(e: String) -> Failure {
 pub fn translate(job: &Job, code: &[u8], ctx: &Context<'_>) -> Result<Translated, Failure> {
     let stage = job.stage.as_str();
     if matches!(stage, "hs" | "ds") {
+        let kind = if stage == "hs" {
+            "control"
+        } else {
+            "evaluation"
+        };
         return Err(Failure::new(
             "not ported",
-            format!("unported: tessellation ({stage} stage)"),
+            format!(
+                "unported: tessellation {kind} shader ({stage} stage), the front end has no tessellation"
+            ),
         ));
     }
     if matches!(stage, "ts" | "ms") {
