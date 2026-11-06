@@ -1,0 +1,1 @@
+nothing.nso: 4096 instructions decoded (0 undecodable words)

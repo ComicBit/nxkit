@@ -1,0 +1,14 @@
+sites.nso: 2048 instructions decoded (0 undecodable words)
+  data blocks left out: 0x2000..0x4000
+  x18 use                5
+  svc                    4
+  mrs tpidr_el0          2
+  msr tpidr_el0          1
+  mrs tpidrro_el0        1
+  mrs cntpct_el0         1
+  mrs cntvct_el0         1
+  mrs cntfrq_el0         1
+  mrs cntpctss_el0       1
+  msr cntvctss_el0       1
+  sub sp, sp, xN         1
+  svc numbers: #5 x1, #0x1d x2, #0x7b x1

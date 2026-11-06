@@ -4,6 +4,7 @@
 //! `NXB_REWRITE_*`).
 
 mod analyse;
+mod census;
 mod cuts;
 mod engine;
 mod error;
@@ -35,5 +36,6 @@ mod spinreg;
 mod tailcall;
 mod windows;
 
+pub use census::census;
 pub use error::RewriteError;
 pub use rewrite::{Options, Output, rewrite};
