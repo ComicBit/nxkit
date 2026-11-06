@@ -119,3 +119,18 @@ Measured on the reference title, Mac target, from the store of a full build. The
 | new translator build with the same output | 107 s |
 | new compiler identity | approximately a full build |
 | full build from an empty store | 687 s |
+
+## Shader step speed-up (measured, 2026-11-06)
+
+Standalone `nxb shaders build` on the reference title, empty store and cache, default jobs. Each output was compared with
+the 0.6.4 output by a SHA-256 manifest of all 90,442 files. All outputs are byte-identical.
+
+| change | wall time | CPU user (s) |
+|---|---|---|
+| 0.6.4 | 327 s | 2,222 |
+| `mem2reg` rewrite in `air-bc` | 214 s | 1,360 |
+| Fx hasher, structural CSE key, metadata text without `fmt` | 196 s | 1,219 |
+| TBAA node cache, hash index for writer constants, work-list DCE, borrowed tokens | 170 s | 1,115 |
+
+Peak memory went from 1.5 GB to 0.6 GB. In 0.6.4, 1,079 of 23,601 libraries came from Apple's `metal -c`.
+The shader step of a second title is in [research/second-title-shader-step.md](research/second-title-shader-step.md).
