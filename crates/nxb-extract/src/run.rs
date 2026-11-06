@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use crate::cache::{BlockCache, CacheStats};
@@ -16,6 +17,16 @@ use crate::version::{
     base_data, display_version, open_romfs_with, pick_program, read_control, read_exefs, title_name,
 };
 use crate::write::{ImageJob, ImageResult, write_images};
+
+/// Bytes of image file data written so far and in all, for a caller's progress display. `total` is set once the
+/// images are planned, `done` grows as each file is written.
+#[derive(Debug, Default)]
+pub struct Counter {
+    /// File bytes written.
+    pub done: AtomicU64,
+    /// File bytes of all images, 0 until they are planned.
+    pub total: AtomicU64,
+}
 
 /// What to extract.
 #[derive(Clone, Debug)]
@@ -57,6 +68,8 @@ pub struct Request {
     /// `nx_extract --manifest`: no `RomFS.img`, a list `romfs_manifest.tsv` (path, size, first 32 bytes) and the
     /// NRO modules under `romfs_nro/`.
     pub manifest: bool,
+    /// Where to count the bytes written, for a progress display.
+    pub progress: Option<Arc<Counter>>,
 }
 
 impl Default for Request {
@@ -78,6 +91,7 @@ impl Default for Request {
             discard_images: false,
             allow_damaged: false,
             manifest: false,
+            progress: None,
         }
     }
 }
@@ -345,6 +359,13 @@ pub fn extract(req: &Request) -> Result<Summary> {
             discard: req.discard_images,
         });
     }
+    if let Some(c) = &req.progress {
+        let total = images
+            .iter()
+            .flat_map(|j| j.plan.entries.iter().filter(|e| !e.dir).map(|e| e.b))
+            .sum();
+        c.total.store(total, Ordering::Relaxed);
+    }
     let t1 = Instant::now();
     let templates = match &req.split {
         Some((game, _)) => {
@@ -415,7 +436,11 @@ pub fn extract(req: &Request) -> Result<Summary> {
             });
         }
         let (templates, tags) = (&templates, &tags);
+        let counter = req.progress.as_deref();
         let hook = move |img: usize, path: &[u8], data: &[u8], d: &nxb_model::Digest| {
+            if let Some(c) = counter {
+                c.done.fetch_add(data.len() as u64, Ordering::Relaxed);
+            }
             if let Some(t) = templates {
                 let label = format!("{}{}", tags[img], String::from_utf8_lossy(path));
                 if t.defer(&label, data, *d) {
@@ -433,7 +458,7 @@ pub fn extract(req: &Request) -> Result<Summary> {
             images,
             req.threads,
             req.mem_limit,
-            templates.as_ref().map(|_| hook_ref),
+            (templates.is_some() || counter.is_some()).then_some(hook_ref),
         );
         drop(hook);
         r

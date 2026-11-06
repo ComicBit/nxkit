@@ -26,7 +26,7 @@ pub(crate) fn nodes(a: &Args, b: &Build) -> Vec<Node> {
     let reuse = |i: usize| b.nodes.get(i).and_then(|n| n.reused.clone());
     let mut nodes = vec![
         Node {
-            name: "extract".into(),
+            name: b.nodes[0].name.clone(),
             deps: vec![],
             key: b.nodes[0].key,
             reused: reuse(0),

@@ -79,6 +79,7 @@ fn reference_extract_and_split_match_python() {
         discard_images: false,
         allow_damaged: false,
         manifest: false,
+        progress: None,
     };
     assert!(nxb_extract::extract(&req).is_ok());
     let mut checked = 0;

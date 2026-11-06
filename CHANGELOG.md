@@ -2,7 +2,7 @@
 
 All notable changes are in this file. The format follows Keep a Changelog. Versions follow Semantic Versioning.
 
-## Unreleased
+## 0.6.2
 
 ### Changed
 
@@ -14,6 +14,12 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
   It checks each rule like `nso_match.validate` and accepts a replacement branch that stays inside the matched function.
 - `data/rewrite-rules` is made again from the engine `88c7e03f` (149 files). It has one new patch, two new game profiles and one changed `game.tsv`.
 - The output is byte-identical to the script of the engine `88c7e03f` on 6 real modules (`main`, `rtld` and `sdk` of the base package and the update of one title).
+
+### Fixed
+
+- The extract stage of a package build reports the bytes written with `--progress json`. A launcher shows a bar with the time left. Before, it only showed that the stage was running.
+- The extract stage is named after the versions it extracts, for example `extract v0 + v327680`, as the script names it. NX2Apple showed the bare name `extract` as "%@ extrahieren".
+- `nxb_extract::Request` has a `progress` field with a byte counter (`nxb_extract::Counter`).
 
 ## 0.6.1
 
