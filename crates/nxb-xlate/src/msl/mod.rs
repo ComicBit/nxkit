@@ -20,6 +20,7 @@ pub mod entry;
 pub mod facts;
 pub mod first_store;
 pub mod handles;
+pub mod hmma;
 pub mod inst_alu;
 pub mod inst_img;
 pub mod inst_mem;
