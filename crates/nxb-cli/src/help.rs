@@ -75,8 +75,8 @@ pub const NXB: &[Cmd] = &[
     c(
         "shaders",
         "Stages",
-        "the shader step: recompile, guards, own-verdicts, build",
-        "usage: nxb shaders <recompile|guards|own-verdicts|build|prune|regressions|self-check> [args]\n  nxb shaders recompile <b-dir> --store <dir> --work <dir> [--jobs N] [--every N] [--limit N] [--io files|pipes] [--no-pch] [--no-side] [--no-variants] [--relaxed] [--own-front <verdicts.jsonl> [--own-allow v1,v2]]\n  nxb shaders guards <b-dir> <out-dir> [jobs]\n  nxb shaders own-verdicts <validation.jsonl> [data-dir]\n  nxb shaders build <pkg> <out> --profile D --chain V --game ID --inputs DIGEST --xlate P --dotnet-root D --spirv-cross P --store D --work D [--jobs N] [key...]",
+        "the shader step: guards, own-verdicts, build",
+        "usage: nxb shaders <guards|own-verdicts|build|prune|regressions|self-check> [args]\n  nxb shaders guards <b-dir> <out-dir> [jobs]\n  nxb shaders own-verdicts <validation.jsonl> [data-dir]\n  nxb shaders build <pkg> <out> --profile D --chain V --game ID --inputs DIGEST --store D --work D [--jobs N] [key...]",
     ),
     c(
         "app",
@@ -157,11 +157,7 @@ pub const NXB: &[Cmd] = &[
 pub const SHADERBUILD: &[(&str, &str)] = &[
     (
         "build",
-        "usage: nxb shaders build <pkg> <out> --profile D --chain V --game ID --inputs DIGEST --xlate P --dotnet-root D --spirv-cross P --store D --work D [--jobs N] [--batch N] [--batch-first N] [--scratch D] [--ios D] [--xlate-host HOST_AND_ARGS] [--xlate-rust on|off] [--own-front off|VERDICTS [--own-allow V,..]] [key...]",
-    ),
-    (
-        "recompile",
-        "usage: nxb shaders recompile <b-dir> --store <dir> --work <dir> [--jobs N] [--every N] [--limit N] [--io files|pipes] [--no-pch] [--no-side] [--no-variants] [--relaxed] [--own-front <verdicts.jsonl> [--own-allow v1,v2]]",
+        "usage: nxb shaders build <pkg> <out> --profile D --chain V --game ID --inputs DIGEST --store D --work D [--jobs N] [--batch N] [--batch-first N] [--scratch D] [--ios D] [--own-front off|VERDICTS [--own-allow V,..]] [key...]",
     ),
     (
         "guards",

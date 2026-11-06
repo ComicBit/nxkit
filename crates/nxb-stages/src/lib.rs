@@ -2,7 +2,7 @@
 //!
 //! A stage module stays under 400 lines.
 //!
-//! Status: `recompile` (the P1a milestone) is implemented, the other modules are placeholders that fix the crate's shape, see
+//! Status: `build` (the shader step) is implemented, the other modules are placeholders that fix the crate's shape, see
 //! `docs/workspace-layout.md` for the planned public surface.
 
 /// The shader step (design-v2).
@@ -14,18 +14,11 @@ mod build_hooks;
 mod build_partial;
 mod build_shared;
 mod build_xlate;
-pub mod front;
 pub mod guard_tables;
 pub mod inputs;
 pub mod own_front;
 pub mod own_raw;
-pub mod recompile;
-mod recompile_build;
-pub mod recompile_summary;
-mod recompile_variants;
-pub mod vertex;
-pub mod xlate_cache;
-pub mod xlatehost;
+mod xlate_cache;
 
 /// The extract stage.
 pub mod extract {}

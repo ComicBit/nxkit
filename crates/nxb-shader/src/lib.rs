@@ -1,7 +1,7 @@
-//! The shader domain: pure functions from package records to final MSL, reflection and output bytes (design-v2 sb-domain).
+//! The shader domain: the translator jobs, the chain version, the guard tables, the header and the target conventions
+//! of the shader step, and the cut of a pixel shader's side library (design-v2 sb-domain).
 //!
-//! No I/O. Everything here is output-relevant and hashed into the chain version V. Only this crate and `nxb-air` construct
-//! `OutputFile` values.
+//! No I/O. Everything here is output-relevant and hashed into the chain version V. The MSL itself comes from `nxb-xlate`.
 //!
 //! Status: skeleton. The modules below are placeholders that fix the crate's shape, see
 //! `docs/workspace-layout.md` for the planned public surface.
@@ -10,11 +10,6 @@
 pub mod nvn {}
 
 pub mod chain;
-pub mod msl;
-
-pub mod reflect;
-
-pub mod variants;
 
 pub mod guards;
 pub mod job;

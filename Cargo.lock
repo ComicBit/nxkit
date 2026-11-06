@@ -283,10 +283,8 @@ dependencies = [
 name = "nxb-shader"
 version = "0.5.1"
 dependencies = [
- "nxb-error",
  "nxb-model",
  "nxb-pyjson",
- "nxb-testkit",
 ]
 
 [[package]]
@@ -317,6 +315,7 @@ dependencies = [
  "nxb-store",
  "nxb-sys",
  "nxb-tool",
+ "nxb-xlate",
 ]
 
 [[package]]
@@ -346,7 +345,6 @@ dependencies = [
  "nxb-model",
  "nxb-sys",
  "nxb-testkit",
- "nxb-xlate",
 ]
 
 [[package]]

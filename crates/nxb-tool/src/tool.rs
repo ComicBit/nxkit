@@ -9,7 +9,7 @@ use std::sync::Arc;
 /// Identity of an external tool: what is recorded in TOOL_FP (design-v2 6).
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct ToolId {
-    /// Short name (`metal`, `metallib`, `spirv-cross`, `dmsh_xlate`).
+    /// Short name (`metal`, `metallib`, `air-opt`).
     pub name: String,
     /// Resolved absolute path.
     pub path: PathBuf,

@@ -240,3 +240,21 @@ pub fn cut(lib: &[u8], side: &[String]) -> Result<(Vec<u8>, Vec<u8>), CutError> 
         .collect();
     Ok((take(&layout, &base)?, take(&layout, &rest)?))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn what_is_not_a_whole_library_is_refused() {
+        let names = ["main0_a".to_string()];
+        assert_eq!(
+            cut(b"", &names),
+            Err(CutError("not a whole Metal library".into()))
+        );
+        assert!(cut(b"MTLB", &names).is_err());
+        let mut short = b"MTLB".to_vec();
+        short.resize(0x40, 0);
+        assert!(cut(&short, &names).is_err());
+    }
+}

@@ -13,11 +13,7 @@ in_v = true
 
 [dependencies]
 nxb-model.workspace = true
-nxb-error.workspace = true
 nxb-pyjson.workspace = true
-
-[dev-dependencies]
-nxb-testkit.workspace = true
 
 [lints]
 workspace = true

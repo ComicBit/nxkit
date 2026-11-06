@@ -16,7 +16,7 @@ exception. Its raw path is on by default since 0.4.0, and GPU tests cover only a
 | 5 | [frontend.md](frontend.md) | the own MSL to AIR front end and its results |
 | 6 | [air-conventions.md](air-conventions.md) | the AIR conventions that a front end must obey |
 | 7 | [gpu-differential-testing.md](gpu-differential-testing.md) | the `gpudiff` harness |
-| 8 | [translator.md](translator.md) | the shader translator, the plan to replace it and the state of the Rust port |
+| 8 | [translator.md](translator.md) | the Rust shader translator and its contract with the shader step |
 | 9 | [early-cutoff.md](early-cutoff.md) | the key scheme of each stage and the cost of a chain change |
 | 10 | [benchmarks.md](benchmarks.md) | measured and estimated timings |
 | 11 | [decisions.md](decisions.md) | architecture decisions W1 to W22 and design decisions |
