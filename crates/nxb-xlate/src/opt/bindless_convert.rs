@@ -66,6 +66,12 @@ pub(super) fn try_convert_bindless(
         if ir.ty(src0) == OperandType::Constant && ir.ty(src1) != OperandType::Constant {
             std::mem::swap(&mut src0, &mut src1);
         }
+        // The compiler ORs the two words in either order. A word in c[2]'s separate sampler table is the sampler.
+        if super::bindless_elim::is_sampler_word(ir, src0)
+            && !super::bindless_elim::is_sampler_word(ir, src1)
+        {
+            std::mem::swap(&mut src0, &mut src1);
+        }
         let mut handle_type = tex::SEPARATE_SAMPLER_HANDLE;
         if let Some(a0) = ir.asg_operation(src0) {
             if let Some(a1) = ir.asg_operation(src1)

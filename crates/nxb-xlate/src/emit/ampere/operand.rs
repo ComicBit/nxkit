@@ -183,15 +183,21 @@ pub fn map_c0(ctx: &Ctx, bank: i32, offset: i32) -> (i32, i32) {
     let ub = 0x10 + push;
     let sb = ub + 0x10 * ubos;
     let hb = sb + 0x10 * ssbos;
-    let ib = hb + 8 * textures;
+    let sep_textures = hb + 8 * textures;
+    let sep_samplers = sep_textures + 8 * l.get(5).copied().unwrap_or(0);
+    let ib = sep_samplers + 8 * l.get(6).copied().unwrap_or(0);
     if (0x10..ub).contains(&offset) {
         (24, offset - 0x10)
     } else if (ub..sb).contains(&offset) {
         (0, 0x210 + (offset - ub))
     } else if (sb..hb).contains(&offset) {
         (0, 0x310 + (offset - sb))
-    } else if (hb..ib).contains(&offset) {
+    } else if (hb..sep_textures).contains(&offset) {
         (2, 0x20 + (offset - hb))
+    } else if (sep_textures..sep_samplers).contains(&offset) {
+        (2, 0x168 + (offset - sep_textures))
+    } else if (sep_samplers..ib).contains(&offset) {
+        (2, 0x568 + (offset - sep_samplers))
     } else if (ib..size).contains(&offset) {
         (2, 0x120 + (offset - ib))
     } else {

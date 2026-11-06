@@ -243,3 +243,27 @@ fn ldg_reads_its_address_before_the_predicate_zeroes_rd() {
     let read = t.find("d=l0, s=R5:0,").expect(&t);
     assert!(read < zero, "{t}");
 }
+
+#[test]
+fn nvn2_compute_c0_maps_separate_textures_and_samplers() {
+    // 2 textures, 1 separate texture, 1 separate sampler, no image: c[0] has 0x10 + 8 * 4 bytes
+    let layout = r#", "nvn2_cs": [0, 0, 2, 48, 0, 1, 1]"#;
+    // the byte offset in c[2] the load is made of
+    let at = |offset| {
+        let t = ampere_cs_text_with(layout, &[ampere_ldc(0, 255, 0, offset, 0)]).expect("emit");
+        t.lines()
+            .find(|l| l.starts_with("  op 2 ") && l.contains("s=#0,#"))
+            .map(|l| {
+                l.rsplit('#')
+                    .next()
+                    .unwrap_or("")
+                    .trim_end_matches(',')
+                    .to_string()
+            })
+            .unwrap_or_default()
+    };
+    // texture slot 0 at 0x10 is c[2] + 0x20, the separate texture at 0x20 is c[2] + 0x168, the separate sampler at 0x28 is c[2] + 0x568
+    assert_eq!(at(0x10), "20");
+    assert_eq!(at(0x20), "168");
+    assert_eq!(at(0x28), "568");
+}
