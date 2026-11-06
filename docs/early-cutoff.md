@@ -1,17 +1,17 @@
 # Early cutoff
 
-This document gives the key scheme of the shader step (decision W21). Each stage has its own content key. No key contains
-the chain version V. Thus a change of the chain does work only for the outputs that it changes.
+This document gives the key scheme of the shader step (decision W21). Each stage has its own content key. Only the translator key contains
+the chain version V. A V change translates again, but compiles only the shaders with a changed MSL.
 
 ## Problem
 
-The host loads the shader libraries from the folder `b-<V>/`. V is a digest of all chain sources. The reference build
+The host loads the shader libraries from the folder `b-<V>/`. V is a hash of the engine files that `dm/gfx/tools/dmsh_chain.py` lists in `FILES`, plus the options string `debug=True reduced=True`. No Rust source goes into V. The reference build
 scripts put the code of the full chain into each cache key. Thus a change of one line in the chain makes all cache
 entries of all games invalid, and the next build compiles all shaders again.
 
 ## Decision
 
-Each stage output has a key from two parts: the version of that stage and the content hash of its inputs. No key contains V.
+Each stage output has a key from two parts: the version of that stage and the content hash of its inputs. Only the translator key contains V.
 
 - A stage runs again only when its version or the content of its inputs changes.
 - If the new output has the same bytes as the previous output, the keys of all subsequent stages stay the same. These stages do not run.
@@ -20,25 +20,27 @@ This is early cutoff, as in the build systems Shake, Bazel and Salsa.
 
 | stage | store domain | version part | content part |
 |---|---|---|---|
-| translator | `nxb.xlate.v2` | translator identity: the chain version V, which covers the sources of `nxb-xlate`, and `NXB_TEST_XLATE_SALT` | job JSON, SHA-256 of the code bytes, V, source, paired shader, answer-table flag, dual-source and fetch-outputs-only flags, partner varyings |
+| translator | `nxb.xlate.v2` | translator identity: a hash of the label `nxb-xlate msl`, V, `nxb_xlate::msl::TRANSLATOR_ID` (now `msl-2.3`) and `NXB_TEST_XLATE_SALT` | job JSON, SHA-256 of the code bytes, V, source, paired shader, answer-table flag, dual-source and fetch-outputs-only flags, partner varyings |
 | Metal compile and link | `nxb.metallib.v2` | target record (flags), compiler identity (`metal` and `metallib` versions, SDK), own front-end tag | the last MSL text |
-| pipeline archive batch | `nxb-archive batch 1` | architecture, platform, minimum OS, `metal-tt` version | library bytes and the entries of the bases of the batch |
+| pipeline archive batch | `nxb-archive batch 1` | architecture, platform, minimum OS, `metal-tt` version, driver (`metal-tt` or `applegpu-nt -j N`) | library bytes and the entries of the bases of the batch |
 
 The translator stores the MSL, the reflection and the side library entries of each key. Nothing else sits between the translator and the compile.
 
 The effect of a chain change:
 
+- A change of the translator in `nxb-xlate` translates again only when someone increases `TRANSLATOR_ID` by hand. Without the increase the store gives the old MSL.
 - A change of the translator compiles again only the shaders with a changed MSL, and their archive batches.
 - A new translator version with the same output translates again, but does not compile a shader.
+- A V change translates all shaders again. It compiles only the shaders with a changed MSL.
 - A new Xcode compiles all shaders again, because the compiler identity is part of each compile key.
 
 ## Rules
 
-1. The output folder stays `b-<V>/`, because the host loads only that folder. But no store key contains V.
-   A new V makes a new folder from cache hits.
+1. The output folder stays `b-<V>/`, because the host loads only that folder. Of the store keys, only the translator key contains V.
+   A new V makes a new folder from compile cache hits where the MSL stays the same.
 2. A chain change does not delete data. `nxb shaders` does not remove store entries. Old entries stay in the store until a prune by last use.
 3. The version of a stage must include all data that changes its output, and no other data.
-   Tool binaries go into the version by their content. The Rust passes run in each build, thus they have no version.
+   Tool binaries go into the version by their content. The Rust passes are part of the translator. `TRANSLATOR_ID` is their version.
 4. The reuse key of the build contains only the id of the `nxb` binary. The shader step owns the keys of each output.
 5. If a pass becomes slow, it gets a key from its pass version and the hash of its input MSL, in the same scheme.
 
@@ -46,6 +48,7 @@ The effect of a chain change:
 
 Measured on the reference title, Mac target, on the reference machine. The machine load was 21 to 47 during the runs.
 Each run started from the store of a full build. The full build took 687 s.
+The numbers are from 0.1.0. At that time the translator key `nxb.xlate.v1` did not contain V.
 
 | change | shaders with a change | wall time |
 |---|---|---|

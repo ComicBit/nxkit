@@ -9,7 +9,7 @@ The shader step changes the GPU machine code of a game into Metal libraries. The
    This applies to orchestration, guards and the store. The translator is the exception (refer to the section on the translator).
 2. The tests compare the last output files (`.metallib`, `.json`, `.metal`, tables), not `.air` files.
    The `.air` bytes can differ when the libraries are byte-identical (measured on 300 of 300 libraries).
-3. **Front-end rule.** The own front end changes bytes by design. It ships with a new chain version and a fallback to the Apple front end for each shader
+3. **Front-end rule.** The own front end changes bytes by design. It ships with a fallback to the Apple front end for each shader
    (refer to [frontend.md](frontend.md)). The own-identical tier has proof for each shader. **The raw tier has no proof for each shader since 0.4.0.**
    It is the one exception to the rule: it is on for all shaders, and only a part of the corpus has a GPU test (refer to the section on the raw tier).
 4. A port and a front-end change are not in the same pull request.
@@ -39,7 +39,7 @@ flowchart LR
   BH & AF --> ML["metallib for each target"]
   T --> RF["reflection"]
   ML & RF & H --> S["side library cut"]
-  S --> P["publish entry"] --> F["summary and build files"] --> RG["regression check"]
+  S --> P["publish entry"] --> F["summary and build files"]
 ```
 
 The reference build scripts do the cache checks in series, then all translations, then two thread-pool passes.
@@ -66,7 +66,8 @@ A panic and a job that the step cannot read are `translation failed`. The step c
 A key that the translator does not do is a `ShaderError` of that key. The build continues.
 
 The translation store key has the translator identity, the job, the code, V, the source, the paired shader, the answer-table flag, the dual-source and fetch-outputs-only flags and the partner varyings.
-The identity is V, which covers the sources of `nxb-xlate`. A store that was written by another translator version is not used. A failure is not stored.
+The translator identity is a hash of the label `nxb-xlate msl`, V, `nxb_xlate::msl::TRANSLATOR_ID` (now `msl-2.3`) and `NXB_TEST_XLATE_SALT`.
+No Rust source goes into V. A change of the translator translates again only when someone increases `TRANSLATOR_ID` by hand. Without the increase, the store gives the old MSL. A failure is not stored.
 
 The output is not byte-identical to the output of the former C# translator and `spirv-cross`. No game ran with it yet (D20). Unit tests and Metal compile tests on built samples cover it.
 
@@ -74,36 +75,35 @@ The output is not byte-identical to the output of the former C# translator and `
 
 | identity | function | made from |
 |---|---|---|
-| V (chain version) | names the folder `b-<V>/` that the host loads. Each `_b.json` file has the same value | the files in `chain-files.txt`, the translator options, `OUTPUT_VERSION` |
-| DOMAIN_FP | cache validity of each shader | the same file set, hashed for each module |
-| TOOL_FP | the external tools that made a result | translator identity (V), `metal` identity, SDK version, deployment target, PCH convention, front-end id |
+| V (chain version) | names the folder `b-<V>/` that the host loads. Each `_b.json` file has the same value | the engine files that `dm/gfx/tools/dmsh_chain.py` lists in `FILES`, and the options string `debug=True reduced=True` |
+| TOOL_FP | the external tools that made a result | translator identity, `metal` identity, SDK version, deployment target, PCH convention, front-end id |
 | BIN_ID | the `nxb` binary that ran | SHA-256 of the binary, rustc version, `Cargo.lock` digest, commit, flags |
 
 The rules for these identities:
 
-1. V and DOMAIN_FP come from source files, not from the binary. `chain-files.txt` names the sources of the crates in V,
-   the versions of their dependencies, the front-end verdict data and `OUTPUT_VERSION`.
-2. `OUTPUT_VERSION` is an integer. Increase it by hand for an output change that no hashed file shows.
+1. V comes from engine files, not from the binary. No Rust source goes into V.
+2. `TRANSLATOR_ID` in `nxb-xlate` is a string. Increase it by hand for each change of the translator output.
 3. The runtime crates are not in V, and TOOL_FP does not contain BIN_ID. A new binary from the same sources keeps V and all cache keys.
 4. The design compares BIN_ID with a lock file at start, and a mismatch is a `[RED]` build error. The code does not have this check at this time. The command `nxb self-check` only finds the external tools and shows their versions.
 5. The reuse key of the build contains BIN_ID. After a runtime fix, the shader step runs one more time, with cache hits only.
-6. The first release of the own front end changes V. The Metal cache format changes from `dmsh_mtlcache 2` to `3`,
-   and its identity gets the front-end id. Apple libraries and own libraries thus do not share a cache entry.
+6. The own front end does not change V. The compiler identity `dmsh_mtlcache 2` (the `chain_compiler` field of the reflection) stays.
+   When the own front end is on, the library key `nxb.metallib.v2` gets a `frontend` field. Apple libraries and own libraries thus do not share a store entry.
 7. Since 0.5.1, the value of V in each `_b.json` file is the computed V. In 0.5.0, the vertex shader files had the constant `0ad559cdbb28`.
    The folder name had the computed V. The two values were not equal. In a full Wonder run with the 0.5.0 code, the pipeline archive found no base library. The build packed the app without an archive.
    The calculation of V reads the engine files that `dmsh_chain.py` names.
 
 ## Execution model
 
-- **CPU.** Tokens = logical cores plus 2 (default). A thread task or a child process holds one token. The target is a use
-  of 90 % or more of the PCE until the last 5 % of the tasks. The QoS class is `USER_INITIATED`.
-- **Priorities.** The critical path is first: pixel shaders that vertex shaders wait for, and mesh pair parts.
-  Then the longest task is first. Its cost comes from the time of the previous build, or from the MSL size.
-  The translator gets small batches (default 32 keys), so that compiles start after some seconds.
-- **Memory.** The budget is the smaller value of `--mem-budget` and (0.5 x memory size minus 2 GiB). For 32 GB, this is 14 GiB.
-  Each task has an expected peak memory from the previous build. The defaults are estimates: 300 MB for `metal -c` of a
-  large pixel unit, 150 MB for other compiles, 400 MB for a translator batch. A task starts only when tokens and memory are free.
-- **Single-flight.** The compile-input digest prevents two compiles of one input in the process. A lock file in the store does the same across processes.
+- **CPU.** The default number of tokens is round(P + 0.4 x E). P is the number of performance cores and E the number of efficiency cores.
+  `--jobs` of `nxb shaders build` and `--threads` of `nxb build` set another number. A thread task or a child process holds one token. The target is a use
+  of 90 % or more of the PCE until the last 5 % of the tasks.
+- **Priorities.** The step translates in key order. First come the keys that wait for no other shader, then the paired vertex shaders.
+  A consumer order (the pair groups of the pipeline archive) and the keys of a manifest go to the front. An earlier batch has a higher priority.
+  A finish task (compile and publish of one key) has a higher priority than each translate batch.
+  The first `--jobs` batches have 16 keys (`--batch-first`). The other batches have 128 keys (`--batch`). Thus each token gets work at once.
+- **Memory.** The budget is 0.5 x memory size minus 2 GiB, and at least 1 GiB. For 32 GB, this is 14 GiB.
+  Each translate batch reserves 500 MB. Each finish task reserves 200 MB. A task starts only when tokens and memory are free.
+- **Single-flight.** The library key prevents two compiles of one input in the process. There is no lock for this across processes.
 
 ## External tools
 
@@ -129,17 +129,21 @@ A panic of the translator is caught and fails one key. For the other tools, a cr
 ## Result store
 
 - **Format 1** is the content-addressed store of this workspace. Each stage output has a key from the stage version and
-  the content hash of its inputs. No key contains V (refer to [early-cutoff.md](early-cutoff.md)).
-- **Manifest.** The store writes the manifest of an entry last. A restore reads it one time, examines all sizes, and
-  examines SHA-256 for 1 % of the files. After an unclean stop, it examines all digests.
+  the content hash of its inputs. The translation key `nxb.xlate.v2` contains V two times: in the translator identity and in the `chain` field.
+  The library key `nxb.metallib.v2` does not contain V. It has the compile record, the compiler identity, the MSL and, with the own front end, the `frontend` field.
+- **Manifest.** The store writes the manifest of an entry last. A restore reads it one time and examines the manifest checksum and all sizes.
+  After an unclean stop, it examines all digests.
 - **Quarantine.** An entry with a bad check goes to `quarantine/`. The store does not delete it. The step compiles that shader again.
-- **Durability.** Temporary name, `fsync`, rename, manifest last, `fsync` of the folder. A dirty marker with a journal of digests in progress replaces `F_FULLFSYNC`.
-- **Locks.** An exclusive `flock` on `b-<V>/.shaderbuild.lock` for each build. A shared lock on the store root for builds, and an exclusive lock for prune and migration.
+- **Durability.** The store writes each file to a temporary name and renames it. It writes the manifest last. The shader step opens the store
+  with `Durability::Relaxed`, which does no `fsync`. A dirty marker with a journal of digests in progress replaces `F_FULLFSYNC`.
+- **Locks.** A shared lock on the store root for builds, and an exclusive lock for prune and migration.
 - **Target keys.** Each key contains the SDK, the deployment target, the compiler target version, the compile convention and the front-end id.
 
 ## Raw container tier
 
-The raw tier (`own-raw`) is the first tier of the own front end in `build`. It is for the Mac target only.
+The raw tier (`own-raw`) is the first tier of the own front end in `build`. It makes the Mac libraries and the iOS libraries.
+The iOS libraries get only the raw tier. When it rejects a shader, Apple's compiler makes the iOS library.
+No GPU test covers the iOS libraries. Apple's `air-validate` accepted 997 iOS libraries of a sample of 1,000 shaders. The other 3 were rejects.
 For a shader, the step calls `air_front::build_raw` in the same process. This call does the front end,
 the split of the entries, the optimizer, the bitcode writer and the library writer. It uses no Apple tool and starts no process.
 
@@ -157,7 +161,8 @@ The new default has a check in the process, but no GPU test for each shader.
   The old allow list (3,365 entries, about 14 % of the corpus) has the shaders that matched in the test. It is not in this repository.
 - **Switches.** `NXB_OWN_RAW=0` turns only the raw tier off. `NXB_OWN_RAW=list` uses only the shaders of the shipped allow list (old behavior).
   The tier is off when the file is missing. `NXB_OWN_RAW=<file>` uses another list. `NXB_OWN_FRONT=0` or `--own-front off` turns all own tiers off. The tier needs the own front end to be on.
-  The run note of the step tells which mode is on and how many libraries came from the raw tier and from Apple.
+  `NXB_OWN_RAW_IOS=0` turns the raw tier off for the iOS libraries only.
+  The run note of the step tells which mode is on and how many libraries came from the raw tier, from the iOS raw tier and from Apple.
 - **Cache key.** A raw library has the key field `own-raw@` and the front-end id, for each shader. A raw library is thus never given to a run with the tier off.
   Entries that an older version made in the list mode are not used.
 - **Output.** A raw library is not byte-identical to Apple's library, and it is larger (1.33 times on 40 samples, measured). This is by design.
@@ -166,7 +171,7 @@ The new default has a check in the process, but no GPU test for each shader.
 Measured (subset of 160 keys, 261 shaders, cold store, load average 8 to 12, `nxb shaders build`): 363 library compiles gave 363 raw libraries, with no fallback, and Apple made 0.
 All 699 output libraries load in Metal (1,092 functions, 0 failures). The wall time was 6.5 s with the tier and 14.4 s without it. This is not a benchmark.
 A smaller measurement (40 shaders, 44 raw libraries, loaded machine) gave a median compile CPU time of 97.5 ms against 109 ms without the tier (about 11 % less).
-Nobody measured a full cold build with the tier on all shaders. The estimate of 4 to 6 minutes less is **not measured**.
+A full cold build of one title (16,268 shaders, cold store, M2 Max, 0.6.3) took 5.2 minutes in the shader step with the raw path and 10.3 minutes without it.
 
 ## Errors
 
@@ -182,24 +187,21 @@ Nobody measured a full cold build with the tier on all shaders. The estimate of 
 **Abort.** On `EnvError` or `BuildError`, the step kills all process groups. It does not write the stamp, the reuse key
 or `_b_cas.txt`. It keeps the completed store entries, writes the `[RED]` lines and an `error` event, and stops with exit code 1.
 
-**Circuit breaker.** Eight failures in sequence with the same tool, exit kind and first stderr line become an `EnvError`.
+**Circuit breaker.** `nxb-tool` has a circuit breaker (`CircuitBreaker`). It turns 8 equal failures in sequence into an `EnvError`.
 Failures in more than 50 % of the first 200 tasks of a tool also become an `EnvError`.
-`ENOSPC`, `EDQUOT`, `EROFS` and `EIO` stop the build at the first occurrence. `EMFILE` and `ENFILE` stop it after 3 occurrences.
+The shader step does not use it.
 
 ## Determinism
 
 - The output order does not come from the completion order or from a hash map. `_b_build.json` and the summary use the key
   order of the reference build scripts. JSON goes through `nxb-pyjson` (insertion order, `indent=1`, Python float format).
 - The tests compare 1 task against N tasks, two runs, and pipes against files. Apple's tools gave the same bytes on 300 of 300 samples (measured).
-- **Drift samples.** On a cache hit, the step compiles 0.5 % of the shaders again and compares the bytes. A mismatch gives a
-  `[RED]` note, puts the entry in quarantine and publishes the new bytes. The cost is approximately 0.5 % of the compile time (derived).
 
 ## Progress and fixed strings
 
-- `--events <path|fd>` writes NDJSON events: `phase`, `progress` (`step`, `done`, `total`, `unit`), `shader`, `error`, `summary`.
-  The format is compatible with the nxnative event stream.
-- Callers parse some strings. Thus these strings must not change: `shaders {N}: ok {K}, ...`, `shader cache: hit {H}, rebuilt {M}`,
-  `shader regressions against b-XXXX: N`, all `[RED] ` lines, and the failure-classifier keys. `tests/contract_strings.rs` compares them.
+- `nxb build --progress json` writes one JSON object for each line: the events `stage`, `step`, `progress`, `stage_end` and `say`.
+- Callers parse some strings. Thus these strings must not change: `shaders {N}: ok {K}, ...`,
+  `shader regressions against b-XXXX: N`, all `[RED] ` lines, and the failure-classifier keys.
 
 ## Parity results
 
@@ -212,4 +214,3 @@ The JSON writer and the guard tables follow the reference build scripts (measure
 
 The libraries and `_b.json` come from the Rust translator. They are not compared byte for byte with the reference build scripts. No game ran with them yet (D20).
 The side library cut and the compile conventions are the same as in the reference build scripts. The raw tier is not byte-identical to Apple's libraries.
-The full iOS target and `_b_cas.txt` are not ported at this time.

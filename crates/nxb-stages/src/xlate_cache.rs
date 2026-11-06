@@ -154,9 +154,10 @@ pub(crate) struct Xlate {
     refused: Mutex<BTreeMap<String, u64>>,
 }
 
-/// The translator identity: the label, the chain id (it covers the `nxb-xlate` sources), the version of the MSL back end
-/// (`nxb_xlate::msl::TRANSLATOR_ID`) and the `NXB_TEST_XLATE_SALT` test hook. A new chain translates again, and the compile cache stops the change where the MSL
-/// stays equal.
+/// The translator identity: the label, the chain version V (the engine files of `dmsh_chain.py` `FILES` and the options,
+/// no Rust source), the version of the MSL back end (`nxb_xlate::msl::TRANSLATOR_ID`) and the `NXB_TEST_XLATE_SALT` test
+/// hook. A change of `nxb-xlate` translates again only when someone increases `TRANSLATOR_ID` by hand. A new chain
+/// translates again, and the compile cache stops the change where the MSL stays equal.
 pub(crate) fn translator_id(chain: &str) -> String {
     let mut h = nxb_model::Sha256::new();
     h.update(b"nxb-xlate msl\0");

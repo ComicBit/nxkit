@@ -87,7 +87,6 @@ Not ported at this time: the `--html` output of some titles. The base game of a 
 - The key of a shader is `sha256(control[:0x880] ‖ code)[:16]`.
 - The output sequence is the contract. Rows record the first occurrence. The split sorts the results in the walk sequence
   of the reference build scripts: versions, sorted paths, `main`, NROs, captures. It does not use the completion sequence.
-- Decoders that only the game has (for example Oodle) operate through the host, behind a `Tool` adapter.
 
 Since version 0.4.0, the split reads many more container families. A format that is not ported stops the split with a named
 `Unsupported` error and exit code 4. The split never gives a silent difference.
@@ -223,10 +222,11 @@ Not overlapped: the shader step with the extract, the copy of the app files duri
 
 ## Mac app and code signature
 
-- `MacApp::plan` makes a bundle plan from typed inputs. The plan has the same tree as the reference build scripts. It does no I/O.
-- The reuse key is the hash of the plan. The plan entries contain the content digests. Thus the stage reads no input file to find if it can use the previous output.
-- The stage clones large files with `clonefile` and writes small generated files into `<out>.app.partial`.
-- Then it seals and signs the bundle and does an atomic swap (`renamex_np RENAME_SWAP`).
+- `nxb_pack::macapp::plan` makes a bundle plan from typed inputs. The plan has the same tree as the reference build scripts.
+- Without a previous app, the stage clones the files into `<out>` (`std::fs::copy`, which uses `fclonefileat` on APFS) and writes the generated files directly.
+  Then it seals and signs the bundle. The digests come from the plan or from the copy. No file is read twice.
+- With a previous app, the stage moves the old `.app` to the new path and updates it in place. A file whose digest is the same as in the previous `CodeResources` stays and is not read.
+  Changed and new files are staged again. Files that are not in the plan are removed. Executables are always staged again. Then the stage signs the bundle.
 
 ### Ad-hoc signer
 
@@ -269,9 +269,9 @@ The default platform is `ios`, as in the reference script. Use `--platform mac-a
 | `--allow-damaged`, `--allow-other-metal` | the options of the script. The second option lets a newer Metal compiler of the same generation go on | tested by unit tests only |
 | `--mac-sign IDENTITY` | signs the staged app again, the host first, then the bundle | **not run with a real identity** |
 | `--romfs bundle\|separate` | the position of the RomFS. `separate` is for iOS. Exit code 2 for a Mac app | tested by unit tests only |
-| `--keep-extracted` | deletes the extraction after the IPA. It has an effect for iOS only | not run |
+| `--keep-extracted`, `--no-keep-extracted` | keeps the extraction after the IPA. On by default. `--no-keep-extracted` deletes `extract/<package>`. It has an effect for iOS only | not run |
 | `--show-fps` | iOS only. On by default, as in the script | not run |
-| `--gpu ARCH\|none` | the GPU architecture of the pipeline archive. The default is the architecture of this Mac. `none` skips the archive | measured on one Mac (M2 Max) |
+| `--gpu ARCH\|none` | the GPU architectures of the pipeline archive. `none` skips the archive. Without the option, a Mac app of a game with `shader_pairs.tsv` uses the architecture of this Mac. An iOS build uses `pso_gpu` of the profile when `pso_mtl4` is `on` (`g18p` when `pso_gpu` is empty). Other builds make no archive | measured on one Mac (M2 Max) |
 | `--team-id`, `--framework`, `--shell-framework`, `--prepare-xcode`, `--xcode-workspace` | the iOS options. They call the code of `nxb ios` | **no device test.** Each stage was checked with a real `xcodebuild`. Nobody ran the stages in one run |
 | `--provisional`, `--survey-only`, `--no-heap-check`, `--profile-out` | the survey options (refer to the next section) | see the next section |
 | `--allow-shader-regressions` | accepted, no effect. No regression check is in the build | not applicable |
@@ -347,7 +347,7 @@ with the same command lines and the same environment variables:
 - `nxb ios shell --prepare-xcode` and `nxb ios shell --build` do the work of the shell script.
 
 `NXB_ENGINE` gives the folder of the engine files that the stages read. `nxb build --platform ios` runs the iOS flow in one process graph
-(see the end of this section). Without `--platform`, `nxb build` refuses a value other than `mac-app` and `ios`.
+(see the end of this section). `--platform` takes `ios`, `mac` or `mac-app`. Other values stop with exit code 2.
 
 `xcodegen`, `xcodebuild`, `sips` and `plutil` stay external. They run through the `Tool` trait.
 Since 0.4.0, the stage signs the iOS executable with the own signer. No call of `codesign`, `xattr` or `PlistBuddy` is left in the signing step.
@@ -403,10 +403,13 @@ and on a bundle with a 300 MB streamed file. A full game IPA was not compared. T
 
 The archive stage compiles one Metal 4 render pipeline base for each shader pair into native GPU code with Apple's `metal-tt`.
 
-- `nxb pso` copies the plan, the script, the stamp and the batch cut byte for byte: the same base sequence, contiguous batches of 1,000.
-- Each batch is a task that holds CPU and memory (2.1 GiB default, from the measured peak memory). It waits for the libraries that its bases use.
-- Each batch runs `applegpu-nt -j 1` and then `air-pack`. The stage runs one batch for each core.
-- The merge keeps the batch sequence (`metal-pack` inputs in index sequence).
+- `nxb pso` copies the plan, the script and the stamp byte for byte.
+- The batches are cut by content. The bases are grouped by their vertex function. The groups are sorted by hash and cut into hash ranges.
+  A new or removed base changes only the batch of its range. On a rebuild, the other batches come from the store.
+- Each batch is a task that holds CPU and memory. The memory of a batch is 1.9 GiB for each 1,000 bases plus 512 MiB. It waits for the libraries that its bases use.
+- Each batch runs `applegpu-nt -j 1` and then `air-pack`. The stage runs one batch for each core. A batch has up to 2,000 bases.
+- When these tools are not found, each batch runs `metal-tt`. Then a batch has up to 1,000 bases and takes 2.2 GiB for each 1,000 bases. One batch runs for each two cores.
+- The merge puts the pieces in hash order (`metal-pack`).
 - Measured on the reference title, cold: 207 s against 257 s for the reference build scripts, and 958 to 1,076 CPU seconds against 1,974.
   The loader probe found all 18,300 bases. The machine load was 7 to 33.
 - Measured: `bases.mtl4-json` and `prebuilt.tsv` are byte-identical (18,301 pairs). The `metal-tt` output is not deterministic. Thus the tests compare archives by content.
@@ -452,7 +455,7 @@ Without the options, nothing changes. The unit tests check the order and the mar
 
 The crate `nxb-profile` (layer L2) holds the profile of a game as typed data: computed values, declared values with a proof for each override, and rules (engine, frame limit, cuts with a reason).
 It has a reader and a writer for a subset of TOML (the workspace has no external crates). It finds problems such as an override without a proof or a cut without a reason.
-The build stages do not use it yet.
+The survey of `nxb build` reads and writes the profile file with `nxb_profile::tsv::TsvFile` (in `host/survey_profile.rs`). Only `nxb profile show` uses the typed profile.
 
 ## Byte identity for each stage
 

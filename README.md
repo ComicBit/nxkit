@@ -13,17 +13,20 @@ A switch turns it off: `NXB_OWN_RAW=0`. If the front end rejects a shader, Apple
 
 ## Status
 
-Version 0.6.3 is the eleventh public release. It is early software. Read this section before you use it.
+Version 0.6.6 is the fourteenth public release. It is early software. Read this section before you use it.
 
 - Mac only for the build tools. The tools run on macOS on Apple silicon. Other systems are not supported.
-- The tools need Apple tools (`metal`, `metallib`, `air-opt`, `metal-tt`, `codesign`, `xcrun`) from your own Xcode.
-- Fixed in this release: the Mac shader step runs without the own-identical allow list, with the raw path on. Before, it stopped with a missing `data/own-front` folder.
+- The tools need Apple tools (`metal`, `metallib`, `air-opt`, `clang`, `metal-tt`, `metal-pack`, `codesign`, `xcrun`) from your own Xcode.
+- Changed in 0.6.6: the own front end also makes the iOS shader libraries. No GPU test and no device test covers them. `NXB_OWN_RAW_IOS=0` gives Apple's libraries.
+- Changed in 0.6.5: the shader step needs less CPU time and memory, and fewer shaders go to Apple's `metal`. A full shader build for iOS writes the stamp that the framework step needs.
+- Changed in 0.6.4: the pipeline archive starts compiler runs by the load of the Mac. The new option `--load-limit` sets the limit.
+- Fixed in 0.6.3: the Mac shader step runs without the own-identical allow list, with the raw path on. Before, it stopped with a missing `data/own-front` folder.
 - Changed in 0.6.2: the rewrite step follows the engine `88c7e03f`, and the extract stage reports the bytes it writes.
 - Changed in 0.6.0: the Rust translator writes MSL directly and is the only translator. The C# translator, `spirv-cross` and the MSL text passes are gone.
   The options `--xlate*`, `--dotnet-root` and `--spirv-cross` and the command `nxb shaders recompile` are removed.
   Refer to [CHANGELOG.md](CHANGELOG.md).
 - One Rust translator writes MSL directly. It runs in the process of the shader step. The tools need no .NET runtime and no `spirv-cross`.
-  Its output is not byte-identical to the output of the reference build scripts. No game ran with it yet. Unit tests and Metal compile tests on built samples cover it.
+  Its output is not byte-identical to the output of the reference build scripts. One game ran with it and looked the same in a check by eye. This is not a GPU test. Unit tests and Metal compile tests on built samples cover it.
 - `nxb build --platform ios` runs the iOS flow. Each stage was checked alone. Nobody ran the stages in one run. There is no device test.
 - A full build in one run with these defaults was not timed. Each stage was compared alone. A full run on one title had an archive error that 0.5.1 fixes. Nobody ran the full build again.
 - **The raw path is on by default.** Its libraries are not byte-identical to Apple's libraries. In a GPU test of 3,625 shaders (about 15 % of the corpus),
@@ -57,8 +60,9 @@ more titles.
 | IPA writer | a 59-entry sample and a bundle with a 300 MB file | byte-identical. A full game IPA was not built |
 | iOS stages (`nxb ios`) | generators and workspace writer on real and synthetic inputs, one title for the IPA | the generators are byte-identical. 75 of 75 IPA entries are equal in name, method, sizes, CRC and attributes. Two entries are equal in part only: the executable (only `__LINKEDIT` differs) and the font file |
 | Overlap in `nxb build` | one title, extract, split and shaders reused | the event streams are the same, except the times. 58,211 of 58,211 paths exist in both outputs. All files are byte-identical, except two rebuilt Mach-O files and their lines in `CodeResources` |
-| Shader step translator | MSL written by the Rust translator | not compared byte for byte with the reference build scripts. No game ran with it yet |
-| Rewrite (`nxb rewrite`), current engine (0.5.1) | 111 modules: 9 real, 4 synthetic and 98 NRO modules | `.patched.bin`, the six tables and `build_src.sha256` are byte-identical in 111 of 111. |
+| Shader step translator | MSL written by the Rust translator | not compared byte for byte with the reference build scripts. One game looked the same in a check by eye |
+| Rewrite (`nxb rewrite`), current engine `88c7e03f` (0.6.2) | 6 real modules of one title and 11 synthetic main modules | all output files are byte-identical in 6 of 6. The 11 synthetic modules are identical too |
+| Rewrite (`nxb rewrite`), script of 0.5.1 | 111 modules: 9 real, 4 synthetic and 98 NRO modules | `.patched.bin`, the six tables and `build_src.sha256` are byte-identical in 111 of 111. The script changed after this comparison |
 | Rewrite (`nxb rewrite`), earlier script | 25 real modules, with ZBIC, NRO and frame step stubs | all tables, `.patched.bin` and the fixups are byte-identical. 98 of 98 NRO modules also. The script changed after this comparison |
 | Profile files, survey and `nxb profile` (0.5.1) | 1,115 tables of 145 profiles, 11 extractions, 6 surveys | read and write of the tables: 1,115 of 1,115. Guess: 11 of 11. Survey and provisional profile: 6 of 6. Registered profile check: 10 of 10 |
 | Split, ZBIC segments (0.5.1) | the four modules of one Switch 2 package, and a synthetic file | each segment hash is correct |
@@ -81,31 +85,32 @@ The numbers are therefore a little worse than on an idle machine. Source: `docs/
 | Shaders, cold, Apple front end | 799 s | 650 s | 1.2 times | measured |
 | Shaders, cold, own front end (identical output only) | 799 s | 586 s | 1.4 times | measured |
 | Shaders, cold, own front end (validated output) | 799 s | 416 s | 1.9 times | measured |
-| Pipeline archive | 257 s | 273 s | 0.94 times (slower) | measured |
+| Pipeline archive, `applegpu-nt -j 1` and `air-pack` | 257 s | 207 s | 1.2 times | measured |
+| Pipeline archive, `metal-tt` (when the two tools above are missing) | 257 s | 273 s | 0.94 times (slower) | measured |
 | Mac app stage, fresh | 129 s | 23 s | 5.6 times | measured |
 | `nxb build`, shaders given | about 623 s | 317 s | 2.0 times | measured |
 | Full build in sequence | 1,422 s | about 960 s | 1.5 times | estimate |
-| Raw path, compile CPU for each library, 44 shaders | 109 ms | 97.5 ms | 1.1 times | measured, small sample, loaded machine |
-| `nxb build` with overlap, shaders given | 136.2 s | 133.0 s | 1.02 times | measured, one run, no cold gain shown |
+| Raw path, compile CPU for each library, 44 shaders | 109 ms | 97.5 ms | 1.1 times | measured, small sample, loaded machine. The left time is nxbuild without the raw path |
+| `nxb build` with overlap, shaders given | 136.2 s | 133.0 s | 1.02 times | measured, one run, no cold gain shown. The left time is the earlier `nxb` binary |
 | `nxb build` with overlap, cold | | | | not timed. A gain is an estimate |
 | Rewrite of a 29 MB main module | 63 s | 3.4 s | 19 times | measured, machine not quiet |
 | Rewrite of a larger main module | 121 s | 8.9 s | 14 times | measured, machine not quiet |
 | Shader step subset (160 keys), raw path against Apple's compiler | 14.4 s | 6.5 s | 2.2 times | measured, not a benchmark, load average 8 to 12 |
 | Full cold build with the raw path on all shaders | | | | not measured. The earlier estimate of 4 to 6 minutes less is an estimate |
 
-The first estimate in the table is the sum of the measured stages, and it does not use the 0.4.0 changes. It was not run as one process. The archive step is slower because `metal-tt`
-limits it. The own front end is not byte-identical in the validated mode.
+The first estimate in the table is the sum of the measured stages, and it does not use the 0.4.0 changes. It was not run as one process. The estimate uses the archive time of 273 s. The own front end is not byte-identical in the validated mode.
 
 ### Known limits
 
 - The Rust translator is new. It is the only translator, and its output is not compared byte for byte with the reference scripts. A key that it does not translate gets the reason `translation failed` or the reason that the translator names.
 - The Ampere path is checked on one package. Its jobs come from a new Rust job writer. Nobody compared them with the job writer of the reference scripts.
 - The raw path is not byte-identical to Apple. A GPU test covered 3,625 shaders, and 220 differed (about 6 %). The check in the process looks at the container only.
-  The raw path is not wired for iOS. After a change of the front end, an old raw cache entry can stay in the store.
+  The raw path also makes the iOS libraries. No GPU test and no device test covers them. Apple's `air-validate` accepts them.
+  After a change of the front end, an old raw cache entry can stay in the store.
 - The own-identical allow list is not in this repository. Without it, only the raw path runs. A new Metal toolchain version has no verdicts, and then only the raw path runs.
 - The pipeline archive uses Apple tools. "Equal" means that the loader finds each base library.
 - The app stage puts about 58,000 loose library files in the app. The reference script packs one image file. The host reads the two forms. `DMSH_IOS_PULL=0` is not ported.
-- The rewrite step is checked against the current script on 111 modules.
+- The rewrite step is checked against the script of the engine `88c7e03f` on 6 real modules and 11 synthetic modules.
   The finders for Unreal and Snowdrop have no real positive sample. The layouts of three more titles and some frame step stubs are checked with synthetic files only.
   Three more titles were not checked again with the current script.
 - Each change of the engine changes the hashes that the rules pin. Make the rules again (`nxb rewrite-rules`) and compare the oracle cases. If the engine differs from the pin,
@@ -127,7 +132,7 @@ limits it. The own front end is not byte-identical in the validated mode.
 - Some error lines start with an old program name (`nxb-extract:` and others). `nxb self-check` finds the external tools only. The signer command `nxb sign` gives exit code 3 for an unsupported input. The other commands give exit code 4.
 - The release ZIP file has an ad-hoc signature and no notarization.
 - There is one program, `nxb`. The separate program names of earlier releases (`nxb-extract`, `nxb-split`, `nxb-ios`, `nxb-macapp`, `nxb-ipa`, `nxb-pack`, `nxb-pso`, `nxb-archive`, `shaderbuild`, `airc`) are gone. Use `nxb <command>`.
-- Not done: Windows and Linux. The process runner and the locks refuse to run there.
+- Not done: Windows and Linux. On a system that is not Unix, the process runner and the locks refuse to run. The tests run on macOS only.
 - Two processes can write the same store key at the same time. The last writer wins. The files stay valid.
 - Parsers read untrusted files. Read [SECURITY.md](SECURITY.md) and [docs/security.md](docs/security.md) for the limits.
 
@@ -207,7 +212,7 @@ Run `nxb help build` for the full usage. Refer to [docs/pipeline-stages.md](docs
 | `--env-file`, `--motion`, `--no-motion`, `--seen-shaders`, `--romfs bundle\|separate`, `--keep-extracted`, `--show-fps` | the options of the reference script |
 | `--allow-damaged`, `--allow-other-metal`, `--allow-shader-regressions` | let the build go on after a damaged file or a newer Metal compiler. The last option has no effect |
 | `--mac-sign ID` | signs the app again with an identity. Not run with a real identity |
-| `--gpu ARCH\|none` | the architecture of the pipeline archive. The default is the architecture of this Mac. `none` skips the archive |
+| `--gpu ARCH\|none` | the architecture of the pipeline archive. `none` skips the archive. Default for `mac-app` with `shader_pairs.tsv` in the profile: the architecture of this Mac. Default for `ios` with `pso_mtl4` on in the profile: the `pso_gpu` list of the profile, else `g18p`. Else there is no archive |
 | `--provisional`, `--survey-only`, `--no-heap-check`, `--profile-out D` | a game without a profile: provisional profile, survey only, skip the checks that start the game, the folder of the profile |
 | `--own-front on\|off` | the own front end |
 | `--threads N` | parallel jobs of the shader step and the extract. The default is the Mac's P-core equivalents, `round(P + 0.4 × E)`: 10 on an M2 Max |
@@ -241,7 +246,8 @@ The tools read no fixed private path. Inputs come from arguments or from these v
 | `NXB_PARITY_*` | parity tests | game files for the comparison tests. Without them the tests skip |
 | `NXB_ORACLE_EXACT` | signer tests | set to `1` to compare bytes with the `codesign` of the host. Without it, the tests check that `codesign --verify` accepts our output. Set it on the Mac where the signer was proven |
 | `NXB_OWN_FRONT` | `nxb shaders` | set to `0` to turn off the own front end |
-| `NXB_OWN_RAW` | `nxb shaders`, `nxb build` | not set: the raw path is on for each shader that the front end accepts. `0`: off. `list`: only the shaders of the shipped raw allow list. A file name: only the shaders of that list |
+| `NXB_OWN_RAW` | `nxb shaders`, `nxb build` | not set: the raw path is on for each shader that the front end accepts. `0`: off. `list`: only the shaders of `raw-verified.txt` in the `data/own-front` folder of the build machine. The release does not have this file, and then the raw path is off. A file name: only the shaders of that list |
+| `NXB_OWN_RAW_IOS` | `nxb build` | `0`: Apple's compiler makes all iOS libraries. Not set: the iOS libraries follow `NXB_OWN_RAW` |
 | `NXB_REWRITE_RULES` | `nxb rewrite` | a folder with rule files. The default is `rewrite-rules` next to the binary, then `data/rewrite-rules` of the checkout |
 | `NXB_REWRITE_PATCHES` | `nxb rewrite` | a snapshot file instead of the rule folder |
 | `NXB_TMP` | `nxb extract` | a folder for decoded streams that do not fit in memory |
@@ -259,22 +265,22 @@ flowchart TD
   L2["L2 runtime: events, tools, store, scheduler, I/O"]
   L1["L1 domain: pure code, no I/O"]
   L0["L0 base: ids, errors, system calls (the only unsafe code)"]
-  LF["F front end: msl-lex, msl-parse, msl-sema, air-emit, air-bc, air-front, airc"]
+  LF["F front end: msl-lex, msl-parse, msl-sema, air-emit, air-bc, air-lib, air-front, airc, mslcheck"]
   L3 --> L2 --> L0
   L3 --> L1 --> L0
+  L2 --> L1
   L2 -.->|optional feature| LF
+  L3 -.->|optional feature| LF
 ```
 
-The build of one game has these steps. Apple tools do the steps in grey.
+The build of one game has these steps. On the Mac, the own front end makes the shader libraries in the process by default. Apple's tools `metal`, `air-opt` and `metallib` make the libraries that the own front end rejects.
 
 ```mermaid
 flowchart LR
   A["Extract"] --> B["Rewrite and split"]
   B --> C["Translate shaders"]
-  C --> D["Compile: metal"]
-  D --> E["Optimize: air-opt"]
-  E --> F["Make library: metallib"]
-  F --> G["Pipeline archive: metal-tt"]
+  C --> D["Make libraries: own front end or Apple tools"]
+  D --> G["Pipeline archive: applegpu-nt and air-pack, or metal-tt"]
   G --> H["Pack and sign"]
 ```
 

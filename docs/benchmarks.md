@@ -19,20 +19,20 @@ Each number has a label: measured, derived or estimate. Read the conditions firs
 | full build | 23:42 |
 | shader step | 13:19 (799 s) |
 | pipeline archive | 4:17 (257 s) |
-| extract and split | 2:27 + 0:43 (210 s) |
+| extract, rewrite and split | 2:27 + 0:19 + 0:43 (209 s) |
 | Mac app pack and sign | 2:09 (129 s) |
 
 ## nxbuild (measured, 2026-11-05)
 
 | stage and run | wall | CPU user + system (s) | average cores | reference build scripts | factor |
 |---|---|---|---|---|---|
-| extract and split, cold, 3 runs | 15.5 s, 13.4 s, 10.5 s | approximately 49 + 7 to 11 | 3.9 to 5.4 | 210 s | 13.5x to 20x |
+| extract and split, cold, 3 runs | 15.5 s, 13.4 s, 10.5 s | approximately 49 + 7 to 11 | 3.9 to 5.4 | 209 s | 13.5x to 20x |
 | extract and split, warm, 2 runs | 14.7 s, 13.3 s | 48.9 + 11.1 | 4.1 to 4.5 | | |
 | shader step, cold, Apple front end | 650.2 s (10:50) | 4,347.5 + 728.6 | 7.8 | 799 s | 1.23x |
 | shader step, cold, own front end for `own-identical` shaders | 586.4 s (9:46) | 3,862.4 + 667.5 | 7.7 | 799 s | 1.36x |
 | shader step, cold, own front end for `own-identical` and `own-validated` shaders | 416.1 s (6:56) | 2,528.9 + 509.5 | 7.3 | 799 s | 1.92x |
 | shader step, warm store, outputs removed | 113.3 s | 333.1 + 116.7 | 4.0 | | 7.1x |
-| pipeline archive, cold, `metal-tt` for each batch | 273.0 s | 1,974.2 + 174.3 | 7.7 | 257 s | 0.94x |
+| pipeline archive, cold, `metal-tt` for each batch | 273.0 s | 1,974.2 + 174.3 | 7.9 | 257 s | 0.94x |
 | pipeline archive, cold, `applegpu-nt -j 1` and `air-pack` for each batch, one batch for each core (load 7 to 33) | 207 s | 958 to 1,076 | | 257 s | 1.24x |
 | pipeline archive, no change | 3.2 s | | | | |
 | Mac app, new | 23.0 s | 7.5 + 18.3 | 1.1 | 129 s | 5.6x |
@@ -47,10 +47,10 @@ The Apple front end and the own front end for `own-identical` shaders gave the s
 ## Full build (derived)
 
 The sum of the stages is approximately 16:00 with the Apple front end, 15:00 with the own front end for `own-identical` shaders,
-and 12:30 with the own front end for `own-identical` and `own-validated` shaders. The reference build scripts take 23:42.
+and 12:10 with the own front end for `own-identical` and `own-validated` shaders. The reference build scripts take 23:42.
 This is a factor of approximately 1.5x, 1.6x or 1.9x. These sums use the first archive time (273 s). With the archive time of 207 s, each sum is approximately 1 min shorter (derived). Nobody ran this sum as one process. There is no overlap of stages in this sum.
 The overlap of stages in version 0.3.0 can make a real run shorter than the sum. Nobody timed a cold build with overlap, thus the size of the gain is an estimate.
-The changes of version 0.4.0 (raw path, Rust translator, host) are not in these sums. Since 0.5.1, the Rust translator is off by default. The 0.5.1 changes (the fix of the chain value, the rewrite step of the current engine, the new inputs and options of `nxb build`) are not in these sums. Nobody timed a full run of `nxb build` with them.
+The changes of version 0.4.0 (raw path, Rust translator, host) are not in these sums. The 0.5.1 changes (the fix of the chain value, the rewrite step of the current engine, the new inputs and options of `nxb build`) are not in these sums. Nobody timed a full run of `nxb build` with them.
 
 ## Findings
 
@@ -84,7 +84,7 @@ No run below is a full build. The numbers of the earlier sections do not include
 | NRO collection, one image | 4.5 s (script) | 3.5 s | measured. The archive table dominates both times |
 | translation of 802 jobs, host against process bridge | 6.3 to 8.4 s (19 starts) | 1.0 to 1.7 s (1 start) | measured, load average 9 to 10 |
 | shader step subset (160 keys, 261 shaders), host against process bridge | 20.7 s | 20.2 s | measured. The Metal compile dominates |
-| shader step subset (160 keys), Rust translator against C# process bridge | 16 s | 17 s | measured with 0.4.0, with the Rust translator on. No gain, no .NET process. The translator is off by default since 0.5.1 |
+| shader step subset (160 keys), Rust translator against C# process bridge | 16 s | 17 s | measured with 0.4.0, with the Rust translator on. No gain, no .NET process |
 | shader step subset (160 keys), raw path on all shaders against Apple's compiler | 14.4 s | 6.5 s | measured, not a benchmark |
 
 Notes:
@@ -99,7 +99,6 @@ Notes:
 
 | change | expected decrease (estimate) | basis |
 |---|---|---|
-| translator server and `spirv-cross` server | warm -55 to -75 s, cold -50 to -80 s. The translator host is done in 0.4.0 and not measured on a full build. The `spirv-cross` server is not done | 667 .NET starts in one run (measured) |
 | own front end at 90 % coverage | shader step 5 min or less | 62 to 72 ms against 140 to 226 ms core time for each input |
 | store format 2 with manifests | full-hit path 5 to 10 times faster | 108,320 store files (measured) |
 | pipes as an alternative to temporary files | 1 % to 3 % on an internal SSD, 5 % to 10 % on an external disk | 31 % of thread time in open, read and close (measured) |
@@ -107,8 +106,9 @@ Notes:
 
 ## Chain changes (measured)
 
-Each stage has its own content key, and no key contains V (refer to [early-cutoff.md](early-cutoff.md)).
-Measured on the reference title, Mac target, from the store of a full build. The machine load was 21 to 47.
+Each stage has its own content key (refer to [early-cutoff.md](early-cutoff.md)). The translator key `nxb.xlate.v2` contains V.
+The compile key `nxb.metallib.v2` does not contain V. Thus a change of V translates again, but the same MSL does not compile again.
+The table comes from the 0.1.0 release. Measured on the reference title, Mac target, from the store of a full build. The machine load was 21 to 47.
 
 | change | wall time |
 |---|---|
