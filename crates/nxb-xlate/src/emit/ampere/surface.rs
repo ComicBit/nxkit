@@ -1,9 +1,9 @@
-//! Surfaces of `InstEmitAmpereMem.cs`: SULD, SUST, SUATOM. The shared emitters bind the handle in the default bank (c[2]);
-//! a handle in another bank fails closed.
+//! Surfaces of `InstEmitAmpereMem.cs`: SULD, SUST, SUATOM, SURED. SUATOM and SURED take a handle in any bank. SULD and
+//! SUST bind it in the default bank (c[2]) and fail closed in another.
 
 use super::operand::*;
 use super::tex::tex_handle;
-use crate::emit::mem::surface::emit_suatom;
+use crate::emit::mem::surface::{emit_suatom, emit_sured};
 use crate::emit::mem::surface_ldst::{emit_suld, emit_sust};
 use crate::emit::mem::tex::DEFAULT_CBUF_SLOT;
 use crate::maxwell::enums::*;
@@ -56,9 +56,6 @@ pub(super) fn surface(ctx: &mut Ctx) -> R {
 pub(super) fn suatom(ctx: &mut Ctx) -> R {
     let x = x(ctx);
     let (handle, cbuf_slot) = tex_handle(ctx, &x);
-    if cbuf_slot != DEFAULT_CBUF_SLOT {
-        return Err(fail(ctx, &format!("SUATOM handle in bank {cbuf_slot}")));
-    }
     if x.bits(81, 84) != 7 {
         return Err(fail(ctx, "SUATOM with a predicate result"));
     }
@@ -77,5 +74,31 @@ pub(super) fn suatom(ctx: &mut Ctx) -> R {
         false,
         false,
         false,
+        cbuf_slot,
+    )
+}
+
+/// `ASured` (0x59f): an image reduction through a handle, laid out as SUATOM with no result. The operation is in
+/// SUATOM's field and the size is 32 bits. Another form is refused.
+pub(super) fn sured(ctx: &mut Ctx) -> R {
+    let x = x(ctx);
+    if x.bits(64, 96) & !(0xf << 23) != 0x0010_e000 || x.bits(59, 61) != 0 {
+        let form = x.bits(64, 96);
+        return Err(fail(ctx, &format!("SURED form {form:08x}")));
+    }
+    let (handle, cbuf_slot) = tex_handle(ctx, &x);
+    emit_sured(
+        ctx,
+        SuDim(x.bits(61, 64)),
+        0,
+        SuatomOp(x.bits(87, 91)),
+        SuatomSize::U32,
+        handle,
+        x.ra(),
+        x.rb(),
+        0,
+        false,
+        false,
+        cbuf_slot,
     )
 }

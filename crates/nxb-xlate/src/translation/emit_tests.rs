@@ -157,3 +157,40 @@ fn tld_takes_a_register_handle() {
     assert!(t.contains("d=l0, s=R1:8,"), "{t}");
     assert!(t.contains("R1:12"), "{t}");
 }
+
+/// `SURED.OR [R4], R6` on a 2D image whose handle is word 0x10 of bank `slot`.
+fn sured(slot: u64, op: u64) -> (u64, u64) {
+    let lo = 0x59f | APT | 4 << 24 | 6 << 32 | 0x10 << 40 | slot << 54 | 3 << 61;
+    (lo, 0x0010_e000 | op << 23)
+}
+
+/// `SUATOM.ADD` of size `size` on a 2D image whose handle is word 0x10 of bank `slot`, no result register.
+fn suatom(slot: u64, size: u64) -> (u64, u64) {
+    let lo = 0x593 | APT | 255 << 16 | 4 << 24 | 6 << 32 | 0x10 << 40 | slot << 54 | 3 << 61;
+    (lo, size << 9 | 7 << 17)
+}
+
+#[test]
+fn suatom_in_the_games_uniform_buffer_names_its_format_by_size() {
+    let t = ampere_cs_text(&[suatom(3, 6)]).expect("emit");
+    // the size Sd32 gives R32Sint (12) without asking a descriptor
+    assert!(t.contains("t=3,12,"), "{t}");
+    let t = ampere_cs_text(&[suatom(3, 0)]).expect("emit");
+    assert!(t.contains("t=3,11,"), "{t}");
+}
+
+#[test]
+fn sured_takes_the_operation_of_suatom_and_any_bank() {
+    let add = ampere_cs_text(&[sured(3, 0)]).expect("emit");
+    let or = ampere_cs_text(&[sured(3, 6)]).expect("emit");
+    assert!(add.contains("t=3,11,12582912,"), "{add}");
+    assert!(or.contains("t=3,11,12976128,"), "{or}");
+    assert!(ampere_cs_text(&[sured(2, 6)]).is_ok());
+}
+
+#[test]
+fn sured_refuses_another_form() {
+    let (lo, hi) = sured(2, 0);
+    let r = ampere_cs_text(&[(lo, hi | 1 << 4)]);
+    assert!(r.is_err_and(|e| e.contains("SURED form")));
+}
