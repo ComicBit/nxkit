@@ -344,7 +344,8 @@ mod tests {
             panic!("no elapsed");
         };
         let el = *el;
-        assert!((0.1..0.25).contains(&el), "elapsed {el}");
+        // the time since its `stage` would be at least 0.42 s, a loaded runner adds some to the own 0.12 s
+        assert!((0.1..0.4).contains(&el), "elapsed {el}");
     }
 
     #[test]

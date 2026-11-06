@@ -17,7 +17,7 @@ step "clippy (deny warnings)"
 cargo clippy --workspace --all-targets --locked --offline -- -D warnings
 
 step "tests"
-cargo test --workspace --locked --offline
+cargo test --workspace --locked --offline --no-fail-fast
 
 step "docs (deny warnings)"
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked --offline --quiet
