@@ -106,3 +106,29 @@ fn the_table_and_the_log_are_argument_buffer_members() {
     assert!(kinds.contains(&"gmem_map"), "{kinds:?}");
     assert!(kinds.contains(&"gmem_log"), "{kinds:?}");
 }
+
+#[test]
+fn a_signed_shared_compare_and_swap_is_a_bit_exact_unsigned_one() {
+    let mut b = super::tests::compute();
+    b.io(StorageKind::Input, IoVariable::GlobalId, 0);
+    let zero = b.k(0);
+    let g = b.load_io(
+        StorageKind::Input,
+        IoVariable::GlobalId,
+        None,
+        1,
+        AggType::U32,
+    );
+    let (cmp, new) = (b.k(-1), b.k(-2));
+    let cas = b.op(
+        Inst::AtomicCompareAndSwap,
+        StorageKind::SharedMemory,
+        0,
+        vec![zero, g, cmp, new],
+    );
+    let _ = b.def(AggType::S32, cas);
+    let m = msl(&b);
+    assert!(m.contains("atomic_compare_exchange_weak_explicit("), "{m}");
+    assert!(m.contains("uint t3 = 4294967295u;"), "{m}");
+    assert!(m.contains("gl_GlobalInvocationID.y"), "{m}");
+}

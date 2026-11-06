@@ -226,3 +226,66 @@ fn a_3d_image_array_drops_its_layer() {
     assert!(m.contains(".read(uint3(1, 2, 3))"), "{m}");
     assert!(notes(&b).iter().any(|n| n.starts_with("3D image array")));
 }
+
+/// A compute shader with one image atomic on an image of `ty` and `format`. `flags` are the atomic flags.
+pub(super) fn image_atomic(ty: SamplerType, format: usize, flags: u32, coords: usize) -> B {
+    let mut b = bare_compute();
+    b.s.props.host.metal_image_atomics = true;
+    let mut tex = texture(&mut b, ty, true);
+    tex.format = format;
+    tex.flags = flags;
+    b.s.props.properties.images[0].format = format;
+    b.s.program.images[0].format = format;
+    let mut srcs: Vec<A> = (0..coords).map(|k| b.k(k as i32 + 1)).collect();
+    srcs.push(b.k(5));
+    if flags & (15 << 16) == 9 << 16 {
+        srcs.push(b.k(6));
+    }
+    let ty = if format == 12 {
+        AggType::S32
+    } else {
+        AggType::U32
+    };
+    let op = b.s.info.ast.new_tex_op(Inst::ImageAtomic, tex, 0, srcs);
+    let _ = b.def(ty, op);
+    b
+}
+
+#[test]
+fn an_image_atomic_stays_inside_the_image() {
+    let m = msl(&image_atomic(SamplerType::TEXTURE_2D, 11, 6 << 16, 2));
+    assert!(
+        m.contains("texture2d<uint, access::read_write> fp_i_2"),
+        "{m}"
+    );
+    assert!(
+        m.contains("if (all(t0c < uint2(spvDescriptorSet0.fp_i_2.get_width(), spvDescriptorSet0.fp_i_2.get_height()))) { t0 = spvDescriptorSet0.fp_i_2.atomic_fetch_or(t0c, uint4(5u)).x; }"),
+        "{m}"
+    );
+    assert!(m.contains("uint t0 = 0u;"), "{m}");
+}
+
+#[test]
+fn a_signed_atomic_uses_the_signed_image_and_a_compare_swaps() {
+    let m = msl(&image_atomic(SamplerType::TEXTURE_BUFFER, 12, 9 << 16, 1));
+    assert!(m.contains("texture_buffer<int, access::read_write>"), "{m}");
+    assert!(
+        m.contains("if (t0c < spvDescriptorSet0.fp_i_2.get_width())"),
+        "{m}"
+    );
+    assert!(
+        m.contains("atomic_compare_exchange_weak(t0c, &t0x, int4(5));"),
+        "{m}"
+    );
+}
+
+#[test]
+fn an_array_image_atomic_tests_its_layer() {
+    let ty = SamplerType(SamplerType::TEXTURE_2D.0 | SamplerType::ARRAY);
+    let m = msl(&image_atomic(ty, 11, 1 << 16, 3));
+    assert!(
+        m.contains("t0l < spvDescriptorSet0.fp_i_2.get_array_size()"),
+        "{m}"
+    );
+    assert!(m.contains("atomic_fetch_min(t0c, t0l, uint4(5u))"), "{m}");
+}
