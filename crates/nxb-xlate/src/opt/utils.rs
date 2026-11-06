@@ -128,10 +128,11 @@ pub fn find_last_operation(
             undef_count += 1;
         }
     }
-    if undef_count + 1 == sources.len() {
+    // The rule holds for this phi alone, not for an outer phi around it: the other sources' phis are seen through
+    if recurse && undef_count + 1 == sources.len() {
         for i in (0..sources.len()).rev() {
             if ir.ty(sources[i].1) != OperandType::Undefined {
-                return Ok(sources[i].1);
+                return find_last_operation(ir, blocks, sources[i].1, block, true);
             }
         }
     }
@@ -146,4 +147,38 @@ pub fn delete_node(ir: &mut Ir, block: &mut Block, pos: usize) {
         ir.set_source(node, i, None);
     }
     ir.clear_dests(node);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Two phis: the inner one takes (undefined, a), the outer one (inner, b).
+    fn nested() -> (Ir, Opd, Opd, Opd, Opd) {
+        let mut ir = Ir::default();
+        let (a, b) = (ir.cbuf(3, 1), ir.cbuf(3, 2));
+        let undef = ir.undef();
+        let (inner, outer) = (ir.local(), ir.local());
+        let p = ir.new_phi(inner);
+        ir.phi_add_source(p, 0, undef);
+        ir.phi_add_source(p, 1, a);
+        let q = ir.new_phi(outer);
+        ir.phi_add_source(q, 2, inner);
+        ir.phi_add_source(q, 3, b);
+        (ir, a, b, inner, outer)
+    }
+
+    #[test]
+    fn a_phi_with_one_defined_source_is_that_source() {
+        let (ir, a, _, inner, _) = nested();
+        let blocks = vec![Block::default(); 4];
+        assert_eq!(find_last_operation(&ir, &blocks, inner, 0, true), Ok(a));
+    }
+
+    #[test]
+    fn the_one_defined_source_rule_does_not_reach_through_an_outer_phi() {
+        let (ir, _, _, _, outer) = nested();
+        let blocks = vec![Block::default(); 4];
+        assert_eq!(find_last_operation(&ir, &blocks, outer, 0, true), Ok(outer));
+    }
 }
