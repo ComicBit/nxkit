@@ -73,7 +73,7 @@ pub(super) fn is_atomic(inst: Inst) -> bool {
     )
 }
 
-fn is_small_int(k: StorageKind) -> bool {
+pub(super) fn is_small_int(k: StorageKind) -> bool {
     matches!(
         k,
         StorageKind::GlobalMemoryS8
@@ -126,7 +126,7 @@ pub(super) fn function_name(
     Ok(name)
 }
 
-fn bit_offset(b: &mut B, offset: Opd) -> Opd {
+pub(super) fn bit_offset(b: &mut B, offset: Opd) -> Opd {
     let c3 = b.ir.const_(3);
     let m = b.op(Inst::BitwiseAnd, &[offset, c3]);
     let c3b = b.ir.const_(3);
@@ -249,7 +249,7 @@ fn generate_storage_op(
     Ok(Some(result))
 }
 
-fn finish_function(b: B, name: &str, returns: bool, in_args: i32) -> R<Function> {
+pub(super) fn finish_function(b: B, name: &str, returns: bool, in_args: i32) -> R<Function> {
     b.finish_with(name, returns, in_args, 0)
 }
 
@@ -354,244 +354,5 @@ pub(super) fn multi_target(
         b.ret(None);
     }
     let name = function_name(inst, kind, true, targets)?;
-    Ok(Some(finish_function(b, &name, returns_value, in_args)?))
-}
-
-/// `GmemMapCbSlot`: the sentinel constant buffer slot of the memory pool table and the write log.
-const GMEM_MAP_CB_SLOT: i32 = 0xff;
-const GMEM_MAP_LOG2: i32 = 12;
-const GMEM_MAP_ENTRY_WORDS: i32 = 8;
-const GMEM_LOG_CB_OFFSET: i32 = 1;
-const GMEM_LOG_LOG2: i32 = 10;
-const GMEM_LOG_PROBES: i32 = 8;
-
-fn map_word(b: &mut B, binding: i32, entry: Opd, word: i32) -> Opd {
-    let (c_b, c0) = (b.ir.const_(binding), b.ir.const_(0));
-    let w = b.ir.const_(word);
-    let idx = b.op(Inst::Add, &[entry, w]);
-    b.op_kind(Inst::Load, StorageKind::StorageBuffer, &[c_b, c0, idx])
-}
-
-/// `TryGenerateRawStorageOp`: `Ok(None)` when a storage buffer cannot be reserved. Sets `UsesPhysicalPointers`.
-pub(super) fn raw_target(
-    ir: &mut crate::ir::Ir,
-    env: &mut Env,
-    inst: Inst,
-    kind: StorageKind,
-    returns_value: bool,
-) -> R<Option<Function>> {
-    let small = is_small_int(kind);
-    if small && is_atomic(inst) {
-        let m = format!(
-            "Global memory operation \"{}\" on a small integer traced to no storage buffer: not implemented.",
-            inst_name(inst)?
-        );
-        env.acc.log(&m);
-        return Ok(None);
-    }
-    let Some(map_binding) =
-        env.rm
-            .try_get_storage_buffer_binding(env.acc, GMEM_MAP_CB_SLOT, 0, false)
-    else {
-        return Ok(None);
-    };
-    let writes = inst == Inst::Store || is_atomic(inst);
-    let mut log_binding = 0;
-    if writes {
-        let Some(l) = env.rm.try_get_storage_buffer_binding(
-            env.acc,
-            GMEM_MAP_CB_SLOT,
-            GMEM_LOG_CB_OFFSET,
-            true,
-        ) else {
-            return Ok(None);
-        };
-        log_binding = l;
-    }
-    env.rm.properties.uses_physical_pointers = true;
-    let in_args = if inst == Inst::AtomicCompareAndSwap {
-        4
-    } else if writes {
-        3
-    } else {
-        2
-    };
-    let mut b = B::new(ir);
-    let addr_low = b.ir.argument(0);
-    let addr_high = b.ir.argument(1);
-    let mut index = b.ir.const_(0);
-    let mut step = 1 << (GMEM_MAP_LOG2 - 1);
-    while step != 0 {
-        let cs = b.ir.const_(step);
-        let candidate = b.op(Inst::Add, &[index, cs]);
-        let cw = b.ir.const_(GMEM_MAP_ENTRY_WORDS);
-        let entry = b.op(Inst::Multiply, &[candidate, cw]);
-        let start_low = map_word(&mut b, map_binding, entry, 0);
-        let start_high = map_word(&mut b, map_binding, entry, 1);
-        let lt = b.op(Inst::CompareLessU32, &[start_high, addr_high]);
-        let eq = b.op(Inst::CompareEqual, &[start_high, addr_high]);
-        let le = b.op(Inst::CompareLessOrEqualU32, &[start_low, addr_low]);
-        let and = b.op(Inst::BitwiseAnd, &[eq, le]);
-        let at_or_below = b.op(Inst::BitwiseOr, &[lt, and]);
-        index = b.op(Inst::ConditionalSelect, &[at_or_below, candidate, index]);
-        step >>= 1;
-    }
-    let cw = b.ir.const_(GMEM_MAP_ENTRY_WORDS);
-    let found = b.op(Inst::Multiply, &[index, cw]);
-    let end_low = map_word(&mut b, map_binding, found, 2);
-    let end_high = map_word(&mut b, map_binding, found, 3);
-    let lt = b.op(Inst::CompareLessU32, &[addr_high, end_high]);
-    let eq = b.op(Inst::CompareEqual, &[addr_high, end_high]);
-    let lt2 = b.op(Inst::CompareLessU32, &[addr_low, end_low]);
-    let and = b.op(Inst::BitwiseAnd, &[eq, lt2]);
-    let in_pool = b.op(Inst::BitwiseOr, &[lt, and]);
-    let skip = b.ir.label();
-    b.branch_if_false(skip, in_pool);
-    if writes {
-        let c20 = b.ir.const_(20);
-        let hi_sh = b.op(Inst::ShiftLeft, &[addr_high, c20]);
-        let c12 = b.ir.const_(12);
-        let lo_sh = b.op(Inst::ShiftRightU32, &[addr_low, c12]);
-        let page = b.op(Inst::BitwiseOr, &[hi_sh, lo_sh]);
-        let mul = b.ir.const_(0x9e37_79b1u32 as i32);
-        let m = b.op(Inst::Multiply, &[page, mul]);
-        let sh = b.ir.const_(32 - GMEM_LOG_LOG2);
-        let hash = b.op(Inst::ShiftRightU32, &[m, sh]);
-        let logged = b.ir.label();
-        for probe in 0..GMEM_LOG_PROBES {
-            let cp = b.ir.const_(probe);
-            let h = b.op(Inst::Add, &[hash, cp]);
-            let cm = b.ir.const_((1 << GMEM_LOG_LOG2) - 1);
-            let masked = b.op(Inst::BitwiseAnd, &[h, cm]);
-            let c1 = b.ir.const_(1);
-            let slot = b.op(Inst::Add, &[masked, c1]);
-            let (c_b, c0, c0b) = (b.ir.const_(log_binding), b.ir.const_(0), b.ir.const_(0));
-            let old = b.op_kind(
-                Inst::AtomicCompareAndSwap,
-                StorageKind::StorageBuffer,
-                &[c_b, c0, slot, c0b, page],
-            );
-            let z1 = b.ir.const_(0);
-            let is0 = b.op(Inst::CompareEqual, &[old, z1]);
-            let is_page = b.op(Inst::CompareEqual, &[old, page]);
-            let either = b.op(Inst::BitwiseOr, &[is0, is_page]);
-            b.branch_if_true(logged, either);
-        }
-        let (c_b, c0, c0b, c1) = (
-            b.ir.const_(log_binding),
-            b.ir.const_(0),
-            b.ir.const_(0),
-            b.ir.const_(1),
-        );
-        b.raw(
-            Inst::Store,
-            StorageKind::StorageBuffer,
-            None,
-            &[c_b, c0, c0b, c1],
-        );
-        b.mark_label(logged);
-    }
-    let word_low = if small {
-        let m = b.ir.const_(!3);
-        b.op(Inst::BitwiseAnd, &[addr_low, m])
-    } else {
-        addr_low
-    };
-    let delta_low = map_word(&mut b, map_binding, found, 4);
-    let host_low = b.op(Inst::Add, &[word_low, delta_low]);
-    let wrapped = b.op(Inst::CompareLessU32, &[host_low, word_low]);
-    let (k1, k0) = (b.ir.const_(1), b.ir.const_(0));
-    let carry = b.op(Inst::ConditionalSelect, &[wrapped, k1, k0]);
-    let delta_high = map_word(&mut b, map_binding, found, 5);
-    let sum = b.op(Inst::Add, &[addr_high, delta_high]);
-    let host_high = b.op(Inst::Add, &[sum, carry]);
-    let mut result = None;
-    if inst == Inst::Load {
-        let mut v = b.op_kind(
-            Inst::Load,
-            StorageKind::GlobalMemory,
-            &[host_low, host_high],
-        );
-        if small {
-            let bo = bit_offset(&mut b, addr_low);
-            v = match kind {
-                StorageKind::GlobalMemoryS8 | StorageKind::GlobalMemoryS16 => {
-                    let sh = b.op(Inst::ShiftRightS32, &[v, bo]);
-                    let z = b.ir.const_(0);
-                    let w = b.ir.const_(if kind == StorageKind::GlobalMemoryS8 {
-                        8
-                    } else {
-                        16
-                    });
-                    b.op(Inst::BitfieldExtractS32, &[sh, z, w])
-                }
-                _ => {
-                    let sh = b.op(Inst::ShiftRightU32, &[v, bo]);
-                    let m = b.ir.const_(if kind == StorageKind::GlobalMemoryU8 {
-                        0xff
-                    } else {
-                        0xffff
-                    });
-                    b.op(Inst::BitwiseAnd, &[sh, m])
-                }
-            };
-        }
-        result = Some(v);
-    } else if inst == Inst::Store {
-        let value = b.ir.argument(2);
-        if small {
-            let bit_size = if matches!(
-                kind,
-                StorageKind::GlobalMemoryS8 | StorageKind::GlobalMemoryU8
-            ) {
-                8
-            } else {
-                16
-            };
-            let bo = bit_offset(&mut b, addr_low);
-            let head = b.ir.label();
-            b.mark_label(head);
-            let old = b.op_kind(
-                Inst::Load,
-                StorageKind::GlobalMemory,
-                &[host_low, host_high],
-            );
-            let size = b.ir.const_(bit_size);
-            let new = b.op(Inst::BitfieldInsert, &[old, value, bo, size]);
-            let cas = b.op_kind(
-                Inst::AtomicCompareAndSwap,
-                StorageKind::GlobalMemory,
-                &[host_low, host_high, old, new],
-            );
-            let fail = b.op(Inst::CompareNotEqual, &[cas, old]);
-            b.branch_if_true(head, fail);
-        } else {
-            b.raw(
-                Inst::Store,
-                StorageKind::GlobalMemory,
-                None,
-                &[host_low, host_high, value],
-            );
-        }
-    } else if inst == Inst::AtomicCompareAndSwap {
-        let (a2, a3) = (b.ir.argument(2), b.ir.argument(3));
-        result = Some(b.op_kind(
-            Inst::AtomicCompareAndSwap,
-            StorageKind::GlobalMemory,
-            &[host_low, host_high, a2, a3],
-        ));
-    } else {
-        let a2 = b.ir.argument(2);
-        result = Some(b.op_kind(inst, StorageKind::GlobalMemory, &[host_low, host_high, a2]));
-    }
-    b.ret(result);
-    b.mark_label(skip);
-    if returns_value {
-        let z = b.ir.const_(0);
-        b.ret(Some(z));
-    } else {
-        b.ret(None);
-    }
-    let name = format!("{}Raw", function_name(inst, kind, true, &[])?);
     Ok(Some(finish_function(b, &name, returns_value, in_args)?))
 }

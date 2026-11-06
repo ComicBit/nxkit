@@ -10,6 +10,7 @@ pub mod fold;
 pub mod frag_w;
 pub mod gts;
 pub mod gts_fn;
+pub mod gts_raw;
 pub mod simplify;
 pub mod tex;
 pub mod utils;
@@ -104,6 +105,7 @@ pub fn remove_node_uses(ir: &mut Ir, node: NodeId) {
                 && set.is_empty()
                 && let Some(asg) = ir.data(src).asg_op
                 && !has_side_effects(ir, asg)
+                && dest_has_no_uses(ir, asg)
             {
                 queue.push_back(asg);
             }
