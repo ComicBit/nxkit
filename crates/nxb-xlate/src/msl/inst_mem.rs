@@ -30,6 +30,8 @@ pub(super) struct Place {
     pub space: Space,
     /// The store has no effect (a point size next to a layer).
     pub skip: bool,
+    /// The value is a viewport mask and the place takes its viewport index.
+    pub mask: bool,
 }
 
 pub(super) fn is_atomic(inst: Inst) -> bool {
@@ -48,7 +50,7 @@ pub(super) fn is_atomic(inst: Inst) -> bool {
     )
 }
 
-fn swizzle_or_index(base: String, vector: bool, index: &str, c: Option<i32>) -> String {
+pub(super) fn swizzle_or_index(base: String, vector: bool, index: &str, c: Option<i32>) -> String {
     match (vector, c) {
         (true, Some(c)) if (0..4).contains(&c) => {
             format!("{base}.{}", ["x", "y", "z", "w"][c as usize])
@@ -102,6 +104,7 @@ impl Em<'_> {
                     mem: AggType::U32,
                     space: Space::Device,
                     skip: false,
+                    mask: false,
                 })
             }
             StorageKind::ConstantBuffer | StorageKind::StorageBuffer => {
@@ -138,6 +141,7 @@ impl Em<'_> {
                             mem: AggType::FP32,
                             space: Space::Constant,
                             skip: false,
+                            mask: false,
                         });
                     }
                 }
@@ -159,6 +163,7 @@ impl Em<'_> {
                     mem,
                     space: if cb { Space::Constant } else { Space::Device },
                     skip: false,
+                    mask: false,
                 })
             }
             StorageKind::LocalMemory | StorageKind::SharedMemory => {
@@ -191,6 +196,7 @@ impl Em<'_> {
                         Space::Threadgroup
                     },
                     skip: false,
+                    mask: false,
                 })
             }
             StorageKind::Input | StorageKind::Output => self.io_place(inst, o, trailing),
@@ -206,6 +212,12 @@ impl Em<'_> {
                 .ok_or("io access without a constant variable")? as u32,
         );
         let d = &self.props.definitions;
+        if out && super::ioidx::is_mask(var) {
+            return Ok(self.viewport_mask_place());
+        }
+        if var == IoVariable::UserDefined && (if out { d.oa_indexing } else { d.ia_indexing }) {
+            return self.indexed_place(o, out, 1);
+        }
         let (mut at, mut loc) = (1, 0);
         if d.has_per_location_input_or_output(var, out) {
             loc = self
@@ -254,6 +266,7 @@ impl Em<'_> {
             mem: scalar(stored),
             space: Space::Thread,
             skip,
+            mask: false,
         })
     }
 
@@ -295,6 +308,11 @@ impl Em<'_> {
                 if p.skip {
                     return Ok(None);
                 }
+                let v = if p.mask {
+                    Val::new(Self::mask_index(&v.s), AggType::U32)
+                } else {
+                    v
+                };
                 let v = self.as_type(v, p.mem);
                 let stmt = format!("{} = {};", p.s, v.s);
                 self.line(&stmt);

@@ -230,6 +230,7 @@ pub fn build(s: &Structured, ctx: &Context<'_>, opt: &Options) -> R<Translated> 
     )?);
 
     let mut notes = s.notes.clone();
+    notes.extend(plan.notes.iter().cloned());
     notes.extend(em.notes.iter().cloned());
     if ctx.no_facts {
         notes.push("not in the answer table, queries use defaults".into());
