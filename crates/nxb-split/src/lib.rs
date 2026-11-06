@@ -6,7 +6,9 @@
 //! container, never a silent difference.
 
 pub mod bahs;
+pub mod bzip2;
 pub mod capcom;
+pub mod cra;
 pub mod engines;
 pub mod glslc;
 pub mod inflate;
@@ -25,6 +27,7 @@ pub mod retro;
 pub mod scanfile;
 pub mod shaders;
 pub mod sized;
+pub mod sjis;
 pub mod snowdrop;
 pub mod src;
 pub mod sumo;

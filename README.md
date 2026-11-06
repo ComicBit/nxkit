@@ -28,7 +28,7 @@ Version 0.5.1 is the seventh public release. It is early software. Read this sec
   220 gave a different output. Nobody tested the other shaders. If you need Apple's output, set `NXB_OWN_RAW=0`.
 - The shader step for iOS is not part of the verified path. Only a sample was compared.
 - Unity readers, large text segments (100 MB and more), frame step builds without a local sample and framework and multi-program builds are checked with synthetic files only.
-- Not ported: the CRA archive family and each format that needs Oodle. These stop with exit code 4.
+- Not ported: each format that needs Oodle. These stop with exit code 4.
 - The reference scripts remain the fallback. If a stage fails or does not support an input, run the reference script for that stage.
   The tools return exit code 4 for an unsupported input. The caller then runs the reference script. Exit code 3 means damaged data.
   The signer command `nxb sign` returns 3 for unsupported input, and the caller runs `codesign`.
@@ -108,7 +108,10 @@ limits it. The own front end is not byte-identical in the validated mode.
   Three more titles were not checked again with the current script.
 - Each change of the engine changes the hashes that the rules pin. Make the rules again (`nxb rewrite-rules`) and compare the oracle cases. If the engine differs from the pin,
   `nxb rewrite` stops with exit code 4, and `nxb build` stops at the rewrite step with exit code 1. The message gives the two hashes.
-- Not supported in the extract and the split (exit code 4 with a named message): Oodle formats, LZ5, CRA, sparse NCAs, zip with bzip2 or lzma, BND3 names in double-byte Shift JIS.
+- Not supported in the extract and the split (exit code 4 with a named message): Oodle formats, LZ5.
+  The file table of a CRA archive is read from the NROs in `DM_NRO_DIR`. Without a table the split stops with a named message. The CRA reader was checked with a synthetic NRO and archive only.
+  The base game of a sparse program is read only with its update NSP (`--updates-only`). Without the update it stops with exit code 4, as in the reference.
+  The sparse reader follows the Atmosphere algorithm and was checked with a synthetic fixture only. The meta hash layer of a sparse section is not verified.
   The checksums of LZ4 frames are not checked. A base game with its update in one run gives an error in the reference split and in this split.
 - XCI, merged packages, dump folders, NSZ block mode and DLC were checked with synthetic files only. One real NSZ file was checked. `nxb build` does not split the shader content of DLC.
 - `nxb build` was run with a registered profile on one title (Mac app). A game without a profile gets a provisional profile. The heap check, the region check and the shader captures start the game, and they are not ported.

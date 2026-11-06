@@ -156,20 +156,18 @@ fn small_outputs(
     Ok(())
 }
 
-/// A program with a sparse layer leaves out data that Horizon reads through the patch: the reader for it is not
-/// ported (`nx_extract` itself reads such a base only with its update, exit code 4).
-fn refuse_sparse(prog: &Nca, with_update: bool) -> Result<()> {
+/// A program with a sparse layer leaves out data that Horizon reads through the patch, so the base alone cannot be
+/// read (`nx_extract` stops the same way, exit code 4). Under an update it is read.
+fn refuse_sparse(prog: &Nca) -> Result<()> {
     let sparse = prog
         .sections
         .iter()
         .flatten()
         .any(|(_, _, fs)| fs.is_sparse());
     if sparse {
-        return Err(ExtractError::Unsupported(if with_update {
-            "the base game's program is sparse (sparse layers are not read yet)".into()
-        } else {
-            "the base game's program is sparse: it can be read only with its update NSP".into()
-        }));
+        return Err(ExtractError::Unsupported(
+            "the base game's program is sparse: it can be read only with its update NSP".into(),
+        ));
     }
     Ok(())
 }
@@ -227,7 +225,9 @@ pub fn extract(req: &Request) -> Result<Summary> {
     let base_shared;
     {
         let (bp, _, ctrl) = pick_programs(&base, None)?;
-        refuse_sparse(bp, false)?;
+        if req.base_outputs || req.updates.is_empty() {
+            refuse_sparse(bp)?;
+        }
         let shared = base_data(&ks, bp, &cache)?;
         if req.base_outputs {
             let mut log = format!("{base_log}title {:016x}\n", bp.title_id);
@@ -252,7 +252,6 @@ pub fn extract(req: &Request) -> Result<Summary> {
     for ((u, u_log), (_, out)) in updates.iter().zip(&req.updates) {
         let (bp, up, ctrl) = pick_programs(&base, Some(u))?;
         let up = up.ok_or_else(|| ExtractError::format("no update program"))?;
-        refuse_sparse(bp, true)?;
         let mut log = format!(
             "{base_log}{u_log}title {:016x}, update {:016x}\n",
             bp.title_id, up.title_id

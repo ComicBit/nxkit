@@ -24,6 +24,13 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 - The command `nxb shaders recompile`. It depended on the MSL text passes.
 - The MSL text passes of `nxb-shader` (`msl`, `reflect`, `variants` and the side unit builder). The job writer, the chain version, the guards and the side library cut stay.
 
+### Added
+
+- The split reads zip members compressed with bzip2 or lzma. The decoders are `nxb-split::bzip2` (new) and `nxb-split::unity::lzma`.
+- The split reads BND3 archives whose entry names are Shift JIS with double-byte characters. The decoder is `nxb-split::sjis` (new). Its table is made by `tools/gen_sjis_table.py`.
+- The split reads the CRA archive family (`nxb-split::cra`, new). The file tables come from the NROs of `DM_NRO_DIR`, and each NRO is scanned like main. New `jobs::plan_with` takes the NROs. It was checked with a synthetic fixture made by `tools/gen_cra_fixture.py`.
+- The extract reads a sparse base program together with its update NSP (`nxb-extract::sparse`, new). The base alone still stops with exit code 4. The reader follows the Atmosphere sparse storage and was checked with a synthetic fixture.
+
 ## 0.5.1
 
 ### Changed (read this first)

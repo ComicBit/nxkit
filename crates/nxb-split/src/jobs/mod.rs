@@ -16,6 +16,7 @@ use crate::zstd::Dicts;
 pub mod arh;
 pub mod bdt;
 pub mod cpk;
+pub mod cra;
 pub mod kpka;
 pub mod linkdata;
 pub mod nlg;
@@ -43,6 +44,15 @@ impl File {
     fn head(&self, n: usize) -> R<Vec<u8>> {
         self.src.as_ref().read_up(0, n)
     }
+}
+
+/// The NROs of the game's `DM_NRO_DIR`, sorted by name: the CRA archives take their file table from them.
+#[derive(Default)]
+pub struct NroSet {
+    /// The folder as the reference names it in its message (`None` when the variable is unset).
+    pub dir: String,
+    /// The bytes of each `*.nro` file.
+    pub files: Vec<Arc<Vec<u8>>>,
 }
 
 /// What a job reads from.
@@ -133,6 +143,11 @@ pub fn deferred(rel: &str, head: &[u8]) -> bool {
 
 /// The plan over every file, in the reference's order of families (`big` of `main()`).
 pub fn plan(files: &[File]) -> R<Plan> {
+    plan_with(files, &NroSet::default())
+}
+
+/// [`plan`] with the NROs of `DM_NRO_DIR`.
+pub fn plan_with(files: &[File], nros: &NroSet) -> R<Plan> {
     let mut p = Plan::default();
     linkdata::plan(files, &mut p)?;
     kpka::plan(files, &mut p)?;
@@ -156,6 +171,7 @@ pub fn plan(files: &[File]) -> R<Plan> {
     smash::plan(files, &mut p)?;
     pkz::plan(files, &mut p)?;
     cpk::plan(files, &mut p)?;
+    cra::plan(files, nros, &mut p)?;
     zip::plan(files, &mut p)?;
     arh::plan(files, &mut p)?;
     Ok(p)

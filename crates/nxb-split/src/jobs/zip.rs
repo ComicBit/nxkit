@@ -11,6 +11,9 @@ use crate::rd::red;
 use crate::shaders::{Found, memfind, scan_blob};
 use crate::src::Src;
 
+#[cfg(test)]
+mod tests;
+
 /// IBM code page 437 above ASCII (`zipfile` decodes names without the UTF-8 flag with it).
 const CP437: &str = "ÇüéâäàåçêëèïîìÄÅÉæÆôöòûùÿÖÜ¢£¥₧ƒáíóúñÑªº¿⌐¬½¼¡«»░▒▓│┤╡╢╖╕╣║╗╝╜╛┐└┴┬├─┼╞╟╚╔╩╦╠═╬╧╨╤╥╙╘╒╓╫╪┘┌█▄▌▐▀αßΓπΣσµτΦΘΩδ∞φε∩≡±≥≤⌠⌡÷≈°∙·√ⁿ²■\u{a0}";
 
@@ -138,6 +141,17 @@ pub fn members(s: &dyn Src) -> R<Vec<Member>> {
     Ok(out)
 }
 
+/// A member of method 14: two version bytes, the size of the properties (5), the properties, then the raw LZMA
+/// stream, which may end with an end marker.
+fn lzma_member(raw: &[u8], limit: usize) -> R<Vec<u8>> {
+    if raw.len() < 4 || le(raw, 2, 2)? != 5 {
+        return Err(SplitError::Red(
+            "lzma.LZMAError: Invalid or unsupported options".into(),
+        ));
+    }
+    crate::unity::lzma::decompress(&raw[4..], limit)
+}
+
 /// `ZipFile.read(name)`: the member's bytes, the CRC checked.
 fn read(s: &dyn Src, m: &Member) -> R<Vec<u8>> {
     let h = s.read_up(m.offset, 30)?;
@@ -163,12 +177,8 @@ fn read(s: &dyn Src, m: &Member) -> R<Vec<u8>> {
         0 => raw,
         8 => crate::inflate::inflate(&raw, m.size as usize + 1)
             .ok_or_else(|| bad("Error -3 while decompressing data"))?,
-        12 | 14 => {
-            return Err(SplitError::Unsupported(format!(
-                "{}: zip compression {} (bzip2 or lzma)",
-                m.name, m.method
-            )));
-        }
+        12 => crate::bzip2::decompress(&raw, m.size as usize + 1)?,
+        14 => lzma_member(&raw, m.size as usize + 1)?,
         n => {
             return red(format!(
                 "NotImplementedError: That compression method is not supported ({n})"
