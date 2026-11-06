@@ -41,12 +41,14 @@ impl Em<'_> {
             Inst::SwizzleAdd => self.swizzle_add(o).map(Some),
             Inst::Barrier => {
                 if !self.barrier_diverges() {
-                    self.line("threadgroup_barrier(mem_flags::mem_threadgroup);");
+                    let flags = self.tg_flags();
+                    self.line(&format!("threadgroup_barrier({flags});"));
                 }
                 Ok(None)
             }
             Inst::SubgroupBarrier => {
-                self.line("simdgroup_barrier(mem_flags::mem_threadgroup);");
+                let flags = self.tg_flags();
+                self.line(&format!("simdgroup_barrier({flags});"));
                 Ok(None)
             }
             Inst::GroupMemoryBarrier | Inst::MemoryBarrier => {
@@ -55,13 +57,22 @@ impl Em<'_> {
                     let flags = if inst == Inst::MemoryBarrier {
                         "mem_flags::mem_device | mem_flags::mem_threadgroup | mem_flags::mem_texture"
                     } else {
-                        "mem_flags::mem_threadgroup"
+                        self.tg_flags()
                     };
                     self.line(&format!("threadgroup_barrier({flags});"));
                 }
                 Ok(None)
             }
             _ => Err(format!("unported: instruction {:x}", o.inst.0)),
+        }
+    }
+
+    /// The memory flags of a threadgroup barrier. The spilled shared memory is device memory.
+    fn tg_flags(&self) -> &'static str {
+        if self.shared.spill {
+            "mem_flags::mem_device | mem_flags::mem_threadgroup"
+        } else {
+            "mem_flags::mem_threadgroup"
         }
     }
 
@@ -128,7 +139,10 @@ impl Em<'_> {
                 }
                 self.return_default()?;
             }
-            Inst::LoopBreak => self.line("break;"),
+            Inst::LoopBreak => match self.loops.last().cloned().flatten() {
+                Some(flag) => self.line(&format!("{{ {flag} = true; break; }}")),
+                None => self.line("break;"),
+            },
             Inst::LoopContinue => self.line("continue;"),
             Inst::FSIBegin | Inst::FSIEnd => {
                 // Metal orders the accesses of the resources in raster order group 0, which the argument buffer members carry.

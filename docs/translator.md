@@ -44,7 +44,7 @@ the library suffixes and the fields of `_b.json`. The facts in `_b.json` come fr
 `msl/entry.rs` writes one function around a translated body. `EntryName` names it: the function name, its `Form`, the return type, the stage input (`StageIn`), extra `Param`s and prologue statements. The form is an entry function or a `static` body function `dm_body_<name>` with the parameters but no attributes.
 The shared memory of a body function is a parameter, because its caller owns it. `msl/library.rs` builds the libraries: `_b` with its reflection, `_bv` and `_bp` for a vertex shader, and `_bf` and the side units for a pixel shader.
 A variant writes its entries with `EntryName { field: .., ..EntryName::new("main0") }`.
-Pixel entries and the wrapper of a task or mesh shader call a body function. The end of a vertex entry comes from `Plan::vertex_epilogue`: the viewport mask, then the depth conversion. `main0_z` and `main0_lz` keep the depth range of the source.
+Pixel entries and the wrapper of a task or mesh shader call a body function. The end of a vertex entry comes from `Plan::vertex_epilogue`: the depth conversion. A viewport mask that a vertex shader writes becomes `gl_ViewportIndex`, the lowest set bit capped at 15. `main0_z` and `main0_lz` keep the depth range of the source.
 
 ## Vertex variants
 
@@ -56,6 +56,10 @@ The emitter produces everything a vertex shader needs from one trace. The code i
 - `_bv` is the library with shadow inputs for integer attributes. The shadows sit at attribute indices 16 to 30. The field `vin` in `_b.json` lists them.
 - `_bp` is the library that pulls the vertices from a buffer with `dm_fetch`. The field `pull` in `_b.json` names the entries and the buffer slot 16.
 - `raster` has `pos_attr`, `pos_w`, `uv_from_attr`, `uv_affine` and `screen`. They come from the stores of the main function. A shader with a branch, a loop or a call has no raster facts.
+
+## Compute kernels
+
+A kernel with more than 32 KB of shared memory takes its arrays from a device buffer at `buffer(30)` (`spill`). The reflection field `tg_spill` has the bytes of one workgroup slice. The stores that only the first invocation of a dispatch makes leave the kernel, and the reflection field `first_store` lists them as `{reg, word, value}` for the host. A task or mesh shader keeps its shared memory in the threadgroup and is refused past the limit.
 
 ## Pixel variants and side units
 
@@ -80,6 +84,8 @@ Only samples in the main function are replaced. A shader without such a sample g
 A discard in a helper function sets the flag `dm_kill`. Every caller returns at once after the call, as the main function does after its own discard.
 A fragment shader interlock (`FSIBegin`, `FSIEnd`) has no statements. The images and storage buffers that the shader writes carry `raster_order_group(0)` in the argument buffer.
 `raster.sample_mask` is false because the IR has no sample mask output. `first_store` belongs to compute kernels and has no pixel form.
+
+Every fragment entry gets `[[early_fragment_tests]]` when `early_tests` is true. That is the case when the shader forces the early depth test, or when its texture pool marks IDs and the shader has no discard, depth write or memory write (`pool::early`). The rule lives in `entry::early_tests`, and the base entries, the side entries and the fetch entry use it.
 
 ## Identity and the cache
 

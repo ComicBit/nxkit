@@ -9,7 +9,9 @@ use super::entry::{EntryName, Form, StageIn, entry_text, params, shared_params};
 use super::refl::Reflection;
 use super::usage::{self, Usage};
 use super::variant::pixel::Built;
-use super::{Context, Library, Translated, facts, io, mesh, prelude, variant};
+use super::{
+    Context, Library, Translated, facts, first_store, io, mesh, prelude, spill, variant, wide,
+};
 use crate::translation::msl_entry::Structured;
 use nxb_pyjson::Value;
 use std::fmt::Write;
@@ -72,9 +74,17 @@ fn build_with(s: &Structured, ctx: &Context<'_>, opt: &Options, ints: &[u32]) ->
         };
         return Err(format!("unported: transform feedback of a {what} shader"));
     }
-    if shader == Shader::Compute && tg_bytes(s) > i64::from(super::abi::TG_MAX) {
-        return Err("unported: threadgroup memory past 32 KB (tg_spill)".into());
-    }
+    // A task or mesh shader keeps its memory in the threadgroup, so past the limit it is refused.
+    let spill = if shader != Shader::Compute {
+        None
+    } else if job.mesh_stage.is_some() {
+        if tg_bytes(s) > i64::from(super::abi::TG_MAX) {
+            return Err("unported: threadgroup memory past 32 KB (tg_spill)".into());
+        }
+        None
+    } else {
+        spill::plan(&s.props.properties.shared_memories)
+    };
     let usage: Usage = usage::collect(&s.info);
     let res = args::build(props, &s.program, &usage, stage_name, &s.notes, &s.fetch1d)?;
     let base_instance = shader == Shader::Vertex
@@ -96,7 +106,14 @@ fn build_with(s: &Structured, ctx: &Context<'_>, opt: &Options, ints: &[u32]) ->
     } else {
         Vec::new()
     };
-    let shared = shared_params(s, &res, &plan, shader)?;
+    let mut shared = shared_params(s, &res, &plan, shader, spill.as_ref())?;
+    let first = (shader == Shader::Compute && job.mesh_stage.is_none())
+        .then(|| first_store::find(&s.info, &res, local_size(s)))
+        .flatten();
+    if let Some(f) = &first {
+        shared.skip = f.skip.clone();
+    }
+    shared.wide = wide::plan(&s.info, &res, &shared.skip);
     let mut em = Em::new(&s.info, props, &res, opt, &shared, &plan, shader);
     em.probe = (shader == Shader::Vertex && ints.is_empty()).then(Vec::new);
     let mut bodies = Vec::new();
@@ -174,7 +191,11 @@ fn build_with(s: &Structured, ctx: &Context<'_>, opt: &Options, ints: &[u32]) ->
                     .push_str(&mesh::wrap(m, &params(&res, &plan), shared, words)?);
             }
             None => {
-                entries.text = entry_text(s, &EntryName::new("main0"), shader, &res, &plan, main)?;
+                let name = EntryName {
+                    spill: spill.as_ref(),
+                    ..EntryName::new("main0")
+                };
+                entries.text = entry_text(s, &name, shader, &res, &plan, main)?;
             }
         },
     }
@@ -207,6 +228,7 @@ fn build_with(s: &Structured, ctx: &Context<'_>, opt: &Options, ints: &[u32]) ->
         });
     }
 
+    notes.extend(plan.notes.iter().cloned());
     notes.extend(em.notes.iter().cloned());
     if ctx.no_facts {
         notes.push("not in the answer table, queries use defaults".into());
@@ -234,6 +256,12 @@ fn build_with(s: &Structured, ctx: &Context<'_>, opt: &Options, ints: &[u32]) ->
     };
     for (k, v) in entries.extra {
         r.set_extra(&k, v);
+    }
+    if let Some(sp) = &spill {
+        r.set_extra("tg_spill", Value::Int(sp.total));
+    }
+    if let Some(f) = first.filter(|f| !f.stores.is_empty()) {
+        r.set_extra("first_store", first_store::value(&f));
     }
     if let Some(m) = &job.mesh_stage {
         mesh::reflect(m, &mut r);

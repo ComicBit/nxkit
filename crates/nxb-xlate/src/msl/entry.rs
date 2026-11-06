@@ -7,6 +7,7 @@ use super::args::{self, SET_NAME, SET_TYPE};
 use super::emit::{R, Shader, Shared};
 use super::facts_ps::{self, KILL};
 use super::io;
+use super::spill::Spill;
 use super::types::{msl_type, scalar};
 use crate::codegen::props::MemoryDef;
 use crate::structured::types::AggType;
@@ -107,6 +108,8 @@ pub struct EntryName<'a> {
     pub extra: &'a [Param],
     /// Statements before the output is declared.
     pub pro: &'a [String],
+    /// The device layout of the shared memories of a compute kernel that is over the threadgroup limit.
+    pub spill: Option<&'a Spill>,
 }
 
 impl<'a> EntryName<'a> {
@@ -119,6 +122,7 @@ impl<'a> EntryName<'a> {
             stage_in: StageIn::Standard,
             extra: &[],
             pro: &[],
+            spill: None,
         }
     }
 }
@@ -146,14 +150,24 @@ fn memory_decl(ty: &str, name: &str, len: Option<i32>) -> (String, String) {
     }
 }
 
-/// The parameters every function of the program takes besides its own.
+/// Whether the fragment entries test depth early: the shader forces it, or its texture pool marks only and the shader
+/// has nothing a test before it would get wrong (`pool::early`).
+pub fn early_tests(s: &Structured, res: &args::Res) -> bool {
+    s.props.definitions.early_z_force || res.early
+}
+
+/// The parameters every function of the program takes besides its own. A spill makes the shared memories device arrays.
 pub(super) fn shared_params(
     s: &Structured,
     res: &args::Res,
     plan: &io::Plan,
     shader: Shader,
+    spill: Option<&Spill>,
 ) -> R<Shared> {
-    let mut p = Shared::default();
+    let mut p = Shared {
+        spill: spill.is_some(),
+        ..Shared::default()
+    };
     let d = |a: &str, b: &str| (a.to_string(), b.to_string());
     if res.has_args {
         p.params
@@ -180,10 +194,12 @@ pub(super) fn shared_params(
     for m in &s.props.properties.shared_memories {
         let (t, n) = memory(m)?;
         let name = format!("sm{}", m.id);
-        p.params.push(d(
-            &format!("threadgroup {}", memory_decl(&t, &name, n).1),
-            &name,
-        ));
+        let decl = if spill.is_some() {
+            Spill::param(m)?
+        } else {
+            format!("threadgroup {}", memory_decl(&t, &name, n).1)
+        };
+        p.params.push(d(&decl, &name));
     }
     Ok(p)
 }
@@ -212,10 +228,11 @@ pub(super) fn entry_text(
     plan: &io::Plan,
     body: &str,
 ) -> R<String> {
-    let early = shader == Shader::Fragment && s.props.definitions.early_z_force;
+    let early = shader == Shader::Fragment && early_tests(s, res);
     let has_out = shader != Shader::Compute && !plan.out_members.is_empty();
     let ret = e.ret.unwrap_or(if has_out { "main0_out" } else { "void" });
     let ps = all_params(e, res, plan);
+    let builtins: Vec<io::Builtin> = plan.builtins.iter().copied().collect();
     let mut t = String::new();
     let body_fn = matches!(e.form, Form::Body { .. });
     match e.form {
@@ -225,7 +242,10 @@ pub(super) fn entry_text(
             } else {
                 ""
             };
-            let full: Vec<String> = ps.iter().map(Param::full).collect();
+            let mut full: Vec<String> = ps.iter().map(Param::full).collect();
+            if let Some(sp) = e.spill {
+                full.extend(sp.entry_params(&builtins));
+            }
             let _ = writeln!(
                 t,
                 "{attr}{} {ret} {}({})\n{{",
@@ -238,8 +258,13 @@ pub(super) fn entry_text(
             let mut decls: Vec<String> = ps.iter().map(|p| p.decl.clone()).collect();
             for m in &s.props.properties.shared_memories {
                 let (ty, n) = memory(m)?;
-                let p = memory_decl(&ty, &format!("sm{}", m.id), n).1;
-                decls.push(format!("threadgroup {p}"));
+                decls.push(match e.spill {
+                    Some(_) => Spill::param(m)?,
+                    None => format!(
+                        "threadgroup {}",
+                        memory_decl(&ty, &format!("sm{}", m.id), n).1
+                    ),
+                });
             }
             let inline = if inline {
                 " inline __attribute__((always_inline))"
@@ -267,15 +292,14 @@ pub(super) fn entry_text(
         for p in &plan.pads {
             let _ = writeln!(t, "    {}", p.init());
         }
-        if plan.viewport_mask {
-            let _ = writeln!(t, "    uint {} = 1u;", io::VIEWPORT_MASK);
-        }
     }
     for m in &s.props.properties.local_memories {
         let (ty, n) = memory(m)?;
         let _ = writeln!(t, "    {};", memory_decl(&ty, &format!("lm{}", m.id), n).0);
     }
-    if !body_fn {
+    if let (false, Some(sp)) = (body_fn, e.spill) {
+        t.push_str(&sp.decls(&s.props.properties.shared_memories, &builtins)?);
+    } else if !body_fn {
         for m in &s.props.properties.shared_memories {
             let (ty, n) = memory(m)?;
             let _ = writeln!(

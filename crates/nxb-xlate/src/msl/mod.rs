@@ -5,8 +5,16 @@
 //! entries, the library files `<key>_b`, `_bf`, `_bp`, `_bv`, `_bx`, `_bg*`, `_bl*`, `_bgv`, and `_b.json` as
 //! [`refl::Reflection`] writes it. Refer to `docs/translator.md`.
 
+/// The version of the MSL back end. The stage step keys its translation store on it besides the chain version.
+///
+/// Bump the number whenever a change alters the MSL text or the reflection for an unchanged input: a new emitter
+/// choice, a new helper, a new reflection field or a changed ABI constant. A change that keeps the output equal needs no bump.
+pub const TRANSLATOR_ID: &str = "msl-2.1";
+
 pub mod abi;
 pub mod args;
+#[cfg(test)]
+mod bind_tests;
 pub mod buffers;
 pub mod control;
 pub mod emit;
@@ -16,11 +24,17 @@ pub mod facts_ps;
 pub mod facts_vs;
 pub mod facts_vs_screen;
 pub mod facts_vs_sym;
+pub mod first_store;
+#[cfg(test)]
+mod gaps_tests;
 pub mod geom;
 pub mod geom_reader;
 #[cfg(test)]
 mod geom_tests;
+#[cfg(test)]
+mod gmem_tests;
 pub mod handles;
+pub mod hmma;
 pub mod inst_alu;
 pub mod inst_img;
 pub mod inst_mem;
@@ -28,12 +42,21 @@ pub mod inst_misc;
 pub mod inst_query;
 pub mod inst_tex;
 pub mod io;
+pub mod ioidx;
+#[cfg(test)]
+mod ioidx_tests;
 pub mod library;
+#[cfg(test)]
+mod loop_tests;
 pub mod mesh;
 #[cfg(test)]
 mod mesh_tests;
+pub mod pool;
+#[cfg(test)]
+mod pool_tests;
 pub mod prelude;
 pub mod refl;
+pub mod spill;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
@@ -42,10 +65,16 @@ mod tests_fetch;
 mod tests_ps;
 #[cfg(test)]
 mod tests_ps_facts;
+pub mod texoff;
 pub mod types;
 pub mod usage;
 pub mod variant;
+#[cfg(test)]
+mod verify_tests;
 pub mod walk;
+pub mod wide;
+#[cfg(test)]
+mod wide_tests;
 
 use crate::job::Job;
 use crate::translation::msl_entry::structure_job;

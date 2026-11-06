@@ -163,6 +163,7 @@ fn another_translator_identity_does_not_reuse_a_translation() {
 fn the_identity_follows_the_chain() {
     assert_eq!(translator_id("v1"), translator_id("v1"));
     assert_ne!(translator_id("v1"), translator_id("v2"));
+    assert!(!nxb_xlate::msl::TRANSLATOR_ID.is_empty());
 }
 
 #[test]
