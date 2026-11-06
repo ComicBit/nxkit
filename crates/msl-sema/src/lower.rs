@@ -36,6 +36,8 @@ struct Cx {
     /// Signatures of the lowered functions, to resolve `Callee::User` by pointer.
     sigs: Vec<(Rc<ast::Signature>, usize)>,
     preludes: Vec<&'static str>,
+    /// A file-scope `#pragma clang fp contract(off)` came before the current item.
+    contract_off: bool,
     // per function
     locals: Vec<Local>,
     scopes: Vec<HashMap<Rc<str>, LocalId>>,
@@ -127,7 +129,13 @@ impl Cx {
 
     fn item(&mut self, item: &Item) -> R<()> {
         match item {
-            Item::Preprocessor { .. } | Item::UsingNamespaceMetal { .. } => Ok(()),
+            Item::Preprocessor { text, .. } => {
+                if text == msl_parse::parser::FP_CONTRACT_OFF {
+                    self.contract_off = true;
+                }
+                Ok(())
+            }
+            Item::UsingNamespaceMetal { .. } => Ok(()),
             Item::Prelude { name, .. } => {
                 if !matches!(
                     *name,
@@ -225,6 +233,9 @@ impl Cx {
                 is_const: p.is_const,
             });
         }
+        if f.body.contract_off {
+            return Err(Error::unsupported("fp-contract-body"));
+        }
         let body = self.block(&f.body.stmts)?;
         let func = Func {
             name: sig.name.clone(),
@@ -242,6 +253,7 @@ impl Cx {
                 crate::hir::Inline::None
             },
             template: false,
+            contract: !self.contract_off,
         };
         self.sigs.push((sig.clone(), self.out.funcs.len()));
         self.out.funcs.push(func);
@@ -282,7 +294,14 @@ impl Cx {
     fn stmt(&mut self, s: &ast::Stmt, out: &mut Vec<Stmt>) -> R<()> {
         match s {
             ast::Stmt::Empty => {}
-            ast::Stmt::Block(b) => out.push(Stmt::Block(self.block(&b.stmts)?)),
+            ast::Stmt::Block(b) => {
+                let stmts = self.block(&b.stmts)?;
+                out.push(if b.contract_off {
+                    Stmt::NoContract(stmts)
+                } else {
+                    Stmt::Block(stmts)
+                });
+            }
             ast::Stmt::If { cond, then, els } => {
                 let c = self.cond(cond)?;
                 let t = self.sub(then)?;
@@ -1053,6 +1072,7 @@ impl Cx {
             attrs: Vec::new(),
             inline: crate::hir::Inline::Always,
             template: true,
+            contract: !self.contract_off,
         });
         Ok(self.out.funcs.len() - 1)
     }

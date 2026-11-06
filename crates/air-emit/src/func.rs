@@ -95,6 +95,8 @@ pub struct FnGen<'a> {
     ret: Option<RetKind>,
     /// Struct-path of field addresses: pointer -> (outermost struct, byte offset).
     paths: std::collections::HashMap<String, (usize, u32)>,
+    /// `a*b + c` may become `llvm.fmuladd` here (no `#pragma clang fp contract(off)` in effect).
+    contract: bool,
     /// Nonzero while loading or storing a whole vector for a component access (clang tags none).
     pub(crate) no_tbaa: u32,
     /// clang's `%retval` slot of a non-void function.
@@ -133,6 +135,7 @@ impl<'a> FnGen<'a> {
             dest_ids: std::collections::HashMap::new(),
             ret: None,
             paths: std::collections::HashMap::new(),
+            contract: f.contract,
             no_tbaa: 0,
             ret_slot: None,
             aligns: std::collections::HashMap::new(),
@@ -534,6 +537,12 @@ impl<'a> FnGen<'a> {
                 self.expr(e)?;
             }
             Stmt::Block(b) => self.scope(b)?,
+            Stmt::NoContract(b) => {
+                let saved = std::mem::replace(&mut self.contract, false);
+                let r = self.scope(b);
+                self.contract = saved;
+                r?;
+            }
             Stmt::Decl(id) => {
                 let lines = self.lifetime("start", *id);
                 for l in lines {
@@ -1651,8 +1660,9 @@ impl<'a> FnGen<'a> {
                 value,
                 op_ty,
             } => {
-                let contract =
-                    matches!(op, BinOp::Add | BinOp::Sub) && op_ty.elem().is_some_and(is_float);
+                let contract = self.contract
+                    && matches!(op, BinOp::Add | BinOp::Sub)
+                    && op_ty.elem().is_some_and(is_float);
                 let r = match &value.kind {
                     ExprKind::Binary(BinOp::Mul, m1, m2) if contract => {
                         // `x += a*b` contracts like `x + a*b` (right operand first, as clang evaluates it).
@@ -1836,7 +1846,10 @@ impl<'a> FnGen<'a> {
     /// Contracts `a*b + c`, `c + a*b`, `a*b - c` and `c - a*b` into `llvm.fmuladd`, as clang does
     /// under `-ffp-contract=on` (the multiply must be an operand of the same expression).
     fn try_fmuladd(&mut self, op: BinOp, a: &Expr, b: &Expr, ty: &Type) -> R<Option<V>> {
-        if !matches!(op, BinOp::Add | BinOp::Sub) || !ty.elem().is_some_and(is_float) {
+        if !self.contract
+            || !matches!(op, BinOp::Add | BinOp::Sub)
+            || !ty.elem().is_some_and(is_float)
+        {
             return Ok(None);
         }
         let is_mul = |e: &Expr| matches!(e.kind, ExprKind::Binary(BinOp::Mul, ..));

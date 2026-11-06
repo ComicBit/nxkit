@@ -79,6 +79,8 @@ pub struct Func {
     pub inline: Inline,
     /// An instantiation of an engine template (clang emits these at the end of the unit).
     pub template: bool,
+    /// clang may contract `a*b + c`: the function comes before any file-scope `#pragma clang fp contract(off)`.
+    pub contract: bool,
 }
 
 /// How a helper asks to be inlined.
@@ -125,6 +127,8 @@ pub enum Stmt {
     Expr(Expr),
     /// A nested block.
     Block(Vec<Stmt>),
+    /// A nested block that starts with `#pragma clang fp contract(off)`: no `llvm.fmuladd` inside.
+    NoContract(Vec<Stmt>),
     /// `if`
     If {
         /// Condition (bool).
@@ -472,7 +476,7 @@ pub fn visit_calls(stmts: &[Stmt], f: &mut dyn FnMut(FuncId)) {
 fn visit_stmt(s: &Stmt, f: &mut dyn FnMut(FuncId)) {
     match s {
         Stmt::Expr(e) => visit_expr(e, f),
-        Stmt::Block(b) => visit_calls(b, f),
+        Stmt::Block(b) | Stmt::NoContract(b) => visit_calls(b, f),
         Stmt::If { cond, then, els } => {
             visit_expr(cond, f);
             visit_calls(then, f);
