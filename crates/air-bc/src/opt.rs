@@ -347,38 +347,20 @@ fn mem2reg(f: &mut Function) {
             undo.push((*a, old));
         }
         for (k, i) in f.blocks[b].1.iter().enumerate() {
-            match &i.op {
-                Op::Alloca(..) if i.res.as_ref().is_some_and(|r| allocas.contains_key(r)) => {
+            match classify(i, &allocas, &slot, &marker_casts) {
+                Use::Load(a) => {
+                    if let Some(r) = &i.res {
+                        subst.insert(r.clone(), cur[a].clone());
+                    }
                     remove[b][k] = true;
                 }
-                Op::Load(_, (_, Val::Local(p)), _) => {
-                    if let Some(&a) = slot.get(p.as_str()) {
-                        if let Some(r) = &i.res {
-                            subst.insert(r.clone(), cur[a].clone());
-                        }
-                        remove[b][k] = true;
-                    }
-                }
-                Op::Store((_, v), (_, Val::Local(p)), _) => {
-                    if let Some(&a) = slot.get(p.as_str()) {
-                        let old = std::mem::replace(&mut cur[a], v.clone());
-                        undo.push((a, old));
-                        remove[b][k] = true;
-                    }
-                }
-                Op::Cast(_, (_, Val::Local(src)), _) if allocas.contains_key(src) => {
+                Use::Store(a, v) => {
+                    let old = std::mem::replace(&mut cur[a], v.clone());
+                    undo.push((a, old));
                     remove[b][k] = true;
                 }
-                op if is_lifetime(op) => {
-                    let mut u = Vec::new();
-                    locals(op, &mut u);
-                    if u.iter()
-                        .any(|x| marker_casts.get(x).is_some_and(|a| allocas.contains_key(a)))
-                    {
-                        remove[b][k] = true;
-                    }
-                }
-                _ => {}
+                Use::Drop => remove[b][k] = true,
+                Use::Keep => {}
             }
         }
         let label = &f.blocks[b].0;
@@ -390,6 +372,21 @@ fn mem2reg(f: &mut Function) {
         steps.push(Step::Leave(mark));
         for &c in &kids[b] {
             steps.push(Step::Enter(c));
+        }
+    }
+    // unreachable blocks are not renamed: their promoted loads read undef, their stores and markers go with the alloca
+    for b in (0..n).filter(|&b| !seen[b]) {
+        for (k, i) in f.blocks[b].1.iter().enumerate() {
+            match classify(i, &allocas, &slot, &marker_casts) {
+                Use::Load(_) => {
+                    if let Some(r) = &i.res {
+                        subst.insert(r.clone(), Val::Undef);
+                    }
+                    remove[b][k] = true;
+                }
+                Use::Store(..) | Use::Drop => remove[b][k] = true,
+                Use::Keep => {}
+            }
         }
     }
     // edges from unreachable predecessors carry undef
@@ -428,6 +425,50 @@ fn mem2reg(f: &mut Function) {
         *insts = out;
     }
     substitute(f, &subst);
+}
+
+/// What renaming does with an instruction.
+enum Use<'a> {
+    /// A load of the promoted alloca with this slot.
+    Load(usize),
+    /// A store of this value to the promoted alloca with this slot.
+    Store(usize, &'a Val),
+    /// A promoted alloca, a cast of one or a lifetime marker of one: removed.
+    Drop,
+    /// Anything else.
+    Keep,
+}
+
+fn classify<'a>(
+    i: &'a Inst,
+    allocas: &HashMap<String, Ty>,
+    slot: &HashMap<&str, usize>,
+    marker_casts: &HashMap<String, String>,
+) -> Use<'a> {
+    match &i.op {
+        Op::Alloca(..) if i.res.as_ref().is_some_and(|r| allocas.contains_key(r)) => Use::Drop,
+        Op::Load(_, (_, Val::Local(p)), _) => match slot.get(p.as_str()) {
+            Some(&a) => Use::Load(a),
+            None => Use::Keep,
+        },
+        Op::Store((_, v), (_, Val::Local(p)), _) => match slot.get(p.as_str()) {
+            Some(&a) => Use::Store(a, v),
+            None => Use::Keep,
+        },
+        Op::Cast(_, (_, Val::Local(src)), _) if allocas.contains_key(src) => Use::Drop,
+        op if is_lifetime(op) => {
+            let mut u = Vec::new();
+            locals(op, &mut u);
+            if u.iter()
+                .any(|x| marker_casts.get(x).is_some_and(|a| allocas.contains_key(a)))
+            {
+                Use::Drop
+            } else {
+                Use::Keep
+            }
+        }
+        _ => Use::Keep,
+    }
 }
 
 /// Follows a chain of substitutions from a local, at most 10 000 steps.
@@ -659,4 +700,51 @@ fn cse(f: &mut Function) {
         });
     }
     substitute(f, &subst);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const DEAD_STORE: &str = r#"; ModuleID = '-'
+source_filename = "-"
+target triple = "air64-apple-macosx14.0.0"
+
+define i32 @f(i32 %a) #0 {
+entry:
+  %r = alloca i32, align 4
+  store i32 %a, i32* %r, align 4
+  br label %ret
+dead:
+  store i32 0, i32* %r, align 4
+  %x = load i32, i32* %r, align 4
+  %y = add nsw i32 %x, 1
+  store i32 %y, i32* %r, align 4
+  br label %ret
+ret:
+  %v = load i32, i32* %r, align 4
+  ret i32 %v
+}
+
+attributes #0 = { nounwind }
+"#;
+
+    #[test]
+    fn unreachable_block_loses_its_promoted_accesses() {
+        let mut m = crate::parse::parse(DEAD_STORE).expect("subset");
+        optimize(&mut m);
+        let f = &m.functions[0];
+        let mut used = Vec::new();
+        for (_, insts) in &f.blocks {
+            for i in insts {
+                assert!(!matches!(
+                    i.op,
+                    Op::Alloca(..) | Op::Load(..) | Op::Store(..)
+                ));
+                locals(&i.op, &mut used);
+            }
+        }
+        assert!(!used.iter().any(|x| x == "r" || x == "x"));
+        crate::writer::write(&m).expect("no dangling value");
+    }
 }
