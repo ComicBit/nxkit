@@ -1,43 +1,167 @@
-//! Early cutoff for the translator (docs/early-cutoff.md): a translation is kept in the store under
-//! (translator build id, the job's content: its JSON without the scratch path, and the code bytes it names). A chain
-//! change that does not touch the translator translates nothing, one that does re-translates, and every stage after it
-//! keys on content again (spirv-cross by the SPIR-V, compiles by the MSL), so equal outputs stop the change there.
+//! The in-process translator of the shader step (`nxb_xlate::msl::translate`) in front of the store (docs/early-cutoff.md).
+//! A translation is kept under the translator identity, the job, the code bytes and what the stage step adds (chain,
+//! source, paired shader, the inputs of the pixel partners). Every stage after it keys on content again (the compile by
+//! the MSL), so equal outputs stop a change there.
+//!
+//! A panic of the translator is caught and counted. A failure keeps the reason string of `nxb_xlate::msl::Failure`.
 
-use nxb_error::ToolError;
-use nxb_model::{ContentKey, Digest, sha256};
+use nxb_model::ContentKey;
+use nxb_pyjson::{Value, dumps, parse};
+use nxb_shader::job::Job;
 use nxb_store::Store;
-use nxb_tool::{ToolId, Translator, XlateJob, XlateOutput, XlateResult};
+use nxb_xlate::job::Job as XJob;
+use nxb_xlate::msl::{Context, Failure, Side, StageInputs, Translated, Varying, translate};
+use std::collections::BTreeMap;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, PoisonError};
 
-/// The translator's build id: SHA-256 over the files of its folder (the apphost and its .NET assemblies), sorted by
-/// name.`NXB_TEST_XLATE_SALT` (a test hook) is mixed in.
-pub fn translator_id(program: &Path) -> String {
-    let mut h = nxb_model::Sha256::new();
-    if let Some(dir) = program.parent()
-        && let Ok(rd) = std::fs::read_dir(dir)
-    {
-        let mut files: Vec<_> = rd
-            .flatten()
-            .map(|e| e.path())
-            .filter(|p| p.is_file())
-            .collect();
-        files.sort();
-        for f in files {
-            h.update(
-                f.file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_default()
-                    .as_bytes(),
-            );
-            h.update(&[0]);
-            h.update(
-                &std::fs::read(&f)
-                    .map(|b| sha256(&b).0.to_vec())
-                    .unwrap_or_default(),
-            );
+/// One library of a translation: the MSL and the JSON of its reflection.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Lib {
+    pub(crate) suffix: String,
+    pub(crate) msl: String,
+    pub(crate) json: Option<Value>,
+}
+
+/// A translated shader as the finish step needs it. It is what the store keeps.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Translation {
+    pub(crate) stage: String,
+    pub(crate) libs: Vec<Lib>,
+    pub(crate) inputs: StageInputs,
+    pub(crate) side: Option<Side>,
+}
+
+impl Translation {
+    fn of(t: &Translated) -> Translation {
+        Translation {
+            stage: t.stage.clone(),
+            libs: t
+                .libraries
+                .iter()
+                .map(|l| Lib {
+                    suffix: l.suffix.clone(),
+                    msl: l.msl.clone(),
+                    json: l.reflection.as_ref().map(|r| r.to_value()),
+                })
+                .collect(),
+            inputs: t.inputs.clone(),
+            side: t.side.clone(),
         }
     }
+
+    fn to_text(&self) -> String {
+        let strs = |v: &[String]| Value::List(v.iter().map(Value::str).collect());
+        let libs = self
+            .libs
+            .iter()
+            .map(|l| {
+                Value::obj([
+                    ("suffix", Value::str(&l.suffix)),
+                    ("msl", Value::str(&l.msl)),
+                    ("json", l.json.clone().unwrap_or(Value::Null)),
+                ])
+            })
+            .collect();
+        let varyings = self
+            .inputs
+            .varyings
+            .iter()
+            .map(|v| {
+                Value::obj([
+                    ("location", Value::Int(i64::from(v.location))),
+                    ("type", Value::str(&v.msl_type)),
+                    ("interp", Value::str(&v.interpolation)),
+                ])
+            })
+            .collect();
+        let side = self.side.as_ref().map_or(Value::Null, |s| {
+            Value::obj([("alpha", strs(&s.alpha)), ("logic", strs(&s.logic))])
+        });
+        dumps(&Value::obj([
+            ("stage", Value::str(&self.stage)),
+            ("libs", Value::List(libs)),
+            ("varyings", Value::List(varyings)),
+            ("side", side),
+        ]))
+    }
+
+    fn from_text(text: &str) -> Option<Translation> {
+        let v = parse(text).ok()?;
+        let strs = |v: Option<&Value>| -> Option<Vec<String>> {
+            v?.as_list()?
+                .iter()
+                .map(|x| x.as_str().map(str::to_string))
+                .collect()
+        };
+        let libs = v
+            .get("libs")?
+            .as_list()?
+            .iter()
+            .map(|l| {
+                Some(Lib {
+                    suffix: l.get("suffix")?.as_str()?.to_string(),
+                    msl: l.get("msl")?.as_str()?.to_string(),
+                    json: match l.get("json")? {
+                        Value::Null => None,
+                        j => Some(j.clone()),
+                    },
+                })
+            })
+            .collect::<Option<Vec<_>>>()?;
+        let varyings = v
+            .get("varyings")?
+            .as_list()?
+            .iter()
+            .map(|x| {
+                Some(Varying {
+                    location: u32::try_from(x.get("location")?.as_i64()?).ok()?,
+                    msl_type: x.get("type")?.as_str()?.to_string(),
+                    interpolation: x.get("interp")?.as_str()?.to_string(),
+                })
+            })
+            .collect::<Option<Vec<_>>>()?;
+        let side = match v.get("side")? {
+            Value::Null => None,
+            s => Some(Side {
+                alpha: strs(s.get("alpha"))?,
+                logic: strs(s.get("logic"))?,
+            }),
+        };
+        Some(Translation {
+            stage: v.get("stage")?.as_str()?.to_string(),
+            libs,
+            inputs: StageInputs { varyings },
+            side,
+        })
+    }
+}
+
+/// The translator function: job, code bytes, context.
+type Run = dyn Fn(&XJob, &[u8], &Context<'_>) -> Result<Translated, Failure> + Send + Sync;
+
+/// The in-process translator in front of the store.
+pub(crate) struct Xlate {
+    store: Store,
+    id: String,
+    run: Box<Run>,
+    /// Jobs answered from the store.
+    pub(crate) hits: AtomicU64,
+    /// Jobs translated.
+    pub(crate) misses: AtomicU64,
+    refused: Mutex<BTreeMap<String, u64>>,
+}
+
+/// The translator identity: the label, the chain id (it covers the `nxb-xlate` sources) and the
+/// `NXB_TEST_XLATE_SALT` test hook. A new chain translates again, and the compile cache stops the change where the MSL
+/// stays equal.
+pub(crate) fn translator_id(chain: &str) -> String {
+    let mut h = nxb_model::Sha256::new();
+    h.update(b"nxb-xlate msl\0");
+    h.update(chain.as_bytes());
+    h.update(&[0]);
     h.update(
         std::env::var("NXB_TEST_XLATE_SALT")
             .unwrap_or_default()
@@ -46,116 +170,102 @@ pub fn translator_id(program: &Path) -> String {
     nxb_model::to_hex(&h.finalize().0)
 }
 
-/// The build's translator in front of its store, and spirv-cross's id (SHA-256 of the binary).
-pub(crate) fn open<T: Translator>(
-    inner: T,
-    cfg: &crate::build::BuildConfig,
-) -> Result<(CachedTranslator<T>, String), String> {
-    let mut store = Store::open(&cfg.store).map_err(|e| e.to_string())?;
-    store.set_durability(nxb_store::Durability::Relaxed);
-    let sc = std::fs::read(&cfg.spirv_cross)
-        .map_err(|e| format!("{}: {e}", cfg.spirv_cross.display()))?;
-    Ok((
-        CachedTranslator::new(inner, store, translator_id(&cfg.xlate), &cfg.scratch),
-        sha256(&sc).to_hex(),
-    ))
-}
+impl Xlate {
+    /// The translator of a build: `nxb_xlate::msl::translate` over the store at `root`.
+    pub(crate) fn open(root: &Path, chain: &str) -> Result<Xlate, String> {
+        let mut store = Store::open(root).map_err(|e| e.to_string())?;
+        store.set_durability(nxb_store::Durability::Relaxed);
+        Ok(Xlate::with(
+            store,
+            translator_id(chain),
+            Box::new(translate),
+        ))
+    }
 
-/// A translator in front of the store.
-pub struct CachedTranslator<T> {
-    inner: T,
-    store: Store,
-    id: String,
-    scratch: String,
-    /// Jobs answered from the store.
-    pub hits: AtomicU64,
-    /// Jobs translated.
-    pub misses: AtomicU64,
-}
-
-impl<T: Translator> CachedTranslator<T> {
-    /// `scratch`: the folder whose path the jobs name (left out of the key).
-    pub fn new(inner: T, store: Store, id: String, scratch: &Path) -> Self {
-        CachedTranslator {
-            inner,
+    pub(crate) fn with(store: Store, id: String, run: Box<Run>) -> Xlate {
+        Xlate {
             store,
             id,
-            scratch: scratch.to_string_lossy().into_owned(),
+            run,
             hits: AtomicU64::new(0),
             misses: AtomicU64::new(0),
+            refused: Mutex::new(BTreeMap::new()),
         }
     }
 
-    /// The inner translator.
-    pub fn inner(&self) -> &T {
-        &self.inner
+    /// Keys the translator refused, by reason (`error` for a job it cannot read, `panic` for a caught panic).
+    pub(crate) fn refused(&self) -> Vec<(String, u64)> {
+        let m = self.refused.lock().unwrap_or_else(PoisonError::into_inner);
+        m.iter().map(|(k, v)| (k.clone(), *v)).collect()
     }
 
-    fn key(&self, j: &XlateJob) -> ContentKey {
-        // the code file the job names: its bytes, not its path
-        let code: Digest = j
-            .job_json
-            .find("\"code\": \"")
-            .and_then(|a| {
-                let rest = &j.job_json[a + 9..];
-                rest.find('"').map(|b| &rest[..b])
-            })
-            .and_then(|p| std::fs::read(p).ok())
-            .map_or_else(|| sha256(b""), |b| sha256(&b));
-        ContentKey::builder("nxb.xlate.v1")
+    fn refuse(&self, why: &str) {
+        let mut m = self.refused.lock().unwrap_or_else(PoisonError::into_inner);
+        *m.entry(why.to_string()).or_default() += 1;
+    }
+
+    fn key(&self, job: &Job, ctx: &Context<'_>) -> ContentKey {
+        let partners: String = ctx
+            .partners
+            .iter()
+            .flat_map(|p| &p.varyings)
+            .map(|v| format!("{} {} {}\n", v.location, v.msl_type, v.interpolation))
+            .collect();
+        ContentKey::builder("nxb.xlate.v2")
             .field_str("translator", &self.id)
-            .field_str("job", &j.job_json.replace(&self.scratch, "<scratch>"))
-            .field_digest("code", &code)
+            .field_str("job", &dumps(&job.json))
+            .field("code", &job.code)
+            .field_str("chain", ctx.chain)
+            .field_str("source", &ctx.source)
+            .field_str("pc_paired", ctx.pc_paired)
+            .field_str("no_facts", if ctx.no_facts { "1" } else { "0" })
+            .field_str("partners", &partners)
             .finish()
     }
-}
 
-impl<T: Translator> Translator for CachedTranslator<T> {
-    fn identity(&self) -> &ToolId {
-        self.inner.identity()
-    }
-
-    fn translate(&self, batch: &[XlateJob]) -> Result<Vec<XlateResult>, ToolError> {
-        let keys: Vec<ContentKey> = batch.iter().map(|j| self.key(j)).collect();
-        let mut out: Vec<Option<XlateResult>> = vec![None; batch.len()];
-        let mut miss = Vec::new();
-        for (i, (j, k)) in batch.iter().zip(&keys).enumerate() {
-            let hit = self.store.lookup(k).ok().flatten().and_then(|m| {
-                let get = |n: &str| m.files.iter().find(|f| f.name == n).map(|f| f.digest);
-                let (s, r) = (get("spv")?, get("res.json")?);
-                Some(XlateOutput {
-                    spirv: self.store.read_blob(&s.sha256).ok()?,
-                    resources_json: self.store.read_blob(&r.sha256).ok()?,
-                })
-            });
-            match hit {
-                Some(o) => {
-                    out[i] = Some(XlateResult {
-                        key: j.key.clone(),
-                        outcome: Ok(o),
-                    })
-                }
-                None => miss.push(i),
-            }
+    /// Translate one shader, from the store when its key is there.
+    pub(crate) fn translate(&self, job: &Job, ctx: &Context<'_>) -> Result<Translation, Failure> {
+        let key = self.key(job, ctx);
+        let hit = self
+            .store
+            .lookup(&key)
+            .ok()
+            .flatten()
+            .and_then(|m| {
+                let f = m.files.iter().find(|f| f.name == "t.json")?;
+                String::from_utf8(self.store.read_blob(&f.digest.sha256).ok()?).ok()
+            })
+            .and_then(|t| Translation::from_text(&t));
+        if let Some(t) = hit {
+            self.hits.fetch_add(1, Ordering::Relaxed);
+            return Ok(t);
         }
-        self.hits
-            .fetch_add((batch.len() - miss.len()) as u64, Ordering::Relaxed);
-        if !miss.is_empty() {
-            self.misses.fetch_add(miss.len() as u64, Ordering::Relaxed);
-            let jobs: Vec<XlateJob> = miss.iter().map(|&i| batch[i].clone()).collect();
-            let res = self.inner.translate(&jobs)?;
-            for (&i, r) in miss.iter().zip(res) {
-                if let Ok(o) = &r.outcome {
-                    let mut w = self.store.entry(keys[i]);
-                    let ok = w.add_bytes("spv", &o.spirv).is_ok()
-                        && w.add_bytes("res.json", &o.resources_json).is_ok();
-                    if ok {
-                        let _ = w.commit();
-                    }
-                }
-                out[i] = Some(r);
+        self.misses.fetch_add(1, Ordering::Relaxed);
+        let j = XJob::from_value(&job.json).map_err(|e| {
+            self.refuse("error");
+            Failure::new("translation failed", e)
+        })?;
+        let t = match catch_unwind(AssertUnwindSafe(|| (self.run)(&j, &job.code, ctx))) {
+            Err(_) => {
+                self.refuse("panic");
+                return Err(Failure::new(
+                    "translation failed",
+                    "panic in the Rust translator",
+                ));
             }
+            Ok(Err(f)) => {
+                self.refuse(&f.reason);
+                return Err(f);
+            }
+            Ok(Ok(t)) => Translation::of(&t),
+        };
+        let mut w = self.store.entry(key);
+        if w.add_bytes("t.json", t.to_text().as_bytes()).is_ok() {
+            let _ = w.commit();
         }
-        Ok(out.into_iter().flatten().collect())
+        Ok(t)
     }
 }
+
+#[cfg(test)]
+mod tests;

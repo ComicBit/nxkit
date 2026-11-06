@@ -23,6 +23,7 @@ nxb-io.workspace = true
 nxb-pyjson.workspace = true
 nxb-shader.workspace = true
 nxb-air.workspace = true
+nxb-xlate.workspace = true
 
 [features]
 air-front = ["nxb-tool/air-front"]
