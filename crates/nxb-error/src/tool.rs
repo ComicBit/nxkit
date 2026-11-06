@@ -39,7 +39,7 @@ impl ToolFailure {
 /// One tool job failed. Recovery decides whether it becomes a shader error or escalates to an `EnvError`.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct ToolError {
-    /// Tool name (`metal`, `metallib`, `spirv-cross`, `dmsh_xlate`, …).
+    /// Tool name (`metal`, `metallib`, `metal-tt`, …).
     pub tool: String,
     /// What happened.
     pub failure: ToolFailure,

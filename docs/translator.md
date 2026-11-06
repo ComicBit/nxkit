@@ -1,113 +1,55 @@
 # Shader translator
 
-This document gives the translator part of the shader step and the plan to replace it. The study is from 2026-11-05.
-It is a read-only survey. Numbers with the label "estimate" are not measured.
-
-## Status in version 0.5.1
-
-Two of the three phases of the plan are done. The study below is the state before this work. The estimates in it are not updated.
-**Since 0.5.1, the Rust translator is off by default.** The documents of 0.4.0 and 0.5.0 said that it is on by default. That is not correct for 0.5.1.
-
-| phase | state | evidence |
-|---|---|---|
-| S1: translator host (option a, the host) | done and the default when its binary is found | 802 of 802 results equal to the process bridge. Translation of 802 jobs: 1.0 to 1.7 s against 6.3 to 8.4 s (measured) |
-| S1: server for `spirv-cross` | not done | |
-| S2: Rust translator (option b) | done for Maxwell and Ampere, for the engine version of the port. **Off by default.** `--xlate-rust on` or `NXB_XLATE_RUST=1` turns it on. The C# translator does the keys that it cannot do | byte-identical for all keys of three titles and for 42,299 of 42,331 keys of a Switch 2 title (measured, first-attempt jobs, engine version of the port). **Not byte-identical on the current engine** (see below) |
-| S3: Rust `spirv-cross` or direct MSL (options c and d) | not done | |
-
-The Rust translator is in the crates `nxb-maxwell` (the decoders for Maxwell and Ampere), `nxb-xlate` (the translation) and `nxb-spvgen` (the SPIR-V generator).
-It is in the process of the shader step, and it needs no .NET runtime for the keys that it does. These parts are not ported, and the key goes to the C# translator:
-geometry, tessellation, transform feedback, vertex shaders as compute, the interlock function match, `SharedStoreSmallIntCas` and the task and mesh jobs.
-No local title has the first four, thus nobody tested them. The C# translator and `spirv-cross` stay necessary.
-In a subset run, the Rust translator gave no gain in wall time (17 s against 16 s), because the Metal compile dominates (measured, one run). The gain is that the shader step needs no .NET process for most keys.
-Refer to [shader-step.md](shader-step.md) for the choice between the three ways to translate and for the `ShaderInterface` file.
-
-Why it is off: the Rust translator does not follow the changes of the engine translator after the port. One known example is the Maxwell denormal flush.
-Thus its output differs from the output of the C# translator on the current engine. Nobody measured how many keys differ.
-To make it the default again, do these steps:
-
-1. Compare the sources of the engine translator (`dmsh_xlate` and the Ryujinx fork) with the ported version.
-2. Port the changes.
-3. Compare again on the reference title, on the other two Maxwell titles and on the Switch 2 corpus.
-4. Change the default.
-
-The same limits are in the list of known limits of the README. The Ampere path is checked on one title only. The jobs of that path come from the new Rust job writer. Nobody compared them with the job writer of the reference scripts.
+This document describes the translator of the shader step. One Rust translator turns the machine code of a shader into
+Metal Shading Language (MSL). It runs in the process of the shader step. It needs no .NET runtime and no external translator program.
+The decision is D20 in [decisions.md](decisions.md).
 
 ## Function
 
 The chain for each shader is:
 
 1. Switch GPU machine code (Maxwell, or Ampere for NVN2).
-2. `dmsh_xlate`: a C# driver around the Ryujinx shader translator. It writes SPIR-V and `res.json`.
-3. `spirv-cross` (a pinned C++ binary). It writes MSL.
-4. The MSL passes (ported to Rust in `nxb-shader::msl`).
-5. `metal` and `metallib`.
+2. `nxb_xlate::msl::translate`: decode, control flow, SSA, passes and the structured program, then MSL.
+3. `metal` and `metallib`, or the own front end for the shaders that it accepts.
 
-The games contain no SPIR-V. They contain only NVN machine code. The shader step writes one job JSON for each shader with
-the code, the `c1` jump-table segment, the answer table (`shader_facts.tsv`) and the options. SPIR-V is only an exchange format between two tools.
+The games contain only machine code. The shader step writes one job for each shader with the code, the `c1` jump-table segment,
+the answer table (`shader_facts.tsv`) and the options. The job writer is `nxb_shader::job`. The translator takes the job and the code.
 
-## Size of the components
+## Crates
 
-The driver has 291 lines of C#. The translator has 46,878 lines of C#, of which 44,010 are in scope. The SPIR-V generator
-has approximately 3,200 hand-written lines. The `spirv-cross` MSL path has an estimated 53,000 lines of C++.
-
-The local changes in the translator (17 files) add non-constant texel offsets, bindless handles through phi nodes,
-1D texel fetch as wrapped 2D, geometry passthrough to compute, bounded image atomics and the full Ampere front end.
-These parts have no upstream reference. Thus they have the highest risk.
+| crate | content |
+|---|---|
+| `nxb-maxwell` | the decoders for Maxwell and Ampere |
+| `nxb-xlate` | the translation and the MSL back end `nxb_xlate::msl` |
+| `nxb-shader` | the job writer, the chain version, the guards and the side library cut |
+| `nxb-stages` | the shader step: it calls the translator, compiles the libraries and writes the files |
 
 ## Contract
 
-- The call is `dmsh_xlate <jobs.json> <outdir>`. For each key, it writes `<key>.spv` and `<key>.res.json`. Failures go to stderr as `[RED] <key>: ...`.
-- For one task, the translator can try up to four times: with guessed image types, with guessed texture types, with `softfloat64`, and with a geometry reader.
-- `spirv-cross` options: `--msl --msl-version 20300 --msl-argument-buffers --msl-texture-buffer-native --msl-pad-fragment-output`. MSL 3.1 when the module has `OpImageTexelPointer`.
+The call is `nxb_xlate::msl::translate(&job, &code, &ctx)`. It returns `Translated` or `Failure`.
 
-## Input of the reference title (measured)
+- `Context` has the chain version V, the source (`<package>#<index>`), the paired shader of the game's program (`pc_paired`), the answer-table flag `no_facts` and the `partners`.
+- `partners` is used by vertex shaders. It holds the `StageInputs` (the user varyings) of the paired pixel shaders. The translator pads the vertex outputs from them.
+- `Translated` has the libraries, the `StageInputs` of a pixel shader and the optional `Side`.
+- A `Library` has a suffix (`_b`, `_bf`, `_bp`, `_bv`, `_bg*`, `_bl*`, `_bgv`, `_bx`), the MSL text and an optional `Reflection`. The first library is `_b`.
+- The `Reflection` is the typed content of `<key>_b.json`. `to_value()` gives the JSON value that the step writes with the same writer as before.
+- `Side` names the alpha test entries and the logic op entries of a pixel shader. The step cuts them from the `_b` library into `_bx` at the metallib level.
+- `Failure.reason` is one of the reason strings of [shader-step.md](shader-step.md). The step counts it as the refusal of the translator.
 
-| measure | value |
-|---|---|
-| modules | 16,268 (11,340 fragment, 4,857 vertex, 71 compute) |
-| SPIR-V size | 736 MB, median 38.6 KB, maximum 503 KB |
-| instructions | 43.7 M, 117 distinct opcodes |
-| top 10 opcodes | 89.9 % of all instructions |
-| `OpPhi`, `OpSwitch`, `OpLoopMerge` | 2, 0, 4,645 |
+The output keeps the contract of the engine host: the argument buffer at `[[buffer(0)]]` with `[[id(n)]]` members, the entry `main0` and its extra entries,
+the library suffixes and the fields of `_b.json`. The facts in `_b.json` come from the emitter. Nothing parses MSL text.
 
-`OpLoad`, `OpStore` and `OpVariable` are 68 % of all instructions. The code contains structured selections, almost no loops and no `OpSwitch`.
-This is a narrow, regular input for an MSL writer. Other games will add atomics, subgroup operations and FP64.
+## Identity and the cache
 
-## Time (measured, warm store, internal disk, 12 tokens)
+The step stores each translation in the store. The key has the translator identity, the job, the code, the chain version V, the source, the paired shader,
+the answer-table flag and the varyings of the partners. The identity is the chain version V, which covers the sources of `nxb-xlate` (refer to [shader-step.md](shader-step.md)).
+`NXB_TEST_XLATE_SALT` changes it. A failure is not stored.
 
-The translator batches took 440 s of token time, and 529 vertex shaders translated again took approximately 500 s (estimate).
-`spirv-cross` took 8.7 ms for each call (measured on 10 modules). Warm wall time 170 to 183 s. Cold wall time 666 s (the compile time is larger). The run had 667 .NET starts.
+## Output
 
-## Options
+The MSL is not byte-identical to the output of the former C# translator and `spirv-cross`. GPU tests validate it.
+The own front end and the Apple tools compile the MSL as before.
 
-| option | content | effort (estimate) | time decrease (estimate) |
-|---|---|---|---|
-| (a) servers | a translator host that loads the unchanged `dmsh_xlate.dll`, and a `spirv-cross` server over its C API | 6 to 10 work-hours | warm -55 to -75 s, cold -50 to -80 s |
-| (b) Rust translator | a port of approximately 47,500 lines C# to an estimated 30,000 to 36,000 lines Rust, byte-identical SPIR-V | 90 to 140 work-hours | warm -15 to -30 s over (a), no .NET in the product |
-| (c) Rust `spirv-cross` | a port of the MSL path for the subset in use, byte-identical MSL | 100 to 160 work-hours | 5 to 10 s |
-| (d) direct MSL | the Rust translator writes MSL without SPIR-V and `spirv-cross`. Not byte-identical, validated by GPU tests. | 50 to 80 work-hours | warm -10 to -25 s over (b) |
+## Open points
 
-Option (a) keeps the translator binary and its fingerprint. Thus it does not change the chain version.
-
-The highest risks of (b) are the SPIR-V id order (it follows the emit order and the C# dictionary order), float folding
-with the same bits as C#, and the local changes without a reference implementation. A development probe that writes the IR
-after each pass as text, in C# and in Rust, finds the first different pass.
-
-Risks of (c): expression forwarding, variable hoisting, name deduplication, argument-buffer layout, helper functions,
-and float literal format. `spirv-cross` uses `snprintf`, which the Rust formatter does not copy.
-
-## Phases
-
-S1 is the servers of option (a). S2 is the Rust translator of option (b) in five work phases: skeleton and probe, decoder
-and SPIR-V generator, emitters and optimizations, structured IR and code generator, other games and the local changes.
-Each phase ends when its probe output is the same as the C# output on the full corpus. S3 is option (c) or (d).
-
-## Recommendation
-
-1. Do S1 first. It gives the largest safe decrease of time and keeps the chain version.
-2. Then do S2, the Rust translator, byte-identical.
-3. For S3, prefer (d) to (c), but only after S2 is byte-identical. If byte identity stays mandatory, use (c) for the measured subset, with the server as fallback.
-
-Estimated total for S1, S2 and S3 (d): the warm translator share decreases from approximately 1,100 token-s to approximately 200 token-s.
-At 12 tokens, that is approximately 90 to 130 s less warm wall time.
+- The MSL back end is the part that fills `translate`. A shader that it does not translate gets `Failure` with the reason `not ported` until then.

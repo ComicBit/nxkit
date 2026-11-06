@@ -20,19 +20,16 @@ This is early cutoff, as in the build systems Shake, Bazel and Salsa.
 
 | stage | store domain | version part | content part |
 |---|---|---|---|
-| translator | `nxb.xlate.v1` | translator build id: SHA-256 of the translator assemblies | job JSON without the scratch path, SHA-256 of the code bytes |
-| `spirv-cross` | `nxb.msl.v1` | SHA-256 of the `spirv-cross` binary | arguments, SPIR-V bytes |
-| MSL passes, variants, reflection | not stored | none | none |
+| translator | `nxb.xlate.v2` | translator identity: the chain version V, which covers the sources of `nxb-xlate`, and `NXB_TEST_XLATE_SALT` | job JSON, SHA-256 of the code bytes, V, source, paired shader, answer-table flag, partner varyings |
 | Metal compile and link | `nxb.metallib.v2` | target record (flags), compiler identity (`metal` and `metallib` versions, SDK), own front-end tag | the last MSL text |
 | pipeline archive batch | `nxb-archive batch 1` | architecture, platform, minimum OS, `metal-tt` version | library bytes and the entries of the bases of the batch |
 
-The MSL passes, the variants and the reflection run again in each build. They are pure Rust and take seconds for all
-shaders. A cache for them costs more time than it saves.
+The translator stores the MSL, the reflection and the side library entries of each key. Nothing else sits between the translator and the compile.
 
 The effect of a chain change:
 
-- A change of one MSL pass compiles again only the shaders with a changed last MSL, and their archive batches.
-- A new translator binary with the same output translates again, but does not compile a shader.
+- A change of the translator compiles again only the shaders with a changed MSL, and their archive batches.
+- A new translator version with the same output translates again, but does not compile a shader.
 - A new Xcode compiles all shaders again, because the compiler identity is part of each compile key.
 
 ## Rules
@@ -64,6 +61,6 @@ Each run started from the store of a full build. The full build took 687 s.
 
 These environment variables are only for the benchmark. They have no effect when they are not set.
 
-- `NXB_TEST_PASS_SALT=<percent>` adds a comment to the MSL of that share of pixel and compute shaders. This simulates a pass that changes the output.
+- `NXB_TEST_PASS_SALT=<percent>` adds a comment to the MSL of that share of pixel and compute shaders. This simulates a translator change that changes the output.
 - `NXB_TEST_XLATE_SALT=<s>` changes the translator id. The translator output stays the same.
 - `NXB_TEST_COMPILER_SALT=<s>` changes the compiler identity.

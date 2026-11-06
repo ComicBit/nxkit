@@ -409,7 +409,7 @@ The new fields come after the old fields, and `t` stays the last field. No old f
   A failed `stage_end` has the severity `error`.
 - A test makes sure of three facts. Each event has a code from the table. The code and the event name agree. The field `t` is the last field.
 
-The shader step adds fields to the `say` event "shaders done": `xlate_starts`, `xlate_restarts` and `xlate_fallbacks` (an object of reasons and keys).
+The shader step adds fields to the `say` event "shaders done": `xlate_hits` (translations from the store) and `xlate_refused` (an object of reasons and keys).
 
 ## Cache export
 
