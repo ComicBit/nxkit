@@ -50,6 +50,20 @@ the answer-table flag and the varyings of the partners. The identity is the chai
 The MSL is not byte-identical to the output of the former C# translator and `spirv-cross`. GPU tests validate it.
 The own front end and the Apple tools compile the MSL as before.
 
+## Geometry, task and mesh shaders
+
+A geometry shader runs as a compute kernel. One job of stage `gs` gives the libraries `_b` (a copy of `_bg0`), `_bg0` to `_bg4` and `_bgv`. Each has its own `.json`.
+The kernels `_bg0` to `_bg4` are one per input topology. They write the output vertices and the index buffer. The library `_bgv` draws that output.
+The `.json` of a kernel has the member `geometry` (`vertices`, `invocations`, `output`, `index_stride`, `stride` in words). The `.json` of `_bgv` has `geometry_reader`, `geometry_output` and `entry_z`.
+
+A task or mesh shader is a job of stage `cs` with the member `mesh_stage`. The code has no SPH. The job carries `stage_memory`, `shared` and `local` as the engine lays them out,
+and the translator refuses a job whose layout differs. The body of the shader is one function. The wrapper is a Metal `[[object]]` function for `ts` and a `[[mesh]]` function for `ms`.
+The `.json` has `stage` `ts` or `ms`, `msl_entry_kind` null and `mesh_stage` (`kind`, `threads`, `payload`, `task`). A mesh function also has `entry_z`.
+The translator fails with `mesh stage failed` when the shader uses shared memory of its own or the sizes do not fit Metal.
+
+Tessellation, transform feedback and vertex as compute are not ported. Each gives `Failure` with the reason `not ported` and a detail that names the stage.
+The lean geometry kernels `_bl0`, `_bl1` and `_bl3` are not emitted.
+
 ## Open points
 
 - The MSL back end is the part that fills `translate`. A shader that it does not translate gets `Failure` with the reason `not ported` until then.
