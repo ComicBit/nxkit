@@ -13,7 +13,7 @@ A switch turns it off: `NXB_OWN_RAW=0`. If the front end rejects a shader, Apple
 
 ## Status
 
-Version 0.6.0 is the eighth public release. It is early software. Read this section before you use it.
+Version 0.6.1 is the ninth public release. It is early software. Read this section before you use it.
 
 - Mac only for the build tools. The tools run on macOS on Apple silicon. Other systems are not supported.
 - The tools need Apple tools (`metal`, `metallib`, `air-opt`, `metal-tt`, `codesign`, `xcrun`) from your own Xcode.
@@ -241,7 +241,7 @@ The tools read no fixed private path. Inputs come from arguments or from these v
 | `NXB_REWRITE_RULES` | `nxb rewrite` | a folder with rule files. The default is `rewrite-rules` next to the binary, then `data/rewrite-rules` of the checkout |
 | `NXB_REWRITE_PATCHES` | `nxb rewrite` | a snapshot file instead of the rule folder |
 | `NXB_TMP` | `nxb extract` | a folder for decoded streams that do not fit in memory |
-| `NXB_ENGINE` | `nxb ios`, `nxb rewrite`, `nxb profile` | the folder with the engine files that the iOS stages, the rewrite step and the survey read. `nxb build` takes `--engine` |
+| `NXB_ENGINE` | `nxb build`, `nxb ios`, `nxb rewrite`, `nxb profile` | the folder with the engine files that the build, the iOS stages, the rewrite step and the survey read. `--engine` of `nxb build` comes first |
 | `NXB_ORACLE_*`, `NXB_ZBIC_EXEFS` | tests | inputs for the tests that compare with the reference scripts and the ZBIC reader. Without them the tests skip |
 
 ## Architecture

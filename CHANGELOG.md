@@ -2,6 +2,12 @@
 
 All notable changes are in this file. The format follows Keep a Changelog. Versions follow Semantic Versioning.
 
+## 0.6.1
+
+### Fixed
+
+- `nxb build` reads the engine folder from `NXB_ENGINE` when `--engine` is not given. NX2Apple passes the engine this way. Before, the build stopped with "--engine <engine folder> is required".
+
 ## 0.6.0
 
 ### Changed (read this first)
