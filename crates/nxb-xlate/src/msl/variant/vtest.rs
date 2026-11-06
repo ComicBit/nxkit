@@ -194,6 +194,35 @@ impl V {
         self.put(op);
     }
 
+    /// A constant buffer `name` of vec4 words at `binding`.
+    pub(super) fn cb(&mut self, binding: i32, name: &str) {
+        use crate::codegen::props::{BufferDef, Field};
+        self.s.props.properties.constant_buffers.push(BufferDef {
+            layout: 0,
+            set: 0,
+            binding,
+            name: name.into(),
+            fields: vec![Field {
+                ty: AggType(AggType::FP32.0 | AggType::VECTOR4.0 | AggType::ARRAY.0),
+                array_length: 4096,
+                name: "data".into(),
+            }],
+        });
+    }
+
+    /// A load of word `comp` of vec4 `vec` of the constant buffer `binding`.
+    pub(super) fn uni(&mut self, binding: i32, vec: i32, comp: i32) -> A {
+        let src = vec![self.k(binding), self.k(0), self.k(vec), self.k(comp)];
+        let op = self.op(Inst::Load, StorageKind::ConstantBuffer, src);
+        self.def(AggType::FP32, op)
+    }
+
+    /// A float operation on `src` into a local.
+    pub(super) fn f(&mut self, inst: Inst, src: Vec<A>) -> A {
+        let op = self.op(Inst(inst.0 | Inst::FP32), StorageKind::None, src);
+        self.def(AggType::FP32, op)
+    }
+
     pub(super) fn translate_with(&self, partners: &[StageInputs]) -> Translated {
         let ctx = Context {
             chain: "V",
