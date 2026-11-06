@@ -164,6 +164,9 @@ pub struct OwnFront {
     verdicts: nxb_tool::airfront::Verdicts,
     #[cfg(feature = "air-front")]
     raw: Option<crate::own_raw::RawTier>,
+    /// The raw tier of the iOS libraries (no GPU test covers them).
+    #[cfg(feature = "air-front")]
+    pub(crate) raw_ios: Option<crate::own_raw::RawTier>,
     tag: String,
     /// Libraries the own front end made.
     pub own: AtomicU64,
@@ -204,7 +207,8 @@ impl OwnFront {
         Ok(OwnFront {
             fe,
             verdicts,
-            raw: crate::own_raw::RawTier::open()?,
+            raw: crate::own_raw::RawTier::open(false)?,
+            raw_ios: crate::own_raw::RawTier::open(true)?,
             tag,
             own: AtomicU64::new(0),
             fallback: AtomicU64::new(0),
@@ -277,8 +281,12 @@ impl OwnFront {
                     format!("{scope}, {l} libraries, {f} fallbacks")
                 },
             );
+            let raw_ios = self
+                .raw_ios
+                .as_ref()
+                .map_or_else(|| "off".into(), |r| r.summary());
             format!(
-                "{} allowed of {:?}; raw tier {raw}; Apple made {} libraries",
+                "{} allowed of {:?}; raw tier {raw}; iOS raw tier {raw_ios}; Apple made {} libraries",
                 self.verdicts.len(),
                 self.verdicts.counts,
                 self.apple.load(Ordering::Relaxed)

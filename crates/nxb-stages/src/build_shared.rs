@@ -107,13 +107,15 @@ impl Shared {
         Ok(Libs { mac, ios })
     }
 
-    /// The library of a source for one target, through single-flight and the store (the own front end: Mac only).
+    /// The library of a source for one target, through single-flight and the store. The Mac takes every own tier, iOS
+    /// only the raw tier.
     fn lib_one(&self, t: Option<&Side>, src: &str) -> Result<FileDigest, String> {
         let (conv, cid, tools, pch) = match t {
             Some(t) => (t.conv, &t.compiler_id, &t.tools, t.pch.as_deref()),
             None => (MAC, &self.compiler_id, &self.tools, self.pch.as_deref()),
         };
         let own = if t.is_none() { self.own.as_ref() } else { None };
+        let own_ios = if t.is_some() { self.own.as_ref() } else { None };
         let mut kb = ContentKey::builder("nxb.metallib.v2")
             .field_str("record", &conv.record())
             .field_str("compiler", cid)
@@ -124,6 +126,9 @@ impl Shared {
             .field("msl", src.as_bytes());
         if let Some(o) = own {
             kb = kb.field_str("frontend", o.key_field(src.as_bytes()));
+        }
+        if let Some(f) = own_ios.and_then(|o| o.ios_key_field(src.as_bytes())) {
+            kb = kb.field_str("frontend", f);
         }
         // test hook for the chain-delta benchmark: a compiler identity change
         if let Ok(salt) = std::env::var("NXB_TEST_COMPILER_SALT") {
@@ -140,14 +145,20 @@ impl Shared {
             {
                 return Ok(f.digest);
             }
-            let (lib, _, _) = crate::own_front::compile_link(
-                tools,
-                pch,
-                own,
-                conv.compile_flags,
-                src.as_bytes(),
-                self.io,
-            )?;
+            let lib = match own_ios.and_then(|o| o.try_compile_ios(src.as_bytes())) {
+                Some(lib) => lib,
+                None => {
+                    crate::own_front::compile_link(
+                        tools,
+                        pch,
+                        own,
+                        conv.compile_flags,
+                        src.as_bytes(),
+                        self.io,
+                    )?
+                    .0
+                }
+            };
             let mut w = self.store.entry(key);
             let d = w.add_bytes("b.metallib", &lib).map_err(|e| e.to_string())?;
             w.commit().map_err(|e| e.to_string())?;

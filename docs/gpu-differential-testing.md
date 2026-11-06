@@ -36,7 +36,8 @@ float values and ULP distance. A case with `written_words` 0 is not a test.
   `msl_info.py` finds the data that controls each loop and each dynamic index, and gives it small integers.
 - **One arena.** All buffers are in one 24 MiB buffer with guard zones. A read past an allocation returns zeros on this GPU (measured).
   The harness puts back the arena before each run and compares all of it after the run.
-- **Reference determinism.** When A and B differ, A runs two more times and B one more time. If a word changes between runs of one library, the case is `nondet`.
+- **Reference determinism.** When A and B differ, A runs two more times and B one more time.
+  If no word changes in these runs, A runs 4 more times and B 2 more times. If a word changes between runs of one library, the case is `nondet`.
 - **Invariance.** All vertex entries of one shader get the same inputs. The harness compares the clip-space x, y and w bits across the entries.
   This finds the z-fighting defect class, also when A and B agree.
 - **Capture twin.** `augment.py` adds a twin `<entry>_hcap` to each vertex entry. The twin stores all output words without raster.

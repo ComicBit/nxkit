@@ -2,6 +2,23 @@
 
 All notable changes are in this file. The format follows Keep a Changelog. Versions follow Semantic Versioning.
 
+## 0.6.6
+
+### Changed
+
+- The raw tier of the own front end also makes the iOS libraries of `nxb build`. Before, Apple's `metal` and `metallib` made all iOS libraries.
+  When the raw tier rejects a shader, Apple's compiler makes the iOS library.
+  The iOS library key gets the `frontend` field, so raw and Apple libraries do not share a store entry.
+- No GPU test and no device test covers the iOS raw libraries.
+  Of a sample of 1,000 shaders from two titles, 997 built and Apple's `air-validate` accepted all 997 for iOS. The 3 others were rejects.
+- The run note of the shader step counts the iOS raw libraries and fallbacks.
+- The docs describe the current code. Claims about features that do not exist are removed.
+  The chain version V, the translator identity, the archive batches and the security gaps now match the code.
+
+### Added
+
+- `NXB_OWN_RAW_IOS=0` turns the raw tier off for the iOS libraries only. `NXB_OWN_RAW` and `NXB_OWN_FRONT` also apply to iOS.
+
 ## 0.6.5
 
 ### Changed

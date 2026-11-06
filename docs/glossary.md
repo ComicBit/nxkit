@@ -8,12 +8,12 @@ The documents use Simplified Technical English (ASD-STE100). The terms below are
 | term | definition |
 |---|---|
 | cache export | One file with the cache entries of a title, made by `nxb cache export`. It has a checksum at the end. |
-| allow list | The list of shader digests with the verdict `own-identical`. By default, the own front end compiles only these shaders. All other shaders go to the Apple front end. |
+| allow list | The list of shader digests with the verdict `own-identical`. When the raw path does not take a shader, the own front end compiles it only if it is on this list. Other shaders go to the Apple front end. |
 | Apple front end | Apple's `metal -c` compiler, used from MSL source to AIR. |
 | AIR | Apple's intermediate representation for Metal shaders. It is LLVM IR with Apple metadata and intrinsics. |
 | back half | The part of the Metal compile after the front end: `air-opt` (or `metal -c` from IR) and `metallib`. |
 | build | The full procedure that makes an app from a game package. |
-| chain version (V) | The version of the shader output. It names the folder `b-<V>/`. A change of shader output bytes changes V. |
+| chain version (V) | A hash of the engine files that `dm/gfx/tools/dmsh_chain.py` lists in `FILES`, plus the options string `debug=True reduced=True`. It names the folder `b-<V>/`. No Rust source goes into V. The translator key `nxb.xlate.v2` contains V. |
 | compile input | One MSL source with one compile convention. The shader step compiles each compile input one time. |
 | corpus | A set of compile inputs from one game, kept on the local machine for tests. |
 | deny list | The list of shader digests that the own front end must not compile. |

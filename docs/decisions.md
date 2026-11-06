@@ -1,6 +1,6 @@
 # Decisions
 
-This document records the architecture decisions and their causes. Part 1 has the workspace decisions W1 to W21.
+This document records the architecture decisions and their causes. Part 1 has the workspace decisions W1 to W23.
 They apply where they are different from the two design proposals. Part 2 has the design decisions of the shader step and of the other stages.
 
 ## Principles
@@ -19,8 +19,8 @@ and shared APIs. The designs set the behavior.
 | W4 | Superseded by D20. The `Translator` trait was in `nxb-tool` (L2). | The trait returns `ToolError`. Process and server bridges are its implementations. |
 | W5 | Events are in their own crate `nxb-obs`. | The scheduler, the tool layer and all stages write events. |
 | W6 | Store format 1 is the own content-addressed store. A compatible tree reader is an adapter. Format 2 has segment files. | This prevents two meanings of "v1". |
-| W7 | Four layers L0 to L3 with an explicit list of sideways edges in L1. | One rule set and one checker. |
-| W8 | `nxb-stages` holds all stage modules. `nxb-cli` holds the program `nxb`. | Fewer crates. |
+| W7 | Four layers L0 to L3 with an explicit list of sideways edges. | One rule set and one checker. |
+| W8 | `nxb-stages` holds the shader step. `nxb-cli` holds the program `nxb`. The other stages are L3 crates (W19). | Fewer crates. |
 | W9 | The NSO parser is part of `nxb-rewrite`. The format modules start in `nxb-split`. | Fewer crates. The names stay reserved. |
 | W10 | The ad-hoc signer started as a standalone crate. It is part of `nxb-pack` (L3) at this time. | Parallel work with its own file set. |
 | W11 | Single-flight uses continuations (`claim` with `on_ready`), plus `get_or_run`, which waits. | A worker that waits is an idle core. |
@@ -28,14 +28,14 @@ and shared APIs. The designs set the behavior.
 | W13 | `rust-version` in the workspace, no `rust-toolchain.toml` at this time. | The build machine has no rustup. |
 | W14 | Withdrawn. A checkout compiles into `./target`. `CARGO_TARGET_DIR` and `CARGO_BUILD_JOBS` change this. | |
 | W15 | `Budget` calculates tokens from the P and E core counts and the factor e. | The budget follows the metric (PCE). e is 0.4 until a measurement replaces it. |
-| W16 | V contains `nxb-model`, `nxb-error`, `nxb-pyjson`, `nxb-shader`, `nxb-air` and their data. The other stages have their own format versions. | `nxb-error` holds reason strings that go into `_b_build.json`. |
-| W17 | `nxb-model` uses `nxb-sys` for the ARMv8 SHA-256 block function, with a scalar fallback. | Measured: 1,841 MB/s against 225 MB/s on 1 GiB. The intrinsics are `unsafe`, and only `nxb-sys` has `unsafe` code. The digests are the same, thus V does not change. |
+| W16 | The crates `nxb-model`, `nxb-error`, `nxb-maxwell`, `nxb-pyjson`, `nxb-shader`, `nxb-air` and `nxb-xlate` are in V. They have `in_v = true`. They use only crates in V. V itself is a hash of engine files (refer to [early-cutoff.md](early-cutoff.md)). The other stages have their own format versions. | `nxb-error` holds reason strings that go into `_b_build.json`. |
+| W17 | `nxb-model` uses `nxb-sys` for the ARMv8 SHA-256 block function, with a scalar fallback. | Measured: 1,841 MB/s against 225 MB/s on 1 GiB. The intrinsics are `unsafe`, and only `nxb-sys` has `unsafe` code. The digests are the same. |
 | W18 | Shader front ends are a `FrontEnd` trait in `nxb-tool`: `AppleFrontEnd`, `OwnFrontEnd`, `WithFallback`. The verdict data is data of the shader domain. The default uses the allow list (refer to D18). | The front-end id keeps the cache entries apart. |
 | W19 | The stage crates with I/O (`nxb-extract`, `nxb-pack`, `nxb-archive`) and the orchestrator `nxb-build` are L3 crates with listed sideways edges. | Each stage crate has one owner. |
 | W20 | The front-end crates are a separate layer F with their own names. | They are standalone and use only the standard library. Only `nxb-tool` can use `air-front`. Since W23, `nxb-cli` can also use `airc`. |
-| W21 | Early cutoff: each stage output has a key from the stage version and the content hash of its inputs. No key contains V. A V change does not delete data. The MSL passes run again in each build. | A change of one line in the chain must not compile all shaders of all games again. Measured: a V change alone took 47 s with 0 compiles (refer to [early-cutoff.md](early-cutoff.md)). |
+| W21 | Early cutoff: each stage output has a key from the stage version and the content hash of its inputs. Only the translator key contains V. A V change translates all shaders again. It compiles only the shaders with a changed MSL. A V change does not delete data. | A change of one line in the chain must not compile all shaders of all games again. Measured in 0.1.0: a V change alone took 47 s with 0 compiles (refer to [early-cutoff.md](early-cutoff.md)). |
 | W22 | Superseded by D20. The shader step had three ways to translate a key: the Rust translator, the translator host and the process bridge. Since 0.5.1, the Rust translator is off by default. Without it, the step uses the host first, then the process bridge. With it on, the step uses it first. Each fallback is counted by reason. | The Rust translator does not follow the current engine translator (for example the Maxwell denormal flush). Thus its output can differ from the C# output. It also does not cover geometry, tessellation, transform feedback, vertex shaders as compute and some rare cases. The C# ways give the same bytes. This reverses the decision of 0.4.0 to turn it on by default. The decision stays reversed until the changes are ported and compared again. |
-| W23 | There is one program, `nxb`. Each stage is a command. The separate program names and the dispatch by `argv[0]` do not exist. The front end compiler is the command `nxb airc`. `nxb-cli` can use `air-front` and `airc` (layer F entry points). | One file to sign, ship and update. A caller names the command, not a file. |
+| W23 | There is one program, `nxb`. Each stage is a command. The stages have no separate programs and no dispatch by `argv[0]`. The front end compiler is the command `nxb airc`. `nxb-cli` can use `airc` (a layer F entry point). | One file to sign, ship and update. A caller names the command, not a file. |
 
 ## Part 2: design decisions
 
@@ -43,7 +43,7 @@ and shared APIs. The designs set the behavior.
 
 | # | decision | cause |
 |---|---|---|
-| D1 | V from the sources that have an effect on the output, and `OUTPUT_VERSION`. | A runtime fix must not make libraries invalid. A domain change must change V. |
+| D1 | V is a hash of the engine files that `dm/gfx/tools/dmsh_chain.py` lists in `FILES`, plus the translator options. | A runtime fix must not make libraries invalid. A domain change must change V. |
 | D2 | Binary provenance in a lock file. BIN_ID in the reuse key of the build. This is the design. The lock file check is not in the code at this time. | This separates the code that made the bytes from the binary that ran. |
 | D3 | The own front end is not byte-identical. Image correctness validates it. | Unoptimized IR gave the same library in only 2 of 300 samples (measured). |
 | D4 | Three gates: `gpudiff` with class tolerances, coverage, scene comparison. | Each gate finds a different error type. |
@@ -51,7 +51,7 @@ and shared APIs. The designs set the behavior.
 | D6 | First back-end path: unoptimized IR into Apple's back half. | This keeps Apple's AIR passes. The back half took 57 ms median (measured). |
 | D7 | Front-end id in TOOL_FP and in the Metal cache identity. | Apple and own libraries do not mix. |
 | D8 | `SDKROOT` for each target and a fixed environment allow list. | A direct call without `SDKROOT` gives different bytes (measured). |
-| D9 | Python regular-expression semantics behind one shim. Hand-written matchers for frequent patterns. | 19 back-references and look-arounds. A verbatim port is the safest path to parity. |
+| D9 | Superseded by D20, which removes the MSL text passes. The shim for Python regular-expression semantics is not built (`nxb_shader::re` is empty). | 19 back-references and look-arounds. A verbatim port is the safest path to parity. |
 | D10 | Error classes and a circuit breaker. | A full disk must not become thousands of shader failures and an incorrect reuse key. |
 | D11 | Manifests with SHA-256, quarantine, dirty marker. | This finds damage and keeps the evidence. |
 | D12 | Process groups and division of bad batches. | One bad shader costs log2(batch) runs. |

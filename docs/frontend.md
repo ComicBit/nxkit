@@ -1,8 +1,8 @@
 # Own shader front end
 
 The own front end changes the machine-generated MSL of the engine into AIR. Apple's back half then makes the library.
-The own front end has two paths. The identical path compiles only the shaders on the allow list. The allow list is the shipped verdict file.
-It contains only shaders with the verdict `own-identical`. The raw path (new as the default in 0.4.0) compiles every Mac shader that the front end accepts.
+The own front end has two paths. The identical path compiles only the shaders on the allow list. The allow list is a verdict file.
+It contains only shaders with the verdict `own-identical`. It is not in this repository. Without it, only the raw path runs. The raw path (new as the default in 0.4.0) compiles every shader that the front end accepts. Since 0.6.6 it also makes the iOS libraries.
 **The raw path is not byte-identical to Apple's output.** The Apple front end compiles all other shaders.
 To use the Apple front end for all shaders, set `NXB_OWN_FRONT=0`. To turn off only the raw path, set `NXB_OWN_RAW=0`.
 
@@ -37,6 +37,8 @@ All crates use only the standard library and forbid `unsafe` code. `nxb shaders`
 
 ## Results
 
+The numbers in the next table come from the 0.1.0 release.
+
 | measure | macOS | iOS |
 |---|---|---|
 | inputs that compile and pass `air-validate` | 23,752 of 23,785 (99.86 %) | 23,752 of 23,785 |
@@ -46,10 +48,10 @@ All crates use only the standard library and forbid `unsafe` code. `nxb shaders`
 | GPU machine code of different libraries (`metal-tt`) | 17 of 20 pairs the same | 27 of 30 pairs the same |
 | CPU time for each input (500 inputs, 6 processes) | 96 ms (Apple: 183 ms) | 105 ms at a higher load |
 
-The 33 inputs that do not compile are parser rejects: threadgroup address-space values, some templates, `<metal_atomic>`.
+In 0.1.0, the 33 inputs that did not compile were parser rejects: threadgroup address-space values, some templates, `<metal_atomic>`.
 
 The own front end does not support these constructs. They go to the Apple front end: texture `write` other than 2D, `read` and `gather`
-other than 2D, `get_width` other than 2D, half builtins, matrices, `simd_*` other than `simd_shuffle`, `simd_any` and
+other than 2D and 2D array, half builtins, matrices, `simd_*` other than `simd_shuffle`, `simd_any` and
 `simd_all`, barriers, sample gradients, `array<T, N>` outside an argument buffer, a reference to an array as a
 parameter.
 
@@ -113,7 +115,7 @@ until the IR agrees.
 
 The front-end code can parse and write the `MTLB` container (210 of 210 Apple libraries rewritten byte-identical).
 But `metallib` also runs its own pass list on each function, and no LLVM pass subset gave Apple's machine code (0 of 15 pairs).
-Thus Apple's `air-opt -O1` and `metallib` stay for the default path (decision D17).
+Thus Apple's `air-opt -O1` and `metallib` stay for the identical path (decision D17).
 
 ## Raw container path
 
@@ -153,7 +155,7 @@ A full-corpus run at 6 threads gave a median of 33 ms and a mean of 71 ms for ea
 The next cheap decrease is to write the bitcode without the text IR (about 35 ms, estimate).
 [shader-step.md](shader-step.md) describes the tier in the shader step and the measured gain.
 
-Not done: the raw path for iOS (there is no GPU test for iOS libraries), a GPU test for the other 85 % of the corpus,
+Not done: a GPU test or a device test of the iOS raw libraries, a GPU test for the other 85 % of the corpus,
 and a GPU test of the side-unit cut of a raw library on its own.
 
 ## Tests
@@ -161,8 +163,8 @@ and a GPU test of the side-unit cut of a raw library on its own.
 - Unit and case tests: `crates/msl-parse/tests`, `crates/air-emit/tests`.
 - GPU differential test of own libraries against Apple libraries: refer to [gpu-differential-testing.md](gpu-differential-testing.md).
 - `cargo test -p air-front -- --include-ignored` runs the tests that use Apple's tools.
-- The scripts in `tools/front` read environment variables and do not use a default path: `NXB_AIRC` (the `airc` program of the front end workspace),
-  `NXB_PROTO` (the Python prototype), `NXB_REF` (reference folder with stored Apple libraries), `NXB_CORPUS`
+- The scripts in `tools/front` read environment variables: `NXB_AIRC` (the `airc` program, default `target/release/airc`),
+  `NXB_HARNESS` (the GPU test harness, default `tools/gpudiff`), `MSL_PROTO` (the Python prototype), `NXB_REF` (reference folder with stored Apple libraries), `NXB_CORPUS`
   (one MSL path on each line), `NXB_SPECS` (prepared GPU test specs).
 
 For the AIR rules, refer to [air-conventions.md](air-conventions.md). For the studies, refer to
