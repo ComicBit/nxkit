@@ -257,6 +257,26 @@ impl Em<'_> {
         })
     }
 
+    /// A store of an integer value to a component of a user output of a vertex shader is a candidate for the layer.
+    fn note_layer_source(&mut self, o: &OpData) {
+        let int = matches!(self.last_src, Some(t) if t == AggType::S32 || t == AggType::U32);
+        let out = o.storage_kind == StorageKind::Output;
+        if self.shader != Shader::Vertex
+            || self.exit.is_some()
+            || !out
+            || !int
+            || o.sources.len() != 4
+        {
+            return;
+        }
+        let k = |em: &Self, i: usize| o.sources.get(i).and_then(|a| em.constant(*a));
+        if k(self, 0) == Some(IoVariable::UserDefined.0 as i32)
+            && let (Some(l), Some(c)) = (k(self, 1), k(self, 2))
+        {
+            self.layer_src.push((self.func, l, c));
+        }
+    }
+
     /// Loads, stores and atomics.
     pub(super) fn memory(&mut self, inst: Inst, o: &OpData) -> R<Option<Val>> {
         let p = self.place(inst, o)?;
@@ -268,6 +288,7 @@ impl Em<'_> {
             Inst::Store => {
                 let last = self.src(o, o.sources.len() - 1)?;
                 let v = self.get(p.ty, last)?;
+                self.note_layer_source(o);
                 if p.skip {
                     return Ok(None);
                 }

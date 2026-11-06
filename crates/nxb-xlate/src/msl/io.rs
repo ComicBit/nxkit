@@ -77,6 +77,10 @@ pub struct Plan {
     pub depth: bool,
     /// The lane id is the constant zero (the visibility counter).
     pub lane_zero: bool,
+    /// The locations of the user outputs of a vertex shader, in order.
+    pub user_locs: Vec<u32>,
+    /// The outputs a vertex shader adds for the inputs of its paired pixel shaders.
+    pub pads: Vec<super::variant::vertex_pad::Pad>,
 }
 
 impl Plan {
@@ -266,6 +270,7 @@ pub fn build(
         p.out_members
             .push(format!("float4 loc{l} [[user(locn{l})]];"));
         p.vec4_outputs.push(format!("loc{l}"));
+        p.user_locs.push(*l as u32);
     }
     if shader == Shader::Vertex {
         let pos = if props.host.reduced_precision {
