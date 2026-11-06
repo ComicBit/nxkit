@@ -12,6 +12,7 @@ pub mod control;
 pub mod emit;
 pub mod entry;
 pub mod facts;
+pub mod facts_ps;
 pub mod handles;
 pub mod inst_alu;
 pub mod inst_img;
@@ -28,6 +29,8 @@ mod tests;
 mod tests_fetch;
 #[cfg(test)]
 mod tests_ps;
+#[cfg(test)]
+mod tests_ps_facts;
 pub mod types;
 pub mod usage;
 pub mod variant;

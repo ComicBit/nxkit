@@ -2,6 +2,7 @@
 
 use super::args::{self, SET_NAME, SET_TYPE};
 use super::emit::{Em, Options, R, Shader, Shared};
+use super::facts_ps::{self, KILL};
 use super::refl::Reflection;
 use super::types::{msl_type, scalar};
 use super::usage::{self, Usage};
@@ -89,6 +90,9 @@ fn shared_params(s: &Structured, res: &args::Res, plan: &io::Plan, shader: Shade
     }
     if !plan.out_members.is_empty() && shader != Shader::Compute {
         p.params.push(d("thread main0_out& out", "out"));
+    }
+    if shader == Shader::Fragment && facts_ps::helper_discards(&s.info) {
+        p.params.push(d(&format!("thread bool& {KILL}"), KILL));
     }
     for b in &plan.builtins {
         p.params.push(d(&format!("{} {}", b.ty, b.name), b.name));

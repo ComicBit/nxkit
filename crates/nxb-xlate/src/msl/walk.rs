@@ -13,7 +13,7 @@ pub fn for_each_node(info: &StructInfo, f: &mut dyn FnMut(A, &Kind)) {
     }
 }
 
-fn visit(info: &StructInfo, a: A, f: &mut dyn FnMut(A, &Kind)) {
+pub(super) fn visit(info: &StructInfo, a: A, f: &mut dyn FnMut(A, &Kind)) {
     let kind = info.ast.kind(a);
     f(a, kind);
     match kind {

@@ -147,6 +147,13 @@ impl Builder<'_> {
         &mut self.res.bindings[n]
     }
 
+    /// The last member joins the raster order group of the fragment shader interlock.
+    fn ordered(&mut self) {
+        if let Some(at) = self.members.rfind("]];") {
+            self.members.insert_str(at, ", raster_order_group(0)");
+        }
+    }
+
     fn cbuf(&mut self, d: &BufferDef) -> R<()> {
         let name = d.name.clone();
         let (kind, reg, bank) = if name == "support_buffer" {
@@ -222,6 +229,9 @@ impl Builder<'_> {
                 });
             }
             b.rw = Some(rw);
+        }
+        if rw && self.usage.interlock {
+            self.ordered();
         }
         self.res.sbs.insert(
             d.binding,
@@ -306,6 +316,9 @@ impl Builder<'_> {
         let b = self.member(&ty, &d.name, d.array_length, dec.kind);
         dec.apply(b);
         b.atomic = u.atomic;
+        if self.usage.interlock && (u.write || u.atomic) {
+            self.ordered();
+        }
         self.res.imgs.insert(
             key,
             Tx {

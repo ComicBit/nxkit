@@ -36,6 +36,9 @@ impl Em<'_> {
         let locals = f.locals.clone();
         let ret = f.return_type;
         let saved = std::mem::take(&mut self.out);
+        if i == 0 && self.kill() {
+            self.raw(&format!("bool {} = false;", super::facts_ps::KILL));
+        }
         for l in locals {
             let Kind::Operand { var_type, .. } = self.info.ast.kind(l) else {
                 return Err("local is not an operand".into());
