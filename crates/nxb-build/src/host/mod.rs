@@ -39,12 +39,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 /// The folders the NSP script puts in front of `PATH` (`TOOL_PATHS`: GUI apps do not get the shell's `PATH`).
-pub const TOOL_PATHS: &[&str] = &[
-    "/opt/homebrew/bin",
-    "/usr/local/bin",
-    "/usr/local/share/dotnet",
-    "~/.dotnet",
-];
+pub const TOOL_PATHS: &[&str] = &["/opt/homebrew/bin", "/usr/local/bin"];
 
 /// Runs the stages' tools: one registry (cancellation) and one environment for all of them.
 #[derive(Clone, Debug)]

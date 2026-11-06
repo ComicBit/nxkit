@@ -11,13 +11,13 @@ use nxb_error::Fatal;
 use nxb_model::{ContentKey, FileDigest};
 use nxb_pyjson::{Value, dumps_indent};
 use nxb_sched::SingleFlight;
-use nxb_xlate::msl::StageInputs;
 use nxb_shader::pch;
 use nxb_shader::side;
 use nxb_shader::target::{MAC, TargetConv};
 use nxb_store::Store;
 use nxb_tool::{Io, MetalTools};
 use nxb_tool::{ProcessRegistry, Resolver, SdkRoots};
+use nxb_xlate::msl::StageInputs;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -180,7 +180,12 @@ impl Shared {
 
     /// A pixel shader's side libraries: the unit compiled once per target and cut into `_b` and `_bx`, the functions
     /// of `names` going to `_bx`. The error is a status and its detail.
-    pub(crate) fn side(&self, key: &str, src: &str, names: &[String]) -> Result<(), (String, String)> {
+    pub(crate) fn side(
+        &self,
+        key: &str,
+        src: &str,
+        names: &[String],
+    ) -> Result<(), (String, String)> {
         let metal = |e: String| ("metal failed".to_string(), e);
         let internal = |e: String| ("internal error".to_string(), e);
         let cut = |d: &FileDigest| {
@@ -205,10 +210,19 @@ impl Shared {
     }
 
     /// `<key><suffix>.json` per target, with that target's `chain_metal` and `chain_compiler` (`MTL.with_compiler`).
-    pub(crate) fn write_json(&self, key: &str, suffix: &str, mut refl: Value) -> Result<(), String> {
+    pub(crate) fn write_json(
+        &self,
+        key: &str,
+        suffix: &str,
+        mut refl: Value,
+    ) -> Result<(), String> {
         refl.set("chain_metal", Value::str(MAC.record()));
         refl.set("chain_compiler", Value::str(self.ident.clone()));
-        self.write(key, &format!("{suffix}.json"), dumps_indent(&refl, 1).as_bytes())?;
+        self.write(
+            key,
+            &format!("{suffix}.json"),
+            dumps_indent(&refl, 1).as_bytes(),
+        )?;
         if let Some(t) = &self.ios {
             refl.set("chain_metal", Value::str(t.conv.record()));
             refl.set("chain_compiler", Value::str(t.ident.clone()));
@@ -216,7 +230,7 @@ impl Shared {
                 t.out.join(format!("{key}{suffix}.json")),
                 dumps_indent(&refl, 1),
             )
-                .map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?;
         }
         Ok(())
     }

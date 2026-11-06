@@ -12,41 +12,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-/// `DOTNET_ROOT` as the NSP script finds it: the option, the environment, else `dotnet --list-runtimes` on `PATH`.
-fn dotnet_root(a: &Args) -> Result<PathBuf, String> {
-    if let Some(d) = &a.dotnet_root {
-        return Ok(d.clone());
-    }
-    if let Some(d) = std::env::var_os("DOTNET_ROOT") {
-        return Ok(d.into());
-    }
-    // `dotnet` is searched in the script's tool folders first (an app started from the Finder has no Homebrew in its PATH)
-    let dotnet = crate::host::Runner::from_parent()
-        .and_then(|r| r.which("dotnet"))
-        .unwrap_or_else(|_| PathBuf::from("dotnet"));
-    let out = std::process::Command::new(dotnet)
-        .arg("--list-runtimes")
-        .output()
-        .map_err(|e| {
-            format!("no .NET runtime for the shader translator (dotnet: {e}); pass --dotnet-root")
-        })?;
-    for line in String::from_utf8_lossy(&out.stdout).lines() {
-        if let Some(rest) = line.trim().strip_prefix("Microsoft.NETCore.App ")
-            && let Some(i) = rest.find('[')
-            && let Some(root) = rest[i + 1..]
-                .trim_end_matches(']')
-                .strip_suffix("/shared/Microsoft.NETCore.App")
-        {
-            return Ok(root.into());
-        }
-    }
-    Err("no .NET runtime for the shader translator; pass --dotnet-root".into())
-}
-
-/// The shader step's configuration from the build's plan: the engine's translator and spirv-cross, the chain version
+/// The shader step's configuration from the build's plan: the chain version
 /// and the profile's inputs digest computed as `dmsh_chain.py` does, outputs in `<work>/shader/cache/b-<V>`.
 pub fn shader_config(a: &Args, b: &Build) -> Result<BuildConfig, String> {
-    let tools = b.engine.join("dm/gfx/tools");
     let chain = nxb_shader::chain::version(&b.engine)?;
     let inputs = nxb_shader::chain::inputs_of(&b.engine, &b.profile.0)?;
     let sh = b.work.join("shader");
@@ -54,10 +22,6 @@ pub fn shader_config(a: &Args, b: &Build) -> Result<BuildConfig, String> {
         Some(f) => nxb_sched::UseManifest::read(f)?.keys().to_vec(),
         None => Vec::new(),
     };
-    let xlate = a
-        .xlate
-        .clone()
-        .unwrap_or_else(|| tools.join("dmsh_xlate_bin/dmsh_xlate"));
     Ok(BuildConfig {
         pkg: sh.join("pkg"),
         out: sh.join("cache"),
@@ -65,9 +29,6 @@ pub fn shader_config(a: &Args, b: &Build) -> Result<BuildConfig, String> {
         chain,
         game: b.title.clone(),
         inputs,
-        xlate: xlate.clone(),
-        dotnet_root: dotnet_root(a)?,
-        spirv_cross: tools.join("spirv_cross_bin/spirv-cross"),
         store: sh.join("store"),
         work: sh.join("work"),
         scratch: std::env::temp_dir().join(format!("nxb-build-{}", std::process::id())),
@@ -88,8 +49,6 @@ pub fn shader_config(a: &Args, b: &Build) -> Result<BuildConfig, String> {
         manifest,
         partial: a.partial,
         ios_out: a.also_ios.then(|| sh.join("ios")),
-        xlate_host: nxb_stages::xlatehost::resolve(a.xlate_host.as_deref(), &xlate),
-        xlate_rust: nxb_stages::xlatehost::resolve_rust(None),
     })
 }
 
@@ -216,10 +175,10 @@ pub fn shaders_and_archive(a: &Args, b: &Build, p: &Arc<Progress>) -> Result<Out
             let r = r?;
             let ok = r.results.iter().filter(|x| x.1 == "ok").count();
             let mut shaders = format!(
-                "{ok} of {} shaders, {}; {} translator processes",
+                "{ok} of {} shaders, {}; {} translations from the store",
                 r.results.len(),
                 r.own_note,
-                r.xlate_runs
+                r.xlate_hits
             );
             let partial = nxb_sched::Partial::read(&lib);
             if let (true, Some(st)) = (a.partial, &partial) {
@@ -228,15 +187,11 @@ pub fn shaders_and_archive(a: &Args, b: &Build, p: &Arc<Progress>) -> Result<Out
             p.say_with(
                 &format!("shaders done in {:.1} s ({shaders})", r.wall.as_secs_f64()),
                 vec![
-                    ("xlate_starts".into(), Value::Int(r.xlate_runs as i64)),
+                    ("xlate_hits".into(), Value::Int(r.xlate_hits as i64)),
                     (
-                        "xlate_restarts".into(),
-                        Value::Int(i64::from(r.xlate_restarts)),
-                    ),
-                    (
-                        "xlate_fallbacks".into(),
+                        "xlate_refused".into(),
                         Value::Object(
-                            r.xlate_fallbacks
+                            r.xlate_refused
                                 .iter()
                                 .map(|(k, n)| (k.clone(), Value::Int(*n as i64)))
                                 .collect(),

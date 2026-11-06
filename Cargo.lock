@@ -283,10 +283,8 @@ dependencies = [
 name = "nxb-shader"
 version = "0.5.1"
 dependencies = [
- "nxb-error",
  "nxb-model",
  "nxb-pyjson",
- "nxb-testkit",
 ]
 
 [[package]]
