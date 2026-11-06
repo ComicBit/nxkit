@@ -536,6 +536,10 @@ impl<'a> P<'a> {
                 let b = self.value()?;
                 Op::Bin(opw.clone(), f, t, a, b)
             }
+            "freeze" => {
+                let t = self.ty()?;
+                Op::Freeze(t, self.value()?)
+            }
             "fneg" => {
                 let f = self.flags();
                 let t = self.ty()?;

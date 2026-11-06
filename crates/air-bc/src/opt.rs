@@ -15,7 +15,7 @@ fn vals_mut(op: &mut Op) -> Vec<&mut Val> {
             .collect(),
         Op::Cast(_, v, _) => vec![&mut v.1],
         Op::Bin(_, _, _, a, b) | Op::Cmp(_, _, _, _, a, b) => vec![a, b],
-        Op::FNeg(_, _, a) => vec![a],
+        Op::FNeg(_, _, a) | Op::Freeze(_, a) => vec![a],
         Op::Select(_, a, b, c) | Op::InsertElt(a, b, c) | Op::Shuffle(a, b, c) => {
             vec![&mut a.1, &mut b.1, &mut c.1]
         }
@@ -42,7 +42,7 @@ fn vals(op: &Op) -> Vec<&Val> {
             .collect(),
         Op::Cast(_, v, _) => vec![&v.1],
         Op::Bin(_, _, _, a, b) | Op::Cmp(_, _, _, _, a, b) => vec![a, b],
-        Op::FNeg(_, _, a) => vec![a],
+        Op::FNeg(_, _, a) | Op::Freeze(_, a) => vec![a],
         Op::Select(_, a, b, c) | Op::InsertElt(a, b, c) | Op::Shuffle(a, b, c) => {
             vec![&a.1, &b.1, &c.1]
         }

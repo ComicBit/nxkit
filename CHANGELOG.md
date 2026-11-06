@@ -2,6 +2,26 @@
 
 All notable changes are in this file. The format follows Keep a Changelog. Versions follow Semantic Versioning.
 
+## Unreleased
+
+### Added
+
+- The own front end accepts `mulhi`, `simd_shuffle`, `simd_any` and `simd_all`.
+  It also accepts the `front_facing` stage-in field and the `thread_index_in_simdgroup` parameter.
+  `calculate_clamped_lod` and `calculate_unclamped_lod` work on `texture2d_array` too.
+- The IR has the same intrinsics, attributes and metadata as the IR of Apple's front end.
+  Apple's front end writes a `freeze` of the data operand of `simd_shuffle`. The own front end does the same, and `air-bc` writes `freeze`.
+  `air_front::FORMAT` is 8.
+- On one title 1,207 shaders went to Apple's `metal` for these reasons. The own front end compiles them in process, and they pass `air-validate`.
+  On the raw path, 158 of them have code after the last `return`. They build only with the `mem2reg` fix for such code.
+  On a second title the own front end makes 39 more libraries. The other libraries stay byte-identical, except for the fix below.
+
+### Fixed
+
+- A call of a user function got the attributes of `dfdx` and `dfdy` (`convergent nounwind willreturn`) when the shader also used one of them.
+  The two attribute groups had the same number. The call has `convergent nobuiltin "no-builtins"`, as in Apple's IR.
+  On one title 2 libraries changed for this reason.
+
 ## 0.6.4
 
 ### Changed
