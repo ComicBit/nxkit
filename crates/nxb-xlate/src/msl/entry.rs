@@ -6,7 +6,7 @@ use super::refl::Reflection;
 use super::spill::{self, Spill};
 use super::types::{msl_type, scalar};
 use super::usage::{self, Usage};
-use super::{Context, Library, Translated, facts, io, prelude};
+use super::{Context, Library, Translated, facts, first_store, io, prelude};
 use crate::codegen::props::MemoryDef;
 use crate::translation::msl_entry::Structured;
 use std::fmt::Write;
@@ -188,7 +188,13 @@ pub fn build(s: &Structured, ctx: &Context<'_>, opt: &Options) -> R<Translated> 
         base_instance,
         lane_zero,
     )?;
-    let shared = shared_params(s, &res, &plan, shader, spill.as_ref())?;
+    let mut shared = shared_params(s, &res, &plan, shader, spill.as_ref())?;
+    let first = (shader == Shader::Compute)
+        .then(|| first_store::find(&s.info, &res, local_size(s)))
+        .flatten();
+    if let Some(f) = &first {
+        shared.skip = f.skip.clone();
+    }
     let mut em = Em::new(&s.info, &s.props, &res, opt, &shared, &plan, shader);
     let mut bodies = Vec::new();
     for i in 0..s.info.functions.len() {
@@ -248,6 +254,9 @@ pub fn build(s: &Structured, ctx: &Context<'_>, opt: &Options) -> R<Translated> 
     };
     if let Some(sp) = &spill {
         r.set_extra("tg_spill", nxb_pyjson::Value::Int(sp.total));
+    }
+    if let Some(f) = first.filter(|f| !f.stores.is_empty()) {
+        r.set_extra("first_store", first_store::value(&f));
     }
     r.raster = facts::raster(shader, &plan, usage.discard, &r.bindings);
     let mut varyings = plan.varyings.clone();

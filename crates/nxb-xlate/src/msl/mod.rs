@@ -18,6 +18,7 @@ pub mod control;
 pub mod emit;
 pub mod entry;
 pub mod facts;
+pub mod first_store;
 pub mod handles;
 pub mod inst_alu;
 pub mod inst_img;
