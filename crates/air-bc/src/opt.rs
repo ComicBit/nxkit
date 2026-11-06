@@ -32,9 +32,35 @@ fn vals_mut(op: &mut Op) -> Vec<&mut Val> {
     }
 }
 
+fn vals(op: &Op) -> Vec<&Val> {
+    match op {
+        Op::Alloca(..) | Op::Br(_) | Op::Unreachable => vec![],
+        Op::Load(_, p, _) => vec![&p.1],
+        Op::Store(a, b, _) => vec![&a.1, &b.1],
+        Op::Gep(_, _, p, idx) => std::iter::once(&p.1)
+            .chain(idx.iter().map(|x| &x.1))
+            .collect(),
+        Op::Cast(_, v, _) => vec![&v.1],
+        Op::Bin(_, _, _, a, b) | Op::Cmp(_, _, _, _, a, b) => vec![a, b],
+        Op::FNeg(_, _, a) => vec![a],
+        Op::Select(_, a, b, c) | Op::InsertElt(a, b, c) | Op::Shuffle(a, b, c) => {
+            vec![&a.1, &b.1, &c.1]
+        }
+        Op::Phi(_, _, ins) => ins.iter().map(|x| &x.0).collect(),
+        Op::CondBr(c, ..) => vec![c],
+        Op::Switch(_, v, _, cases) => std::iter::once(v)
+            .chain(cases.iter().map(|x| &x.0))
+            .collect(),
+        Op::Ret(v) => v.iter().map(|x| &x.1).collect(),
+        Op::Call(_, _, _, _, args, _) => args.iter().map(|x| &x.2).collect(),
+        Op::ExtractElt(a, b) => vec![&a.1, &b.1],
+        Op::ExtractVal(a, _) => vec![&a.1],
+        Op::InsertVal(a, b, _) => vec![&a.1, &b.1],
+    }
+}
+
 fn locals(op: &Op, out: &mut Vec<String>) {
-    let mut op = op.clone();
-    for v in vals_mut(&mut op) {
+    for v in vals(op) {
         collect(v, out);
     }
 }
@@ -246,31 +272,39 @@ fn mem2reg(f: &mut Function) {
             }
         }
     }
-    // phi placement
+    // phi placement, allocas numbered in name order
     let names: Vec<String> = {
         let mut v: Vec<String> = allocas.keys().cloned().collect();
         v.sort();
         v
     };
-    let mut phis: Vec<Vec<(String, String)>> = vec![Vec::new(); n]; // block -> (alloca, phi name)
+    let slot: HashMap<&str, usize> = names
+        .iter()
+        .enumerate()
+        .map(|(k, a)| (a.as_str(), k))
+        .collect();
+    // blocks that store to each alloca, ascending
+    let mut defs: Vec<Vec<usize>> = vec![Vec::new(); names.len()];
+    for (b, (_, insts)) in f.blocks.iter().enumerate() {
+        for i in insts {
+            if let Op::Store(_, (_, Val::Local(p)), _) = &i.op {
+                if let Some(&k) = slot.get(p.as_str()) {
+                    if defs[k].last() != Some(&b) {
+                        defs[k].push(b);
+                    }
+                }
+            }
+        }
+    }
+    let mut phis: Vec<Vec<(usize, String)>> = vec![Vec::new(); n]; // block -> (alloca slot, phi name)
     let mut counter = 0usize;
-    for a in &names {
-        let mut work: Vec<usize> = f
-            .blocks
-            .iter()
-            .enumerate()
-            .filter(|(_, b)| {
-                b.1.iter()
-                    .any(|i| matches!(&i.op, Op::Store(_, (_, Val::Local(p)), _) if p == a))
-            })
-            .map(|(k, _)| k)
-            .collect();
+    for (a, work) in defs.iter_mut().enumerate() {
         let mut has: HashSet<usize> = HashSet::new();
         while let Some(b) = work.pop() {
             for &d in &df[b] {
                 if has.insert(d) {
                     counter += 1;
-                    phis[d].push((a.clone(), format!("m2r.{counter}")));
+                    phis[d].push((a, format!("m2r.{counter}")));
                     work.push(d);
                 }
             }
@@ -286,31 +320,54 @@ fn mem2reg(f: &mut Function) {
     let mut subst: HashMap<String, Val> = HashMap::new();
     let mut phi_in: Vec<Vec<Vec<(Val, String)>>> =
         phis.iter().map(|p| vec![Vec::new(); p.len()]).collect();
-    let mut remove: HashSet<(usize, usize)> = HashSet::new();
-    let mut stack: Vec<(usize, HashMap<String, Val>)> =
-        vec![(0, names.iter().map(|a| (a.clone(), Val::Undef)).collect())];
-    while let Some((b, mut cur)) = stack.pop() {
+    let mut remove: Vec<Vec<bool>> = f.blocks.iter().map(|b| vec![false; b.1.len()]).collect();
+    // depth first over the dominator tree, current values per slot, restored from an undo log on leaving a block
+    enum Step {
+        Enter(usize),
+        Leave(usize),
+    }
+    let mut cur: Vec<Val> = vec![Val::Undef; names.len()];
+    let mut undo: Vec<(usize, Val)> = Vec::new();
+    let mut steps = vec![Step::Enter(0)];
+    while let Some(step) = steps.pop() {
+        let b = match step {
+            Step::Leave(mark) => {
+                while undo.len() > mark {
+                    if let Some((k, v)) = undo.pop() {
+                        cur[k] = v;
+                    }
+                }
+                continue;
+            }
+            Step::Enter(b) => b,
+        };
+        let mark = undo.len();
         for (a, p) in &phis[b] {
-            cur.insert(a.clone(), Val::Local(p.clone()));
+            let old = std::mem::replace(&mut cur[*a], Val::Local(p.clone()));
+            undo.push((*a, old));
         }
         for (k, i) in f.blocks[b].1.iter().enumerate() {
             match &i.op {
                 Op::Alloca(..) if i.res.as_ref().is_some_and(|r| allocas.contains_key(r)) => {
-                    remove.insert((b, k));
+                    remove[b][k] = true;
                 }
-                Op::Load(_, (_, Val::Local(p)), _) if allocas.contains_key(p) => {
-                    let v = cur[p].clone();
-                    if let Some(r) = &i.res {
-                        subst.insert(r.clone(), v);
+                Op::Load(_, (_, Val::Local(p)), _) => {
+                    if let Some(&a) = slot.get(p.as_str()) {
+                        if let Some(r) = &i.res {
+                            subst.insert(r.clone(), cur[a].clone());
+                        }
+                        remove[b][k] = true;
                     }
-                    remove.insert((b, k));
                 }
-                Op::Store((_, v), (_, Val::Local(p)), _) if allocas.contains_key(p) => {
-                    cur.insert(p.clone(), v.clone());
-                    remove.insert((b, k));
+                Op::Store((_, v), (_, Val::Local(p)), _) => {
+                    if let Some(&a) = slot.get(p.as_str()) {
+                        let old = std::mem::replace(&mut cur[a], v.clone());
+                        undo.push((a, old));
+                        remove[b][k] = true;
+                    }
                 }
                 Op::Cast(_, (_, Val::Local(src)), _) if allocas.contains_key(src) => {
-                    remove.insert((b, k));
+                    remove[b][k] = true;
                 }
                 op if is_lifetime(op) => {
                     let mut u = Vec::new();
@@ -318,20 +375,21 @@ fn mem2reg(f: &mut Function) {
                     if u.iter()
                         .any(|x| marker_casts.get(x).is_some_and(|a| allocas.contains_key(a)))
                     {
-                        remove.insert((b, k));
+                        remove[b][k] = true;
                     }
                 }
                 _ => {}
             }
         }
-        let label = f.blocks[b].0.clone();
+        let label = &f.blocks[b].0;
         for &s in &succ[b] {
             for (j, (a, _)) in phis[s].iter().enumerate() {
-                phi_in[s][j].push((cur[a].clone(), label.clone()));
+                phi_in[s][j].push((cur[*a].clone(), label.clone()));
             }
         }
+        steps.push(Step::Leave(mark));
         for &c in &kids[b] {
-            stack.push((c, cur.clone()));
+            steps.push(Step::Enter(c));
         }
     }
     // edges from unreachable predecessors carry undef
@@ -347,68 +405,58 @@ fn mem2reg(f: &mut Function) {
         }
     }
     // rewrite: drop promoted instructions, insert phis, substitute loaded values (chains resolved)
-    let resolve = |v: &Val, subst: &HashMap<String, Val>| -> Val {
-        let mut v = v.clone();
-        let mut guard = 0;
-        while let Val::Local(n) = &v {
-            match subst.get(n) {
-                Some(x) if guard < 10_000 => {
-                    v = x.clone();
-                    guard += 1;
-                }
-                _ => break,
-            }
-        }
-        v
-    };
     for (b, (_, insts)) in f.blocks.iter_mut().enumerate() {
         let mut out: Vec<Inst> = Vec::with_capacity(insts.len());
-        for (j, (a, p)) in phis[b].iter().enumerate() {
-            if !seen[b] {
-                continue;
+        if seen[b] {
+            for (j, (a, p)) in phis[b].iter().enumerate() {
+                out.push(Inst {
+                    res: Some(p.clone()),
+                    op: Op::Phi(
+                        Vec::new(),
+                        allocas[&names[*a]].clone(),
+                        std::mem::take(&mut phi_in[b][j]),
+                    ),
+                    md: Vec::new(),
+                });
             }
-            let ty = allocas[a].clone();
-            out.push(Inst {
-                res: Some(p.clone()),
-                op: Op::Phi(Vec::new(), ty, phi_in[b][j].clone()),
-                md: Vec::new(),
-            });
         }
         for (k, i) in insts.drain(..).enumerate() {
-            if !remove.contains(&(b, k)) {
+            if !remove[b][k] {
                 out.push(i);
             }
         }
         *insts = out;
     }
-    for (_, insts) in &mut f.blocks {
-        for i in insts.iter_mut() {
-            for v in vals_mut(&mut i.op) {
-                *v = subst_deep(v, &subst, &resolve);
-            }
-        }
-    }
+    substitute(f, &subst);
 }
 
-fn subst_deep(
-    v: &Val,
-    subst: &HashMap<String, Val>,
-    resolve: &dyn Fn(&Val, &HashMap<String, Val>) -> Val,
-) -> Val {
+/// Follows a chain of substitutions from a local, at most 10 000 steps.
+fn resolve(n: &str, subst: &HashMap<String, Val>) -> Option<Val> {
+    let mut v = subst.get(n)?;
+    let mut guard = 1;
+    while let Val::Local(m) = v {
+        match subst.get(m) {
+            Some(x) if guard < 10_000 => {
+                v = x;
+                guard += 1;
+            }
+            _ => break,
+        }
+    }
+    Some(v.clone())
+}
+
+/// Replaces substituted locals in place, also inside aggregates and constant casts.
+fn subst_in_place(v: &mut Val, subst: &HashMap<String, Val>) {
     match v {
-        Val::Local(_) => resolve(v, subst),
-        Val::Aggregate(items) => Val::Aggregate(
-            items
-                .iter()
-                .map(|(t, x)| (t.clone(), subst_deep(x, subst, resolve)))
-                .collect(),
-        ),
-        Val::Cast(k, inner, to) => Val::Cast(
-            k.clone(),
-            Box::new((inner.0.clone(), subst_deep(&inner.1, subst, resolve))),
-            to.clone(),
-        ),
-        _ => v.clone(),
+        Val::Local(n) => {
+            if let Some(x) = resolve(n, subst) {
+                *v = x;
+            }
+        }
+        Val::Aggregate(items) => items.iter_mut().for_each(|(_, x)| subst_in_place(x, subst)),
+        Val::Cast(_, inner, _) => subst_in_place(&mut inner.1, subst),
+        _ => {}
     }
 }
 
@@ -461,24 +509,10 @@ fn substitute(f: &mut Function, subst: &HashMap<String, Val>) {
     if subst.is_empty() {
         return;
     }
-    let resolve = |v: &Val, subst: &HashMap<String, Val>| -> Val {
-        let mut v = v.clone();
-        let mut guard = 0;
-        while let Val::Local(n) = &v {
-            match subst.get(n) {
-                Some(x) if guard < 10_000 => {
-                    v = x.clone();
-                    guard += 1;
-                }
-                _ => break,
-            }
-        }
-        v
-    };
     for (_, insts) in &mut f.blocks {
         for i in insts.iter_mut() {
             for v in vals_mut(&mut i.op) {
-                *v = subst_deep(v, subst, &resolve);
+                subst_in_place(v, subst);
             }
         }
     }
