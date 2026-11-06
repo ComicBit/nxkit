@@ -79,12 +79,22 @@ the pipeline archive (derived). On 12 cores this is less than 10 minutes of wall
 The NUP and the work folder were on the same external USB SSD. The extract read the NUP and wrote `RomFS.img` at the
 same time. It reached 5 to 10 MB/s (observed in the progress).
 
+### The archive keeps three compiler runs while the CPU is busy
+
+The archive always starts 3 compiler runs (`MIN_RUNS` in `nxb-build/src/pipeline.rs`). It starts more only while the
+CPU and the memory stay below the load limit, and its runs have nice 10. While the shader step fills the CPU, the
+archive thus stays at 3 runs. This agrees with the 9 waiting threads in the sample. In the standalone run, three cargo
+builds kept the CPU busy. This agrees with the 2.5 cores. Read in the code on 2026-11-06.
+
+Decision E6 in [../decisions.md](../decisions.md) gives `applegpu-nt -j 1` and `air-pack` for each batch. In the code
+every caller sets `direct: None`, so each batch runs through `metal-tt`. Read in the code on 2026-11-06.
+
 ## Open questions
 
-- Where do the 45 minutes go? The CPU work does not explain them. The answer needs a timeline of a full build with the CPU
-  load of each child process.
-- Does the admission in `Headroom` hold back the archive while the shader step runs, and is that the main cause?
-- Does `applegpu-nt -j N` in place of `metal-tt` raise the 2.5 cores of the archive?
+- Where do the 45 minutes go? The CPU work does not explain them. The answer needs a timeline of a full build with the
+  CPU load of each child process.
+- How long does the archive take on a quiet machine, and how long after the shader step ends?
+- Is the direct mode of E6 faster than `metal-tt` for this title?
 
 ## Decision
 
