@@ -29,7 +29,7 @@ pub fn plain_section(
     i: usize,
     cache: &Arc<BlockCache>,
 ) -> Result<(Arc<dyn Storage>, crate::nca::FsHeader)> {
-    let (raw, start, fs) = nca.section_raw(i)?;
+    let (raw, start, fs) = nca.section_view(ks, i)?;
     let s: Arc<dyn Storage> = match fs.encryption {
         1 => raw,
         3 => Arc::new(CtrSection::new(
@@ -97,7 +97,7 @@ pub fn open_romfs_with(
             })
         }
         Some(upd) => {
-            let (raw, start, fs) = upd.section_raw(upd.data_section())?;
+            let (raw, start, fs) = upd.section_view(ks, upd.data_section())?;
             if fs.encryption != 4 {
                 return Err(ExtractError::Unsupported(format!(
                     "update data section with encryption type {}",

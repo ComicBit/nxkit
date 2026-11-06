@@ -118,7 +118,9 @@ limits it. The own front end is not byte-identical in the validated mode.
   Three more titles were not checked again with the current script.
 - Each change of the engine changes the hashes that the rules pin. Make the rules again (`nxb rewrite-rules`) and compare the oracle cases. If the engine differs from the pin,
   `nxb rewrite` stops with exit code 4, and `nxb build` stops at the rewrite step with exit code 1. The message gives the two hashes.
-- Not supported in the extract and the split (exit code 4 with a named message): Oodle formats, LZ5, CRA, sparse NCAs.
+- Not supported in the extract and the split (exit code 4 with a named message): Oodle formats, LZ5, CRA.
+  The base game of a sparse program is read only with its update NSP (`--updates-only`). Without the update it stops with exit code 4, as in the reference.
+  The sparse reader follows the Atmosphere algorithm and was checked with a synthetic fixture only. The meta hash layer of a sparse section is not verified.
   The checksums of LZ4 frames are not checked. A base game with its update in one run gives an error in the reference split and in this split.
 - XCI, merged packages, dump folders, NSZ block mode and DLC were checked with synthetic files only. One real NSZ file was checked. `nxb build` does not split the shader content of DLC.
 - `nxb build` was run with a registered profile on one title (Mac app). A game without a profile gets a provisional profile. The heap check, the region check and the shader captures start the game, and they are not ported.

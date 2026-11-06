@@ -158,8 +158,8 @@ impl FsHeader {
         }
     }
 
-    /// A sparse layer (sparse info generation nonzero, LibHac's `ExistsSparseLayer`), which `nx_extract` refuses
-    /// without an update (exit 4).
+    /// A sparse layer (sparse info generation nonzero, LibHac's `ExistsSparseLayer`), which `nx_extract` reads only
+    /// with an update (exit 4 without).
     pub fn is_sparse(&self) -> bool {
         self.raw.get(0x170..0x172).is_some_and(|g| g != [0, 0])
     }
@@ -304,6 +304,16 @@ impl Nca {
         let sub: Arc<dyn Storage> =
             Arc::new(SubStorage::new(self.raw.clone(), start, end - start)?);
         Ok((sub, start, fs))
+    }
+
+    /// The raw (still encrypted) data of section `i` in the section's own offsets: the window of the NCA, or for a
+    /// sparse section the view that maps its data ranges and its holes.
+    pub fn section_view(&self, ks: &KeySet, i: usize) -> Result<(Arc<dyn Storage>, u64, FsHeader)> {
+        let (start, fs) = match self.sections.get(i) {
+            Some(Some((start, _, fs))) if fs.is_sparse() => (*start, fs.clone()),
+            _ => return self.section_raw(i),
+        };
+        Ok((crate::sparse::open(ks, self, i)?, start, fs))
     }
 }
 

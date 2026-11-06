@@ -11,7 +11,8 @@
 //!
 //! Layer: L3 for now (it does file I/O and threads). Its pure parts (AES, PFS0/NCA/IVFC/BKTR/RomFS parsing, the image
 //! plan) belong in `nxb-crypto`, `nxb-hos` and `nxb-romfs` once their owner takes them.
-//! Not yet: sparse NCAs (a named `Unsupported` error, never a silent difference).
+//! A sparse base program is read only together with its update NSP, as `nx_extract` does (a named `Unsupported` error
+//! for the base alone, never a silent difference).
 
 pub mod aes;
 pub mod aoc;
@@ -37,6 +38,7 @@ pub mod prof;
 pub mod romfs;
 pub mod run;
 pub mod safe_path;
+pub mod sparse;
 pub mod split;
 pub mod split_cli;
 pub mod split_out;

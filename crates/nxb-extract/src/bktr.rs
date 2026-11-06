@@ -13,7 +13,11 @@ use crate::storage::{Counter, CtrSection, IndirectStorage, Relocation, Storage};
 const NODE: usize = 0x4000;
 
 /// The fixed-size entries of a bucket tree with one offset node (L1) and its entry-set nodes.
-fn bucket_entries(table: &[u8], entry_size: usize, expected: u32) -> Result<(Vec<&[u8]>, u64)> {
+pub(crate) fn bucket_entries(
+    table: &[u8],
+    entry_size: usize,
+    expected: u32,
+) -> Result<(Vec<&[u8]>, u64)> {
     if table.len() < NODE {
         return Err(ExtractError::format("BKTR table shorter than one node"));
     }
