@@ -73,7 +73,7 @@ and shared APIs. The designs set the behavior.
 | E3 | Own ad-hoc signer. `codesign` is the reference and the fallback. | `codesign` reads 4.7 GB again. The own signer uses the known digests. |
 | E4 | The split operates on the data of the extract. | The stages read each file only one time. |
 | E5 | One hash for each byte, at the producer. | No byte gets a second hash. |
-| E6 | Archive batches as tasks under a memory budget, with the same merge sequence. Each batch runs `metal-tt`. The number of runs follows the machine load and the memory budget. `nxb-archive` has a direct mode with `applegpu-nt -j N` and `air-pack`, but no caller uses it. | Measured: 207 s against 257 s cold, and the loader probe found all 18,300 bases. |
+| E6 | Archive batches as tasks under a memory budget, with the same merge sequence. Each batch runs `applegpu-nt -j 1` and `air-pack`. The number of runs follows the machine load and the memory budget. If the two tools are not beside `metal-tt`, each batch runs `metal-tt`. | Measured: 207 s against 257 s cold, and the loader probe found all 18,300 bases. |
 | E7 | One `nxb build` with one task graph. Stage commands first, as a migration step. | One graph lets the extract feed the split and the shader step feed the archive. |
 | E8 | Own zstd decoder in `nxb-split`, standard library only. | NSZ, XCZ and `.zs` files use zstd. The workspace has no external crates. |
 | E9 | No own GPU code generator. | Closed plugin, private format and ISA (refer to [research/backend-survey.md](research/backend-survey.md)). |

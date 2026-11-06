@@ -93,8 +93,9 @@ CPU and the memory stay below the load limit, and its runs have nice 10. While t
 archive thus stays at 3 runs. This agrees with the 9 waiting threads in the sample. In the standalone run, three cargo
 builds kept the CPU busy. This agrees with the 2.5 cores. Read in the code on 2026-11-06.
 
-Each batch runs through `metal-tt`. Every caller sets `direct: None`. The direct mode with `applegpu-nt -j N` and
-`air-pack` exists in `nxb-archive`, but no caller uses it. Read in the code on 2026-11-06. Decision E6 in
+Each batch runs `applegpu-nt -j 1` and `air-pack`. `Config::for_tools` in `nxb-archive` selects this direct mode when
+the two tools are beside `metal-tt`. They are on this Mac, in `metal/32023/bin`. The sample agrees: it shows
+`applegpu-nt` and `air-pack` and no `metal-tt`. Read in the code on 2026-11-06. Decision E6 in
 [../decisions.md](../decisions.md) describes this.
 
 ## After the fixes (0.6.5)
@@ -123,7 +124,6 @@ The 16 rejects thus cost about 2 CPU seconds instead of about 11 CPU minutes (de
 - How long does the full shader step of the second title take with 0.6.5? The CPU work does not explain the 45 minutes
   in the progress. The answer needs a full build with a timeline and the CPU load of each child process.
 - How long does the archive take on a quiet machine, and how long after the shader step ends?
-- Is the direct mode of E6 faster than `metal-tt` for this title?
 
 ## Decision
 
