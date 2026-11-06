@@ -4,6 +4,11 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ## Unreleased
 
+### Fixed
+
+- The profile header follows the current engine `game.py`. It has the keys `fps_max` (`DM_GAME_FPS_MAX`) and `draw_barriers` (`DM_GAME_DRAW_BARRIERS_GAME`) now.
+  The key `tex_bc_cpu` is gone. The headers of all profiles, the multi-program header and the app settings files are identical to the engine scripts again.
+
 ### Added
 
 - The finder `ue_region` in `nxb rewrite`. A main module with `SwitchVirtualAddressSpaceSize` no longer gives exit code 4.

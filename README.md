@@ -47,7 +47,7 @@ more titles.
 | Extract, XCI, merged packages (`--app`), dump folders | synthetic fixtures only | byte-identical to the reference extractors. No real sample was available |
 | Extract, NSZ | one real file and synthetic fixtures | the decoded NCA is identical to the output of the reference decompressor. The NCZ block mode was not checked on real data |
 | App icon, companion app | one title | byte-identical |
-| App settings file | 142 profiles, 425 outputs | byte-identical. One multi-program header is not ported |
+| App settings file | 142 profiles, 425 outputs | byte-identical. The header of the multi-program profile is ported. The headers of all profiles are identical to `game.py header` |
 | Mac host | one title | reuse key and decoder inputs are identical. The binary is not byte-identical, also not between two runs of the reference script |
 | Extract | two more titles (one with an update, `--updates-only`) | `RomFS.img`, ExeFS, control data and icon are byte-identical |
 | Shader step, Mac | one full run | 74,421 of 74,422 files are byte-identical. The listing `_b_cas.txt` differs by design |

@@ -113,6 +113,7 @@ pub fn header_one(g: &Game, here: &Path) -> Result<String, String> {
         "game or display",
     )?;
     let ft = one_of(g, "fps_target", "0", &["0", "30", "60"], "0, 30 or 60")?;
+    let fm = one_of(g, "fps_max", "60", &["60", "120"], "60 or 120")?;
     let fh = on_off(g, "fps_hold", "on")?;
     let utp = g.get_or("ue_texture_pool", "0");
     if utp.is_empty() || !utp.bytes().all(|b| b.is_ascii_digit()) {
@@ -164,11 +165,17 @@ pub fn header_one(g: &Game, here: &Path) -> Result<String, String> {
             "{id}: tex_dirty_upload must be on or off, and needs tex_flush_upload on: {tdu}"
         ));
     }
-    let tbc = on_off(g, "tex_bc_cpu", "off")?;
     let tds = on_off(g, "tex_dyn_slots", "off")?;
     let vcr = on_off(g, "vconv_range", "off")?;
     let mml = on_off(g, "mem_map_limit", "off")?;
     let ups = upscaler_keys(g)?;
+    let dbr = one_of(
+        g,
+        "draw_barriers",
+        "full",
+        &["full", "game"],
+        "full or game",
+    )?;
     let gts = one_of(
         g,
         "gpu_timestamps",
@@ -282,6 +289,7 @@ pub fn header_one(g: &Game, here: &Path) -> Result<String, String> {
         format!("#define DM_GAME_CORE_PREEMPT {}", b(cp)),
         format!("#define DM_GAME_ALLOC_BIG_ALIGN {}", b(aba)),
         format!("#define DM_GAME_FPS_TARGET {ft}"),
+        format!("#define DM_GAME_FPS_MAX {fm}"),
         format!("#define DM_GAME_FPS_HOLD {}", b(fh)),
         format!("#define DM_GAME_UE_TEXTURE_POOL {}", int0(&utp)?),
         format!("#define DM_GAME_UE_FPS_CVAR {}", q(&ufc)),
@@ -308,9 +316,9 @@ pub fn header_one(g: &Game, here: &Path) -> Result<String, String> {
         format!("#define DM_GAME_SHADER_KEY_SKIP_LEN {}", hex(skl)),
         format!("#define DM_GAME_RENDER_COND {}", b(rcd)),
         format!("#define DM_GAME_TEX_DIRTY_UPLOAD {}", b(tdu == "on")),
-        format!("#define DM_GAME_TEX_BC_CPU {}", b(tbc)),
         format!("#define DM_GAME_TEX_DYN_SLOTS {}", b(tds)),
         format!("#define DM_GAME_GPU_TS_SEGMENT {}", b(gts == "segment")),
+        format!("#define DM_GAME_DRAW_BARRIERS_GAME {}", b(dbr == "game")),
         format!("#define DM_GAME_UPSCALER_KEYS {}", q(&ups.join(","))),
         format!("#define DM_GAME_UPSCALER_N {}", ups.len()),
         format!("#define DM_GAME_VCONV_RANGE {}", b(vcr)),
