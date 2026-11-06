@@ -88,12 +88,14 @@ impl Em<'_> {
             .texs
             .get(&(t.set, t.binding))
             .ok_or("texture is not in the argument buffer")?;
+        let used = tx.name.clone();
         let (name, smp_name, twin, array) = (
             tx.name.clone(),
             tx.sampler.clone(),
             tx.twin.clone(),
             tx.def.array_length != 1,
         );
+        self.fetch_use(&used);
         let idx = if array {
             Some(self.tsrc(o, i, AggType::S32)?.s)
         } else {
@@ -163,7 +165,9 @@ impl Em<'_> {
             AggType::FP32
         };
         let mut coords = Vec::new();
+        let mut coord_nodes = Vec::new();
         for _ in 0..dims {
+            coord_nodes.push(self.src(o, i)?);
             coords.push(self.tsrc(o, &mut i, coord_ty)?.s);
         }
         let array = if is_array {
@@ -301,6 +305,9 @@ impl Em<'_> {
                 r.tex
             );
             self.helpers.insert("border");
+        }
+        if color && self.fetch.is_some() {
+            s = self.fetch_rewrite(&t, &r, &coord_nodes, s);
         }
         if color {
             let ty = result_type(o.index, AggType::FP32);

@@ -17,6 +17,8 @@ pub struct EntryName<'a> {
     pub name: &'a str,
     /// Write a `static` function `dm_body_<name>` with the plain parameters instead of the entry function.
     pub body: bool,
+    /// Parameters after the plain ones.
+    pub extra: &'a [Param],
 }
 
 /// One parameter of an entry function.
@@ -129,7 +131,8 @@ pub(super) fn entry_text(
     let early = shader == Shader::Fragment && s.props.definitions.early_z_force;
     let has_out = shader != Shader::Compute && !plan.out_members.is_empty();
     let ret = if has_out { "main0_out" } else { "void" };
-    let ps = params(res, plan);
+    let mut ps = params(res, plan);
+    ps.extend(e.extra.iter().cloned());
     let mut t = String::new();
     if e.body {
         let decls: Vec<&str> = ps.iter().map(|p| p.decl.as_str()).collect();
@@ -252,6 +255,7 @@ pub fn build(s: &Structured, ctx: &Context<'_>, opt: &Options) -> R<Translated> 
         let e = EntryName {
             name: "main0",
             body: false,
+            extra: &[],
         };
         Built {
             text: entry_text(s, &e, shader, &res, &plan, main)?,
@@ -259,11 +263,22 @@ pub fn build(s: &Structured, ctx: &Context<'_>, opt: &Options) -> R<Translated> 
         }
     };
     msl.push_str(&built.text);
-
     let mut notes = s.notes.clone();
+    let mut fetch = None;
+    if shader == Shader::Fragment {
+        match variant::fetch::build(s, &res, &plan, &shared, opt) {
+            Ok(f) => fetch = f,
+            Err(e) => notes.push(format!("no fetch variant: {e}")),
+        }
+    }
+
     notes.extend(em.notes.iter().cloned());
     if ctx.no_facts {
         notes.push("not in the answer table, queries use defaults".into());
+    }
+    let mut extra_fields = built.extra;
+    if let Some(f) = &fetch {
+        extra_fields.push(("fetch".into(), f.meta.clone()));
     }
     let reads = facts::drv_reads(&em.drv);
     let mut r = Reflection {
@@ -283,20 +298,28 @@ pub fn build(s: &Structured, ctx: &Context<'_>, opt: &Options) -> R<Translated> 
         bindings: res.bindings.clone(),
         vertex_inputs: facts::vertex_inputs(&plan),
         entries: built.entries,
-        extra: built.extra,
+        extra: extra_fields,
         ..Reflection::default()
     };
     r.raster = facts::raster(shader, &plan, usage.discard, &r.bindings);
     let mut varyings = plan.varyings.clone();
     varyings.sort_by_key(|v| v.location);
+    let mut libraries = vec![Library {
+        suffix: "_b".into(),
+        msl,
+        reflection: Some(r),
+    }];
+    if let Some(f) = fetch {
+        libraries.push(Library {
+            suffix: "_bf".into(),
+            msl: f.msl,
+            reflection: None,
+        });
+    }
     Ok(Translated {
         key: job.key.clone(),
         stage: job.stage.clone(),
-        libraries: vec![Library {
-            suffix: "_b".into(),
-            msl,
-            reflection: Some(r),
-        }],
+        libraries,
         inputs: super::StageInputs { varyings },
         side: built.side,
     })

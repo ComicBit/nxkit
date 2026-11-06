@@ -94,6 +94,8 @@ pub struct Em<'a> {
     pub notes: Vec<String>,
     /// The prelude helper functions the body calls (see `prelude`).
     pub helpers: BTreeSet<&'static str>,
+    /// The fetch variant is being written: the rewritten samples so far.
+    pub(super) fetch: Option<super::variant::fetch::State>,
 }
 
 impl<'a> Em<'a> {
@@ -126,6 +128,7 @@ impl<'a> Em<'a> {
             drv: DrvReads::default(),
             notes: Vec::new(),
             helpers: BTreeSet::new(),
+            fetch: None,
         }
     }
 

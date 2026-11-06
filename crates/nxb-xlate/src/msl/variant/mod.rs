@@ -8,6 +8,8 @@
 //!
 //! No variant is written yet.
 
+pub mod fetch;
+pub mod fetch_origin;
 pub mod pixel;
 pub mod pixel_derived;
 pub mod side;

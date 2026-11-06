@@ -25,6 +25,8 @@ pub mod refl;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
+mod tests_fetch;
+#[cfg(test)]
 mod tests_ps;
 pub mod types;
 pub mod usage;

@@ -140,7 +140,7 @@ impl B {
     }
 }
 
-fn vertex() -> B {
+pub(super) fn vertex() -> B {
     let mut b = B::new(Stage::Vertex, "vs");
     b.s.props.definitions.attribute_types = vec![0];
     b.io(StorageKind::Input, IoVariable::UserDefined, 0);
