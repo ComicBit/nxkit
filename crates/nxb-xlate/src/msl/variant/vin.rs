@@ -3,6 +3,7 @@
 //! A host whose vertex format does not feed an integer register directly binds the same stream a second time as
 //! `float4` (and once with the other sign) at an attribute of 16 to 30. The entries OR the shadows into the input.
 
+use super::super::entry::Param;
 use super::super::io::Plan;
 use nxb_pyjson::Value;
 use std::fmt::Write;
@@ -20,7 +21,7 @@ pub struct Vin {
     /// The structs `main0_in` and `main0_in_v`.
     pub in_struct: String,
     /// The stage input parameter of the entries.
-    pub in_param: &'static str,
+    pub in_param: Param,
     /// The statements that fill `in` from `dm_in`.
     pub pro: Vec<String>,
     /// The `vin` field of the reflection without the entry names.
@@ -101,7 +102,7 @@ pub fn build(plan: &Plan) -> Option<Vin> {
         .collect();
     Some(Vin {
         in_struct,
-        in_param: "main0_in_v dm_in [[stage_in]]",
+        in_param: Param::new("main0_in_v dm_in", "stage_in", "dm_in"),
         pro,
         shadow,
     })

@@ -3,6 +3,7 @@
 //! The host fills a `dm_vlayout` block per draw and binds it at buffer 16. `dm_fetch` (`dm_fetch.metal`) turns the
 //! attribute state of Maxwell and the stream into the four register words, which the input takes with `as_type`.
 
+use super::super::entry::Param;
 use super::super::io::Plan;
 use nxb_pyjson::Value;
 use std::fmt::Write;
@@ -18,7 +19,7 @@ pub struct Pull {
     /// The struct `main0_in` as plain members.
     pub in_struct: String,
     /// The parameters after the standard ones.
-    pub params: Vec<String>,
+    pub params: Vec<Param>,
     /// The statements that fill `in`.
     pub pro: Vec<String>,
     /// The locations pulled.
@@ -42,7 +43,11 @@ pub fn build(plan: &Plan) -> Option<Pull> {
     }
     in_struct.push_str("};\n");
     let has = |n: &str| plan.builtins.iter().any(|b| b.name == n);
-    let mut params = vec![format!("constant dm_vlayout& dm_lay [[buffer({SLOT})]]")];
+    let mut params = vec![Param::new(
+        "constant dm_vlayout& dm_lay",
+        format!("buffer({SLOT})"),
+        "dm_lay",
+    )];
     let mut names = Vec::new();
     for (name, own, attr) in [
         ("gl_VertexIndex", "dm_vid", "vertex_id"),
@@ -52,7 +57,7 @@ pub fn build(plan: &Plan) -> Option<Pull> {
         if has(name) {
             names.push(name);
         } else {
-            params.push(format!("uint {own} [[{attr}]]"));
+            params.push(Param::new(format!("uint {own}"), attr, own));
             names.push(own);
         }
     }

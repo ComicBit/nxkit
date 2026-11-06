@@ -7,15 +7,11 @@
 
 use super::super::args;
 use super::super::emit::{Em, R};
-use super::super::entry::{EntryName, entry_text};
+use super::super::entry::{EntryName, Param, StageIn, ZFIX, entry_text};
 use super::super::io::Plan;
 use crate::translation::msl_entry::Structured;
 use nxb_pyjson::Value;
 use std::fmt::Write;
-
-/// The depth fix of the GL convention.
-pub(super) const ZFIX: &str =
-    "out.gl_Position.z = fma(out.gl_Position.z, 0.5, out.gl_Position.w * 0.5);";
 
 /// The capture buffer binding.
 const CAPTURE_SLOT: u32 = 13;
@@ -212,10 +208,10 @@ fn capture_decls(plan: &Plan) -> R<String> {
 /// How the entries of a library take their stage input and which entries it keeps.
 #[derive(Default)]
 pub struct Frame<'a> {
-    /// The stage input parameter instead of the standard one. Empty for none.
-    pub in_param: Option<&'a str>,
+    /// The stage input.
+    pub stage_in: StageIn<'a>,
     /// Parameters after the standard ones.
-    pub params: &'a [String],
+    pub extra: &'a [Param],
     /// Statements before the output is declared.
     pub pro: &'a [String],
     /// Only `main0` and `main0_z`.
@@ -231,12 +227,11 @@ pub fn entries(
     f: &Frame<'_>,
 ) -> R<String> {
     let mk = |name: &'static str, ret: Option<&'static str>| EntryName {
-        name,
         ret,
-        in_param: f.in_param,
-        params: f.params,
+        stage_in: f.stage_in,
+        extra: f.extra,
         pro: f.pro,
-        exit: None,
+        ..EntryName::new(name)
     };
     let shader = super::super::emit::Shader::Vertex;
     let mut t = String::new();
@@ -260,12 +255,14 @@ pub fn entries(
         ("gl_VertexIndex", "uint", "vertex_id"),
         ("gl_InstanceIndex", "uint", "instance_id"),
     );
-    let mut params = vec![format!(
-        "constant dm_geometry_capture& dm_gs [[buffer({CAPTURE_SLOT})]]"
+    let mut params = vec![Param::new(
+        "constant dm_geometry_capture& dm_gs",
+        format!("buffer({CAPTURE_SLOT})"),
+        "dm_gs",
     )];
     for (id, ty, attr) in [&vid, &iid] {
         if !plan.builtins.iter().any(|b| b.name == *id) {
-            params.push(format!("{ty} {id} [[{attr}]]"));
+            params.push(Param::new(format!("{ty} {id}"), *attr, *id));
         }
     }
     let pro = vec![
@@ -281,12 +278,11 @@ pub fn entries(
         ),
     ];
     let gs = EntryName {
-        name: "main0_gs",
         ret: Some("void"),
-        in_param: f.in_param,
-        params: &params,
+        stage_in: f.stage_in,
+        extra: &params,
         pro: &pro,
-        exit: None,
+        ..EntryName::new("main0_gs")
     };
     put(&gs, &b.gs)?;
     Ok(t)

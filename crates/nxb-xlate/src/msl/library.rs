@@ -1,0 +1,348 @@
+//! The libraries of a shader: the base library `_b` with its reflection, and the variant libraries that belong to it.
+//!
+//! A vertex shader adds `_bv` and `_bp`. A pixel shader adds `_bf` and the side units. The entries of each stage are
+//! written by `variant::vertex` and `variant::pixel`. `entry` writes the functions.
+
+use super::args::{self};
+use super::emit::{Em, Options, R, Shader};
+use super::entry::{EntryName, StageIn, entry_text, shared_params};
+use super::refl::Reflection;
+use super::usage::{self, Usage};
+use super::variant::pixel::Built;
+use super::{Context, Library, Translated, facts, io, prelude, variant};
+use crate::translation::msl_entry::Structured;
+use nxb_pyjson::Value;
+use std::fmt::Write;
+
+/// The kind keyword of a shader.
+fn kind(s: Shader) -> &'static str {
+    match s {
+        Shader::Vertex => "vertex",
+        Shader::Fragment => "fragment",
+        Shader::Compute => "kernel",
+    }
+}
+
+fn tg_bytes(s: &Structured) -> i64 {
+    s.props
+        .properties
+        .shared_memories
+        .iter()
+        .map(|m| i64::from(m.ty.size_in_bytes()) * i64::from(m.array_length.max(1)))
+        .sum()
+}
+
+/// Build the base library `_b` and its reflection.
+pub fn build(s: &Structured, ctx: &Context<'_>, opt: &Options) -> R<Translated> {
+    build_with(s, ctx, opt, &[])
+}
+
+/// What the entries of a library add to its text and to the reflection of `_b`.
+#[derive(Default)]
+struct Entries {
+    /// The text of all entries.
+    text: String,
+    /// The reflection fields that name the entries.
+    entries: Vec<(String, Value)>,
+    /// Further reflection fields.
+    extra: Vec<(String, Value)>,
+}
+
+/// Build with the vertex inputs at `ints` declared `uint`.
+fn build_with(s: &Structured, ctx: &Context<'_>, opt: &Options, ints: &[u32]) -> R<Translated> {
+    let job = &s.job;
+    let patched = (!ints.is_empty()).then(|| variant::int_inputs::declare(&s.props, ints));
+    let props = patched.as_ref().unwrap_or(&s.props);
+    let shader = match job.stage.as_str() {
+        "vs" => Shader::Vertex,
+        "ps" => Shader::Fragment,
+        "cs" => Shader::Compute,
+        other => return Err(format!("unported: {other} stage")),
+    };
+    if s.props.definitions.transform_feedback_enabled {
+        return Err("unported: transform feedback".into());
+    }
+    if shader == Shader::Compute && tg_bytes(s) > i64::from(super::abi::TG_MAX) {
+        return Err("unported: threadgroup memory past 32 KB (tg_spill)".into());
+    }
+    let usage: Usage = usage::collect(&s.info);
+    let res = args::build(props, &s.program, &usage, &job.stage, &s.notes, &s.fetch1d)?;
+    let base_instance = shader == Shader::Vertex
+        && res
+            .cbs
+            .values()
+            .any(|b| b.name == "vp_c0" && usage.base_inst.contains(&b.def.binding));
+    let lane_zero = shader == Shader::Vertex && opt.visibility_counter;
+    let mut plan = io::build(
+        &s.info,
+        props,
+        shader,
+        usage.lane_id,
+        base_instance,
+        lane_zero,
+    )?;
+    let vs_pad = if shader == Shader::Vertex {
+        variant::vertex_pad::apply(&mut plan, ctx.partners)
+    } else {
+        Vec::new()
+    };
+    let shared = shared_params(s, &res, &plan, shader)?;
+    let mut em = Em::new(&s.info, props, &res, opt, &shared, &plan, shader);
+    em.probe = (shader == Shader::Vertex && ints.is_empty()).then(Vec::new);
+    let mut bodies = Vec::new();
+    for i in 0..s.info.functions.len() {
+        bodies.push(em.body(i)?);
+    }
+    if let Some(uses) = em.probe.take() {
+        let declared = s
+            .job
+            .attr
+            .iter()
+            .filter_map(|(k, _)| u32::try_from(*k).ok())
+            .collect();
+        let float = |l: u32| props.definitions.attribute_types.get(l as usize) == Some(&0);
+        let found = variant::int_inputs::find(&s.info, &uses, &declared, &float);
+        if !found.is_empty() {
+            return build_with(s, ctx, opt, &found);
+        }
+    }
+    if opt.visibility_counter && shader == Shader::Vertex {
+        em.notes.push(
+            "visibility counter lowered to singleton groups (one atomic add per passing vertex)"
+                .into(),
+        );
+    }
+    let main = bodies.first().ok_or("program without a main function")?;
+    let mut notes = s.notes.clone();
+    let mut libraries = Vec::new();
+    let mut side = None;
+    let mut entries = Entries::default();
+    let mut fetch = None;
+    let vx = match shader {
+        Shader::Vertex => {
+            let w = res.bindings.iter().any(facts::writes);
+            Some(variant::vertex::bodies(&mut em, &plan, main.clone(), w)?)
+        }
+        _ => None,
+    };
+    let lib = Lib {
+        in_struct: plan.in_struct(),
+        fetch: false,
+    };
+    match (&vx, shader) {
+        (Some(vx), _) => {
+            let frame = variant::vertex::Frame::default();
+            entries.text = variant::vertex::entries(s, &res, &plan, vx, &frame)?;
+            entries.entries = variant::vertex::fields(vx);
+        }
+        (None, Shader::Fragment) => {
+            let derived = variant::pixel_derived::derived(&s.info, &plan, opt.dual_source);
+            let built = variant::pixel::assemble(s, &res, &plan, main, &derived)?;
+            side = built.side.clone();
+            entries = entries_of(built);
+            match variant::fetch::build(s, &res, &plan, &shared, opt) {
+                Ok(Some(f)) => {
+                    entries.extra.push(("fetch".into(), f.meta));
+                    fetch = Some(f.msl);
+                }
+                Ok(None) => {}
+                Err(e) => notes.push(format!("no fetch variant: {e}")),
+            }
+        }
+        (None, _) => {
+            entries.text = entry_text(s, &EntryName::new("main0"), shader, &res, &plan, main)?;
+        }
+    }
+    let msl = assemble(
+        s,
+        &em,
+        &res,
+        &plan,
+        &bodies,
+        vx.as_ref(),
+        &lib,
+        &entries.text,
+    )?;
+    libraries.push(Library {
+        suffix: "_b".into(),
+        msl,
+        reflection: None,
+    });
+    if let Some(vx) = &vx {
+        for (l, (k, v)) in vertex_libraries(s, &em, &res, &plan, &bodies, vx)? {
+            entries.extra.push((k.to_string(), v));
+            libraries.push(l);
+        }
+    }
+    if let Some(msl) = fetch {
+        libraries.push(Library {
+            suffix: "_bf".into(),
+            msl,
+            reflection: None,
+        });
+    }
+
+    notes.extend(em.notes.iter().cloned());
+    if ctx.no_facts {
+        notes.push("not in the answer table, queries use defaults".into());
+    }
+    let reads = facts::drv_reads(&em.drv);
+    let mut r = Reflection {
+        key: format!("{}_b", job.key),
+        chain: ctx.chain.to_string(),
+        dm_ctl: job.key.clone(),
+        source: ctx.source.clone(),
+        pc_paired: ctx.pc_paired.to_string(),
+        stage: job.stage.clone(),
+        entry: "main0".into(),
+        msl_entry_kind: kind(shader).into(),
+        threadgroup_size: (shader == Shader::Compute).then(|| local_size(s)),
+        c1: facts::hex(&job.c1),
+        notes,
+        drv_unfillable: super::refl::unfillable(&reads, &job.stage),
+        drv_reads: reads,
+        bindings: res.bindings.clone(),
+        vertex_inputs: facts::vertex_inputs(&plan),
+        vs_pad,
+        entries: entries.entries,
+        ..Reflection::default()
+    };
+    for (k, v) in entries.extra {
+        r.set_extra(&k, v);
+    }
+    r.raster = if shader == Shader::Vertex {
+        super::facts_vs::raster(&s.info, props, &plan, &res)
+    } else {
+        facts::raster(shader, &plan, usage.discard, &r.bindings)
+    };
+    libraries[0].reflection = Some(r);
+    let mut varyings = plan.varyings.clone();
+    varyings.sort_by_key(|v| v.location);
+    Ok(Translated {
+        key: job.key.clone(),
+        stage: job.stage.clone(),
+        libraries,
+        inputs: super::StageInputs { varyings },
+        side,
+    })
+}
+
+fn entries_of(b: Built) -> Entries {
+    Entries {
+        text: b.text,
+        entries: b.entries,
+        extra: b.extra,
+    }
+}
+
+/// The pieces of a library that differ between the base library and its vertex variants.
+struct Lib {
+    in_struct: String,
+    /// The fetch helpers follow `using namespace metal;`.
+    fetch: bool,
+}
+
+/// The text of a library: the common part, then the entries.
+#[allow(clippy::too_many_arguments)]
+fn assemble(
+    s: &Structured,
+    em: &Em<'_>,
+    res: &args::Res,
+    plan: &io::Plan,
+    bodies: &[String],
+    vx: Option<&variant::vertex::Bodies>,
+    lib: &Lib,
+    entries: &str,
+) -> R<String> {
+    let mut msl = prelude::header(s.props.host.reduced_precision);
+    if lib.fetch {
+        msl = msl.replacen(
+            "using namespace metal;\n",
+            &format!("using namespace metal;\n\n{}", variant::pull::FETCH),
+            1,
+        );
+    }
+    msl.push_str(&prelude::helpers(&em.helpers, res.border));
+    msl.push_str(&res.text);
+    msl.push_str(&lib.in_struct);
+    msl.push_str(&plan.out_struct());
+    if let Some(vx) = vx {
+        msl.push_str(&variant::vertex::decls(plan, vx)?);
+    }
+    for i in 1..bodies.len() {
+        let _ = writeln!(msl, "{};", em.signature(i)?);
+    }
+    for (i, b) in bodies.iter().enumerate().skip(1) {
+        let _ = write!(msl, "{}\n{{\n{b}}}\n", em.signature(i)?);
+    }
+    msl.push_str(entries);
+    Ok(msl)
+}
+
+/// The libraries `_bv` and `_bp` of a vertex shader with the reflection fields that describe them.
+fn vertex_libraries(
+    s: &Structured,
+    em: &Em<'_>,
+    res: &args::Res,
+    plan: &io::Plan,
+    bodies: &[String],
+    vx: &variant::vertex::Bodies,
+) -> R<Vec<(Library, (&'static str, Value))>> {
+    let mut out = Vec::new();
+    let mut add = |suffix: &str,
+                   lib: &Lib,
+                   frame: &variant::vertex::Frame<'_>,
+                   field: (&'static str, Value)|
+     -> R<()> {
+        let entries = variant::vertex::entries(s, res, plan, vx, frame)?;
+        let msl = assemble(s, em, res, plan, bodies, Some(vx), lib, &entries)?;
+        out.push((
+            Library {
+                suffix: suffix.into(),
+                msl,
+                reflection: None,
+            },
+            field,
+        ));
+        Ok(())
+    };
+    if let Some(v) = variant::vin::build(plan) {
+        let lib = Lib {
+            in_struct: v.in_struct.clone(),
+            fetch: false,
+        };
+        let frame = variant::vertex::Frame {
+            stage_in: StageIn::Custom(&v.in_param),
+            extra: &[],
+            pro: &v.pro,
+            plain_only: true,
+        };
+        add("_bv", &lib, &frame, ("vin", variant::vin::field(&v)))?;
+    }
+    if let Some(p) = variant::pull::build(plan) {
+        let lib = Lib {
+            in_struct: p.in_struct.clone(),
+            fetch: true,
+        };
+        let frame = variant::vertex::Frame {
+            stage_in: StageIn::None,
+            extra: &p.params,
+            pro: &p.pro,
+            plain_only: true,
+        };
+        add("_bp", &lib, &frame, ("pull", variant::pull::field(&p)))?;
+    }
+    Ok(out)
+}
+
+fn local_size(s: &Structured) -> [u32; 3] {
+    let d = s.props.definitions.compute_local_size;
+    let from_job = s.job.local.as_deref().unwrap_or(&[]);
+    let at = |i: usize| {
+        let j = from_job.get(i).copied().unwrap_or(0);
+        u32::try_from(if j > 0 { j } else { i64::from(d[i]) })
+            .unwrap_or(1)
+            .max(1)
+    };
+    [at(0), at(1), at(2)]
+}

@@ -12,6 +12,7 @@ pub mod control;
 pub mod emit;
 pub mod entry;
 pub mod facts;
+pub mod facts_ps;
 pub mod facts_vs;
 pub mod facts_vs_screen;
 pub mod facts_vs_sym;
@@ -23,10 +24,17 @@ pub mod inst_misc;
 pub mod inst_query;
 pub mod inst_tex;
 pub mod io;
+pub mod library;
 pub mod prelude;
 pub mod refl;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_fetch;
+#[cfg(test)]
+mod tests_ps;
+#[cfg(test)]
+mod tests_ps_facts;
 pub mod types;
 pub mod usage;
 pub mod variant;
@@ -147,6 +155,7 @@ pub fn translate(job: &Job, code: &[u8], ctx: &Context<'_>) -> Result<Translated
     let opt = Options {
         visibility_counter: job.stage == "vs"
             && nxb_model::sha256(code).to_hex() == VISIBILITY_COUNTER,
+        ..Options::default()
     };
-    entry::build(&structured, ctx, &opt).map_err(failure)
+    library::build(&structured, ctx, &opt).map_err(failure)
 }
