@@ -2,6 +2,14 @@
 
 All notable changes are in this file. The format follows Keep a Changelog. Versions follow Semantic Versioning.
 
+## Unreleased
+
+### Fixed
+
+- The extract stage of a package build reports the bytes written with `--progress json`. A launcher shows a bar with the time left. Before, it only showed that the stage was running.
+- The extract stage is named after the versions it extracts, for example `extract v0 + v327680`, as the script names it. NX2Apple showed the bare name `extract` as "%@ extrahieren".
+- `nxb_extract::Request` has a `progress` field with a byte counter (`nxb_extract::Counter`).
+
 ## 0.6.1
 
 ### Fixed
