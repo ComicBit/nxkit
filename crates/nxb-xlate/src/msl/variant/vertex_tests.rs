@@ -98,6 +98,7 @@ fn capture_rejects_an_attribute_outside_the_map() {
         pc_paired: "",
         partners: &[],
         no_facts: false,
+        ..crate::msl::Context::default()
     };
     let r = crate::msl::library::build(&b.s, &ctx, &crate::msl::emit::Options::default());
     assert!(r.err().is_some_and(|e| e.contains("geometry capture")));

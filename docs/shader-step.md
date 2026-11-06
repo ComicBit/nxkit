@@ -53,7 +53,7 @@ It needs no .NET runtime and no external translator program. The output is MSL. 
 
 The step does this for each key:
 
-1. It reads the code and the job. It calls the translator with the context: the chain version V, the source (`<package>#<index>`), the paired shader (`pc_paired`), the answer-table flag and the partners.
+1. It reads the code and the job. It calls the translator with the context: the chain version V, the source (`<package>#<index>`), the paired shader (`pc_paired`), the answer-table flag, the dual-source and fetch-outputs-only flags (from `dual_want.tsv` and `bf_want.tsv` of the profile) and the partners.
 2. A vertex shader waits for its pixel shaders. It gets their `StageInputs` (the user varyings) as the partners, in the order of the pairs table. A pixel shader that failed gives no inputs.
 3. For each `Library`, it writes `<key><suffix>.metal`, compiles it and writes `<key><suffix>.metallib`. A library with a `Reflection` also gets `<key><suffix>.json`. The step writes `_b.json` last.
 4. When the translation has a `Side`, the step compiles `_b` and cuts it into `_b` and `_bx` at the metallib level. The cut keeps the alpha test entries and the logic op entries in `_bx`.
@@ -63,7 +63,7 @@ The reasons of a failure are the reason strings of the reference build scripts (
 A panic and a job that the step cannot read are `translation failed`. The step counts each reason. The run report and the `shaders done` event have the counters `xlate_hits` (translations from the store) and `xlate_refused` (an object of reasons and counts).
 A key that the translator does not do is a `ShaderError` of that key. The build continues.
 
-The translation store key has the translator identity, the job, the code, V, the source, the paired shader, the answer-table flag and the partner varyings.
+The translation store key has the translator identity, the job, the code, V, the source, the paired shader, the answer-table flag, the dual-source and fetch-outputs-only flags and the partner varyings.
 The identity is V, which covers the sources of `nxb-xlate`. A store that was written by another translator version is not used. A failure is not stored.
 
 The output is not byte-identical to the output of the former C# translator and `spirv-cross`. GPU tests validate it (D20).

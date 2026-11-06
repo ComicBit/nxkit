@@ -219,6 +219,11 @@ impl Xlate {
             .field_str("source", &ctx.source)
             .field_str("pc_paired", ctx.pc_paired)
             .field_str("no_facts", if ctx.no_facts { "1" } else { "0" })
+            .field_str("dual_source", if ctx.dual_source { "1" } else { "0" })
+            .field_str(
+                "fetch_outputs_only",
+                if ctx.fetch_outputs_only { "1" } else { "0" },
+            )
             .field_str("partners", &partners)
             .finish()
     }
