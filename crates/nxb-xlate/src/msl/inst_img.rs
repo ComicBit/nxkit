@@ -121,7 +121,7 @@ impl Em<'_> {
         let cty = msl_type(comp)?;
         let mut i = 0;
         let img = self.image_ref(o, &mut i, t)?;
-        let c = self.image_coords(o, &mut i, t)?.join(", ");
+        let c = self.image_coords(o, &mut i, t)?;
         let value = self.tsrc(o, &mut i, comp)?.s;
         let f = match t.flags & ATOMIC_MASK {
             x if x == 1 << 16 => "min",
@@ -135,20 +135,60 @@ impl Em<'_> {
             _ => "compare",
         };
         let v4 = format!("{cty}4");
-        if f == "compare" {
-            let cmp = self.tsrc(o, &mut i, comp)?.s;
-            let n = self.tmp;
-            self.tmp += 1;
-            self.pre.push(format!("{v4} t{n} = {v4}({cmp});"));
-            self.pre.push(format!(
-                "{img}.atomic_compare_exchange_weak({c}, &t{n}, {v4}({value}));"
-            ));
-            return Ok(Val::new(format!("t{n}.x"), comp));
+        let n = self.tmp;
+        self.tmp += 1;
+        let coord = format!("t{n}c");
+        let layer = format!("t{n}l");
+        let cty_coord = match dimensions(t.ty)? {
+            1 => "uint".to_string(),
+            d => format!("uint{d}"),
+        };
+        let init = if cty_coord == "uint" {
+            format!("uint({})", c[0])
+        } else {
+            c[0].clone()
+        };
+        self.pre.push(format!("{cty_coord} {coord} = {init};"));
+        let mut args = vec![coord.clone()];
+        if let Some(l) = c.get(1) {
+            self.pre.push(format!("uint {layer} = {l};"));
+            args.push(layer.clone());
         }
-        let one = matches!(t.flags & ATOMIC_MASK, x if x == 3 << 16 || x == 4 << 16);
-        let arg = if one { literal(comp, 1) } else { value };
-        let call = format!("{img}.atomic_fetch_{f}({c}, {v4}({arg})).x");
-        let v = self.effect(call, comp)?;
-        Ok(v)
+        let args = args.join(", ");
+        let inside = Self::inside(&img, t.ty, &coord, c.get(1).map(|_| layer.as_str()))?;
+        let body = if f == "compare" {
+            let cmp = self.tsrc(o, &mut i, comp)?.s;
+            self.pre.push(format!("{v4} t{n}x = {v4}({cmp});"));
+            format!(
+                "{img}.atomic_compare_exchange_weak({args}, &t{n}x, {v4}({value})); t{n} = t{n}x.x;"
+            )
+        } else {
+            let one = matches!(t.flags & ATOMIC_MASK, x if x == 3 << 16 || x == 4 << 16);
+            let arg = if one { literal(comp, 1) } else { value };
+            format!("t{n} = {img}.atomic_fetch_{f}({args}, {v4}({arg})).x;")
+        };
+        self.pre
+            .push(format!("{} t{n} = {};", cty, literal(comp, 0)));
+        self.pre.push(format!("if ({inside}) {{ {body} }}"));
+        Ok(Val::new(format!("t{n}"), comp))
+    }
+
+    /// The bounds test of an atomic: a coordinate outside the image leaves memory alone and reads as zero.
+    fn inside(img: &str, ty: SamplerType, coord: &str, layer: Option<&str>) -> R<String> {
+        let mask = ty.0 & SamplerType::MASK;
+        let extent = match mask {
+            1 | 2 => format!("{img}.get_width()"),
+            4 => format!("uint3({img}.get_width(), {img}.get_height(), {img}.get_depth())"),
+            _ => format!("uint2({img}.get_width(), {img}.get_height())"),
+        };
+        let mut s = if matches!(mask, 1 | 2) {
+            format!("{coord} < {extent}")
+        } else {
+            format!("all({coord} < {extent})")
+        };
+        if let Some(l) = layer {
+            s.push_str(&format!(" && {l} < {img}.get_array_size()"));
+        }
+        Ok(s)
     }
 }
