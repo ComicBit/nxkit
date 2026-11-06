@@ -5,7 +5,8 @@ use super::emit::{Em, Options, R, Shader, Shared};
 use super::refl::Reflection;
 use super::types::{msl_type, scalar};
 use super::usage::{self, Usage};
-use super::{Context, Library, Translated, facts, io, prelude};
+use super::variant::pixel::Built;
+use super::{Context, Library, Translated, facts, io, prelude, variant};
 use crate::codegen::props::MemoryDef;
 use crate::translation::msl_entry::Structured;
 use std::fmt::Write;
@@ -14,6 +15,50 @@ use std::fmt::Write;
 pub struct EntryName<'a> {
     /// The function name.
     pub name: &'a str,
+    /// Write a `static` function `dm_body_<name>` with the plain parameters instead of the entry function.
+    pub body: bool,
+}
+
+/// One parameter of an entry function.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Param {
+    /// The declaration without the attribute (`main0_in in`).
+    pub decl: String,
+    /// The attribute without the brackets (`stage_in`).
+    pub attr: String,
+    /// The name the body uses.
+    pub name: String,
+}
+
+impl Param {
+    /// The declaration with its attribute.
+    pub fn full(&self) -> String {
+        format!("{} [[{}]]", self.decl, self.attr)
+    }
+}
+
+/// The parameters of the entry functions of a shader.
+pub fn params(res: &args::Res, plan: &io::Plan) -> Vec<Param> {
+    let p = |decl: String, attr: String, name: &str| Param {
+        decl,
+        attr,
+        name: name.to_string(),
+    };
+    let mut v = Vec::new();
+    if !plan.in_members.is_empty() {
+        v.push(p("main0_in in".into(), "stage_in".into(), "in"));
+    }
+    if res.has_args {
+        v.push(p(
+            format!("constant {SET_TYPE}& {SET_NAME}"),
+            "buffer(0)".into(),
+            SET_NAME,
+        ));
+    }
+    for b in &plan.builtins {
+        v.push(p(format!("{} {}", b.ty, b.name), b.attr.into(), b.name));
+    }
+    v
 }
 
 /// The kind keyword of a shader.
@@ -73,7 +118,7 @@ fn tg_bytes(s: &Structured) -> i64 {
 }
 
 /// The text of one entry function around a body.
-fn entry_text(
+pub(super) fn entry_text(
     s: &Structured,
     e: &EntryName<'_>,
     shader: Shader,
@@ -84,29 +129,31 @@ fn entry_text(
     let early = shader == Shader::Fragment && s.props.definitions.early_z_force;
     let has_out = shader != Shader::Compute && !plan.out_members.is_empty();
     let ret = if has_out { "main0_out" } else { "void" };
-    let mut params = Vec::new();
-    if !plan.in_members.is_empty() {
-        params.push("main0_in in [[stage_in]]".to_string());
-    }
-    if res.has_args {
-        params.push(format!("constant {SET_TYPE}& {SET_NAME} [[buffer(0)]]"));
-    }
-    for b in &plan.builtins {
-        params.push(format!("{} {} [[{}]]", b.ty, b.name, b.attr));
-    }
+    let ps = params(res, plan);
     let mut t = String::new();
-    let attr = if early {
-        "[[early_fragment_tests]] "
+    if e.body {
+        let decls: Vec<&str> = ps.iter().map(|p| p.decl.as_str()).collect();
+        let _ = writeln!(
+            t,
+            "static {ret} dm_body_{}({})\n{{",
+            e.name,
+            decls.join(", ")
+        );
     } else {
-        ""
-    };
-    let _ = writeln!(
-        t,
-        "{attr}{} {ret} {}({})\n{{",
-        kind(shader),
-        e.name,
-        params.join(", ")
-    );
+        let attr = if early {
+            "[[early_fragment_tests]] "
+        } else {
+            ""
+        };
+        let full: Vec<String> = ps.iter().map(Param::full).collect();
+        let _ = writeln!(
+            t,
+            "{attr}{} {ret} {}({})\n{{",
+            kind(shader),
+            e.name,
+            full.join(", ")
+        );
+    }
     if has_out {
         t.push_str("    main0_out out = {};\n");
     }
@@ -198,14 +245,19 @@ pub fn build(s: &Structured, ctx: &Context<'_>, opt: &Options) -> R<Translated> 
         let _ = write!(msl, "{}\n{{\n{b}}}\n", em.signature(i)?);
     }
     let main = bodies.first().ok_or("program without a main function")?;
-    msl.push_str(&entry_text(
-        s,
-        &EntryName { name: "main0" },
-        shader,
-        &res,
-        &plan,
-        main,
-    )?);
+    let built = if shader == Shader::Fragment {
+        variant::pixel::assemble(s, &res, &plan, main, &[])?
+    } else {
+        let e = EntryName {
+            name: "main0",
+            body: false,
+        };
+        Built {
+            text: entry_text(s, &e, shader, &res, &plan, main)?,
+            ..Built::default()
+        }
+    };
+    msl.push_str(&built.text);
 
     let mut notes = s.notes.clone();
     notes.extend(em.notes.iter().cloned());
@@ -229,6 +281,8 @@ pub fn build(s: &Structured, ctx: &Context<'_>, opt: &Options) -> R<Translated> 
         drv_reads: reads,
         bindings: res.bindings.clone(),
         vertex_inputs: facts::vertex_inputs(&plan),
+        entries: built.entries,
+        extra: built.extra,
         ..Reflection::default()
     };
     r.raster = facts::raster(shader, &plan, usage.discard, &r.bindings);
@@ -243,7 +297,7 @@ pub fn build(s: &Structured, ctx: &Context<'_>, opt: &Options) -> R<Translated> 
             reflection: Some(r),
         }],
         inputs: super::StageInputs { varyings },
-        side: None,
+        side: built.side,
     })
 }
 

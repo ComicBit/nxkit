@@ -7,3 +7,6 @@
 //! the same emitter writes with other options. The vertex pad takes `Context::partners`.
 //!
 //! No variant is written yet.
+
+pub mod pixel;
+pub mod side;

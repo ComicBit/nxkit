@@ -24,6 +24,8 @@ pub mod prelude;
 pub mod refl;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_ps;
 pub mod types;
 pub mod usage;
 pub mod variant;
