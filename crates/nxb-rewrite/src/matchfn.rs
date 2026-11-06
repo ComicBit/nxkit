@@ -12,6 +12,10 @@ use crate::scan::fde_ranges;
 /// A matching failure (the script's `MatchError`).
 pub(crate) type MErr = String;
 
+/// The word some compilers leave after a call that does not return. It is no AArch64 instruction, and it is read as `brk #0`.
+const TRAP_WORD: u32 = 0xe7ff_defe;
+const BRK: u32 = 0xd420_0000;
+
 fn signed(n: i64, bits: u32) -> i64 {
     if n & (1 << (bits - 1)) != 0 {
         n - (1 << bits)
@@ -21,7 +25,7 @@ fn signed(n: i64, bits: u32) -> i64 {
 }
 
 /// `(immediate-bit mask, signed byte displacement)` for direct branches.
-fn relative(w: u32) -> Option<(u32, i64)> {
+pub(crate) fn relative(w: u32) -> Option<(u32, i64)> {
     if w & 0x7c00_0000 == 0x1400_0000 {
         return Some((0x03ff_ffff, signed(i64::from(w & 0x3ff_ffff), 26) * 4));
     }
@@ -136,7 +140,9 @@ impl<'a> MatchImage<'a> {
             .collect();
         let mut ins = Vec::with_capacity(n);
         for (i, w) in words.iter().enumerate() {
-            match decode(*w, (start + 4 * i as i64) as u64) {
+            // the digest below still covers the word itself
+            let read = if *w == TRAP_WORD { BRK } else { *w };
+            match decode(read, (start + 4 * i as i64) as u64) {
                 Some(x) => ins.push(x),
                 None => return Err(format!("undecodable function at {start:#x}")),
             }
@@ -288,7 +294,7 @@ impl<'a> MatchImage<'a> {
         Ok(Callee::Function(end - target, self.body(target)?.0))
     }
 
-    fn fingerprint(&mut self, start: i64) -> Result<String, MErr> {
+    pub(crate) fn fingerprint(&mut self, start: i64) -> Result<String, MErr> {
         if let Some(f) = self.fps.get(&start) {
             return f.clone();
         }
@@ -437,6 +443,9 @@ pub(crate) fn resolve(
             return Ok(Vec::new());
         }
     };
+    for r in rules {
+        crate::matchrule::validate(r)?;
+    }
     let mut cuts: Vec<CutRow> = Vec::new();
     for (name, alts) in &groups {
         let (mut found, mut misses) = (Vec::new(), Vec::new());

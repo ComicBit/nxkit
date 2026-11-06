@@ -1,5 +1,6 @@
 file	sdk_patches.py	1cebce622eb6b41eddab9f24711460775437ed6fec2204e951651ec4965d062d
 file	../games/010014C011146000/patches.py	ad88a073c3c874055a324ea750505a0fcc843984ee0aa9e75ef9f4b425fd4e15
+file	../games/01001F5010DFA000/patches.py	8092374ab460af96b8f8e743a6836e87ea77cb6742d8cd5efe8640f9dfb1a3f5
 file	../games/010029B0118E8000/patches.py	c6f75e654922ec671d03dc699162e73badbbd57c32d33d79ab73f076280f1f88
 file	../games/01002B00111A2000/patches.py	8b7ac03d94ed6b355daf2aab457722bfad31276ef08d89d761ef4a7f56fa8daf
 file	../games/0100317013770000/patches.py	982076b7a92a3c1b5dca75d06467133ffe03511a15723a1c922e8c327f0355ec
@@ -86,6 +87,12 @@ rcut	sdk	sdk	AllocateAddressRegion: regions of 4 MB and more aligned to 2 MB, as
 rcut	sdk	sdk	AllocateAddressRegion: regions of 4 MB and more aligned to 2 MB, as SDK 20	11	0	112	0808a052	0804a052	AllocateAddressRegion: alignment of regions from 4 MB to 32 MB mov w8,#0x400000 → mov w8,#0x200000 (2 MB, as SDK 20)
 bscope	5b050c55b8264040b642a0cdca5ded83	010014C011146000
 cuts	5b050c55b8264040b642a0cdca5ded83	6625268	e51f8052	e5078052	BucketAllocator ALLOC_BUCKET: at most 255 blocks of 4 MB (a 1 GB address region) → 63 (256 MB)
+rule	01001F5010DFA000	main	capture demo: the empty result when the weak reference at +0x88 is unset or dead	0	0	2672	123f93c4fa74d68f6100dab6ec8310a5047b2b3535b72361b6e658e3e48d792e
+rcut	01001F5010DFA000	main	capture demo: the empty result when the weak reference at +0x88 is unset or dead	0	0	48	bf031af8	64020014	capture demo: the empty result when the weak reference at +0x88 is unset or dead: no reference at +0x88 (as 1.1.1 main+0x16e341c)
+rcut	01001F5010DFA000	main	capture demo: the empty result when the weak reference at +0x88 is unset or dead	0	0	1084	fefeff17	5f010014	capture demo: the empty result when the weak reference at +0x88 is unset or dead: after the lock (as 1.1.1 main+0x16e3828)
+rcut	01001F5010DFA000	main	capture demo: the empty result when the weak reference at +0x88 is unset or dead	0	0	1480	811f0054	a11e0054	capture demo: the empty result when the weak reference at +0x88 is unset or dead: frees a duplicate block (as 1.1.1 main+0x16e39b4)
+rcut	01001F5010DFA000	main	capture demo: the empty result when the weak reference at +0x88 is unset or dead	0	0	1552	811d0054	611c0054	capture demo: the empty result when the weak reference at +0x88 is unset or dead: frees a duplicate block (as 1.1.1 main+0x16e39fc)
+rcut	01001F5010DFA000	main	capture demo: the empty result when the weak reference at +0x88 is unset or dead	0	0	2488	f7031f2a1bffff17f7031f2a19ffff17	a8035af8c8b3ffb59f7e00a9c8ffff17	capture demo: the empty result when the weak reference at +0x88 is unset or dead: the null check and the empty result (as 1.1.1 main+0x16e3da4)
 bscope	799d1061182c1302e08e706b84ce76e5	010029B0118E8000
 cuts	799d1061182c1302e08e706b84ce76e5	4732324	2cffff54	1f2003d5	frame limiter spin: b.gt main+0x483588 → nop (the host paces the frames)
 bscope	c3cf52bf2b05d7310884971b50bcccb8	01002B00111A2000
@@ -5899,9 +5906,13 @@ file	../games/0400380020056000/game.tsv	59a2f5838d4e4398e91f991908e575dc947b2ebe
 gbuild	0400380020056000	build	v65536	v65536	main=663c2e087a083f05307f229dfc4042d5	subsdk0=07e685d1c23a77a389fd205288ae904c	sdk=41d4de4a3b78214ad20c896960df0e5e
 file	../games/04003F40232DE000/game.tsv	12f21d3b041304dfe19533c9700aabea6977cd4f1ad9b547ad885eb6d5e77352
 gbuild	04003F40232DE000	build	v196608	v196608	main=659cb288b5c5b2b49853add616c0d5bf	subsdk0=2f1ad4154aecbb0c128030906af67685	sdk=820cd7d096aac448693f504400cc2375
+file	../games/0400486024DEC000/game.tsv	1b625ba040c386a78d56a75bdd727367c9f90f7b901bb410800e0cad75504117
+gbuild	0400486024DEC000	build	v131072	v131072	main=e0f3ccfaf50065ae4ea01eb5aeb13b1a	subsdk0=b0110087a7b339ef74588d3bd0b4dd5d	sdk=1643a838814f9c10c696f930ed681e7f
 file	../games/040074A01BF12000/game.tsv	af2e2284f920d16ad2b68ae1ed9175a3e01faed7b6044e33411cdef8755a4153
 gbuild	040074A01BF12000	build	v458752	v458752	main=e25c90c1c136638885659fd55bf8a03b	sdk=18265daea2105b31f25346adfbbd09b5
-file	../games/04007EF01F8AE000/game.tsv	ca47d850396e502fa2421c2510d9e4c6f85f777c8db11059983c51fcde3e4986
+file	../games/040077201BE50000/game.tsv	2c0227b70216fd344c9189c2c4ae012ea266d662923368a25bfade3d94100db4
+gbuild	040077201BE50000	build	v458752	1.3.3	main=9ede03836568bcd34434dfc29bc61e04	subsdk0=11a5672eeabf787e8e510902825606d4	sdk=89ea3537110354e8427004a0266744c8
+file	../games/04007EF01F8AE000/game.tsv	d277a2295bad53b742ddc8a91b8ac35257c70d5c8c9bf16184a471ddd229a139
 gbuild	04007EF01F8AE000	build	v131072	v131072	main=db93b0125f4850601d61c3edde012f8e	subsdk2=7d73f8e808341683306a4425a4989ed5	sdk=5b1602f3a2965f44ab13124cadbdf148
 file	../games/0400A3A01EE4C000/game.tsv	ae40346ab8b17c06efe2513d412f93cba1a42120097250735ad21d159cd83ca1
 gbuild	0400A3A01EE4C000	build	v655360	v655360	main=76a489f3bd3642fa5e18bd83d32c98ba	subsdk0=9646a69cb1024ba919fddaa4265e6bc5	sdk=cc7da00d672399efe7958790d17fae39

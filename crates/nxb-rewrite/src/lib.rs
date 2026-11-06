@@ -16,6 +16,9 @@ mod jumps2;
 mod jumps3;
 mod locks;
 mod matchfn;
+#[cfg(test)]
+mod matchfn_tests;
+mod matchrule;
 /// NSO and NRO parsing.
 pub mod nso;
 mod obs;
@@ -24,6 +27,9 @@ mod pat;
 pub mod patches;
 mod region;
 mod rewrite;
+mod ring;
+#[cfg(test)]
+mod ring_tests;
 /// The registered patches as `rules/*.toml`.
 pub mod rules;
 mod rw;

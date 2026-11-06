@@ -143,6 +143,8 @@ Results (measured, the reference script as oracle, all six tables and `.patched.
 | synthetic modules with text of 100, 125.3 and 185.6 MB, and the two re-run cases | identical. Only the layout code and the registered rows are tested |
 | synthetic main modules of three frame step builds and of one build with registered cuts | identical. The words are the asserted original bytes only |
 | the rules from `data/rewrite-rules` | 120 of 130 earlier cases ran again and were identical. 14 cases cannot run again, because their input files are deleted |
+| 2026-11-06: the script of the engine `88c7e03f`. 6 real modules (`main`, `rtld` and `sdk` of the base package and of the update of one title) | 6 of 6 identical (all files of the output folder, including `build_src.sha256`) |
+| 2026-11-06: 11 synthetic main modules for the finder `ue_ring` (`tools/gen_synth_ring.py`) | 11 of 11 identical (length and SHA-256 of each output file, and the lines of the log) |
 
 Time (measured, release build, machine not quiet): a 29 MB main module took 3.4 s against 63 s for the script. A larger module took 8.9 s against 121 s.
 The synthetic large modules took 1 to 3.5 s against 183 to 672 s. The NRO collection took 3.5 s against 4.5 s, because the archive table dominates both times.
@@ -150,12 +152,15 @@ The synthetic large modules took 1 to 3.5 s against 183 to 672 s. The NRO collec
 The older script gave the 25 real modules and the other rows below the first row.
 The script then changed in 551 lines. Version 0.5.1 ports these changes: the acquire order of locks (`ldaxr`), the Trinity barrier, `changed.tsv`, the observation gates at each instruction that can move,
 `BACK_MIN`, the recognizers of jump tables, the proof of tail calls and the finders `ue_cvar`, `ue_malloc`, `ue_region`, `fps_target` and `snowdrop_pools`.
-The rules in `data/rewrite-rules` come from the current engine (147 files). A pin holds the hash of each engine file that the rules use.
+The rules in `data/rewrite-rules` come from the engine `88c7e03f` (149 files). A pin holds the hash of each engine file that the rules use.
 After an engine change, make the rules again with `nxb rewrite-rules`, and compare the oracle cases again.
+
+The engine `88c7e03f` changed two pinned files. `patch_nso.py` runs the new finder `ue_ring.py` on a main module (Unreal's dynamic buffers keep 4 copies instead of 3). `nso_match.py` reads the word `0xe7ffdefe` as `brk #0`, and it accepts a replacement branch whose target stays inside the matched function.
+Both are ported (`crates/nxb-rewrite/src/ring.rs` and `matchrule.rs`). The pins have 13 files, and the rule files have the new patch and game rows of this engine.
 
 Not tested: rules on real code of the builds that have no local sample, and modules with words that the decoder does not cover.
 Not rechecked with the current script: three more titles (their images are not extracted).
-The finders `ue_cvar`, `ue_malloc`, `ue_region`, `fps_target` and `snowdrop_pools` have no real positive sample. `ue_region` is tested on synthetic main modules (`crates/nxb-rewrite/tests/region.rs`, made by `tools/gen_synth_region.py` with the script). The layouts of three more titles and some frame step stubs are **synthetic**.
+The finders `ue_cvar`, `ue_malloc`, `ue_region`, `ue_ring`, `fps_target` and `snowdrop_pools` have no real positive sample. `ue_region` is tested on synthetic main modules (`crates/nxb-rewrite/tests/region.rs`, made by `tools/gen_synth_region.py` with the script). `ue_ring` is tested the same way (`crates/nxb-rewrite/tests/ring.rs`, made by `tools/gen_synth_ring.py`). The layouts of three more titles and some frame step stubs are **synthetic**.
 
 ## Host stages around the app
 

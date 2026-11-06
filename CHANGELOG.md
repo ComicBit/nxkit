@@ -2,6 +2,19 @@
 
 All notable changes are in this file. The format follows Keep a Changelog. Versions follow Semantic Versioning.
 
+## Unreleased
+
+### Changed
+
+- The rewrite step follows the engine `88c7e03f`. `nxb rewrite` no longer stops with "patch_nso.py of the engine differs from the version this rewriter was checked against".
+  The pins have 13 files. `ue_ring.py` is new, and `patch_nso.py` and `nso_match.py` have new hashes.
+- The finder `ue_ring` in `nxb rewrite`. A main module of Unreal Engine 4 with the ring of 3 copies for dynamic buffers gets 4 copies, as `dm/tools/ue_ring.py` does.
+  The output is byte-identical to the script on 11 synthetic main modules (`crates/nxb-rewrite/tests/ring.rs`).
+- The matcher reads the word `0xe7ffdefe` as `brk #0`, and the fingerprint still covers the word itself.
+  It checks each rule like `nso_match.validate` and accepts a replacement branch that stays inside the matched function.
+- `data/rewrite-rules` is made again from the engine `88c7e03f` (149 files). It has one new patch, two new game profiles and one changed `game.tsv`.
+- The output is byte-identical to the script of the engine `88c7e03f` on 6 real modules (`main`, `rtld` and `sdk` of the base package and the update of one title).
+
 ## 0.6.1
 
 ### Fixed
