@@ -2,7 +2,7 @@
 
 All notable changes are in this file. The format follows Keep a Changelog. Versions follow Semantic Versioning.
 
-## Unreleased
+## 0.6.0
 
 ### Changed (read this first)
 
@@ -14,7 +14,7 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 - A vertex shader waits for its pixel shaders and gets their varyings from the translator (`StageInputs`).
   It no longer reads `_b.metal` files.
 - The `shaders done` event has the fields `xlate_hits` and `xlate_refused`. The fields `xlate_starts`, `xlate_restarts` and `xlate_fallbacks` are gone.
-- The output is not byte-identical to the output of the reference build scripts. GPU tests validate it.
+- The output is not byte-identical to the output of the reference build scripts. No game ran with it yet. Unit tests and Metal compile tests on built samples cover it.
 
 ### Removed
 
