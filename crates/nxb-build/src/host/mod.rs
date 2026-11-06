@@ -3,6 +3,7 @@
 //! Every child runs through [`nxb_tool::Tool`] (own process group, exact environment, timeout).
 
 pub mod app;
+pub mod build_sources;
 pub mod companion;
 pub mod fingerprint;
 pub mod gpu;
@@ -22,6 +23,7 @@ pub mod profile;
 pub mod profile_cli;
 pub mod profile_tsv;
 pub mod pyfmt;
+pub mod rom;
 pub mod settings;
 #[cfg(test)]
 mod settings_tests;
@@ -30,6 +32,7 @@ pub mod survey_extract;
 pub mod survey_profile;
 #[cfg(test)]
 mod survey_tests;
+pub mod ue_paks;
 
 use nxb_tool::{Completed, EnvPolicy, Invocation, ProcessRegistry, ProcessTool, Tool, ToolId};
 use std::ffi::OsString;
