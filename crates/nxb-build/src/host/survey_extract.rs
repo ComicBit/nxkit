@@ -71,20 +71,28 @@ fn dm_image_files(img: &Path) -> Result<Vec<nxb_extract::romfs::RomEntry>, Strin
     Ok(out)
 }
 
-/// Lists the RomFS image `img` (a `DMROMFS1` image or a RomFS partition) into `out`. Returns the number of files.
-pub fn manifest_of_image(img: &Path, out: &Path) -> Result<usize, String> {
-    let s = FileStorage::open(img).map_err(|e| e.to_string())?;
+/// The files of a RomFS image (`DMROMFS1` or a RomFS partition): `(path, size, offset)`, directories left out.
+pub(crate) fn image_files(
+    s: &FileStorage,
+    img: &Path,
+) -> Result<Vec<nxb_extract::romfs::RomEntry>, String> {
     let mut magic = [0u8; 8];
     let dm = s.size() >= 8 && s.read_at(0, &mut magic).is_ok() && &magic == b"DMROMFS1";
-    let mut files: Vec<_> = if dm {
-        dm_image_files(img)?
+    if dm {
+        dm_image_files(img)
     } else {
-        read_tables(&s)
+        Ok(read_tables(s)
             .map_err(|e| e.to_string())?
             .into_iter()
             .filter(|e| !e.dir)
-            .collect()
-    };
+            .collect())
+    }
+}
+
+/// Lists the RomFS image `img` (a `DMROMFS1` image or a RomFS partition) into `out`. Returns the number of files.
+pub fn manifest_of_image(img: &Path, out: &Path) -> Result<usize, String> {
+    let s = FileStorage::open(img).map_err(|e| e.to_string())?;
+    let mut files = image_files(&s, img)?;
     files.sort_by(|a, b| a.path.cmp(&b.path));
     std::fs::create_dir_all(out).map_err(|e| format!("{}: {e}", out.display()))?;
     let mut text = String::from("# path\tbytes\tfirst 32 bytes (hex)\n");

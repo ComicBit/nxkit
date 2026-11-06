@@ -130,6 +130,7 @@ const OBS_REGION_ASK: u64 = 22;
 const OBS_REGION_GOT: u64 = 23;
 const OBS_REGION_FREE: u64 = 24;
 const OBS_STDALLOC_INIT: u64 = 25;
+const OBS_UE_REGION: u64 = 26;
 
 impl Rw {
     fn in_window(windows: &[Vec<Insn>], off: i64) -> bool {
@@ -175,6 +176,7 @@ impl Rw {
         windows: &[Vec<Insn>],
         log: &mut Vec<String>,
         ue_call: Option<usize>,
+        region: Option<&crate::region::UeRegion>,
     ) -> R<Vec<ObsRow>> {
         let sym = defined(&self.img);
         let mut rows: Vec<ObsRow> = Vec::new();
@@ -266,6 +268,29 @@ impl Rw {
                 word: "d503201f".into(),
                 why: "FMallocBinned3 constructor call (cut): the object in x0; the host puts its allocator's vtable in (hle_uemalloc.c)".into(),
             });
+        }
+        if let Some(r) = region {
+            let (off, reg) = (r.off as i64, r.reg);
+            if kinds.contains_key(&off) || Self::in_window(windows, off) {
+                return fail(format!(
+                    "assertion failed: engine region gate conflicts with a rewrite site {off:#x}"
+                ));
+            }
+            rows.push(ObsRow {
+                off,
+                id: OBS_UE_REGION | u64::from(reg) << 8,
+                word: format!("{:08x}", self.w32(off)),
+                why: format!("Unreal's engine region: its size in x{reg}, stored before nninitStartup reserves it; the host gives what the alias region has room for (hle_svc.c)"),
+            });
+            if let Some(x) = r.x1 {
+                let x = x as i64;
+                if kinds.contains_key(&x) || Self::in_window(windows, x) {
+                    return fail(format!(
+                        "assertion failed: engine region size conflicts with a rewrite site {x:#x}"
+                    ));
+                }
+                self.put32(x, 0xAA00_03E1 | u32::from(reg) << 16);
+            }
         }
         for r in &rows {
             let w =

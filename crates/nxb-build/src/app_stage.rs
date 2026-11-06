@@ -21,6 +21,7 @@ pub(crate) fn stage_app(
     previous: Option<PathBuf>,
     parts: crate::host::app::AppParts,
     no_archive: bool,
+    programs: &[nxb_pack::macapp::Program],
 ) -> Result<String, String> {
     let w = &b.work;
     let prof = &b.profile.1;
@@ -70,7 +71,7 @@ pub(crate) fn stage_app(
             .join(","),
         commit: None,
         aoc: b.work.join("aoc").is_dir().then(|| b.work.join("aoc")),
-        programs: Vec::new(),
+        programs: programs.to_vec(),
     };
     let plan = nxb_pack::macapp::plan(&inputs).map_err(|e| e.to_string())?;
     let done = match previous {

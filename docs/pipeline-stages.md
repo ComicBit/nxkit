@@ -126,8 +126,8 @@ The extract stage of `nxb build` runs it for the modules of the profile.
   The licence notice of the engine that the rules come from is in `data/rewrite-rules/NOTICE` and in `THIRD_PARTY.md`.
 - **Where the rules are found.** In this sequence: `NXB_REWRITE_RULES` (a folder), `NXB_REWRITE_PATCHES` (a snapshot), the folder `rewrite-rules` next to the binary (the release ZIP file),
   `data/rewrite-rules` above the binary or in the checkout, and last the older file `rewrite_patches.tsv` next to the script.
-- **When the port refuses.** The port gives exit code 4, and the caller runs the script, in four conditions. The first is an engine file that hashes differently from the file that the rules come from. The message gives the two hashes.
-  The second is a set `DM_GAMES_DIR`. The third is a frame step stub that the trace cannot express. The fourth is a main module that has `SwitchVirtualAddressSpaceSize`. It needs the finder `ue_region`, which is not ported.
+- **When the port refuses.** The port gives exit code 4, and the caller runs the script, in three conditions. The first is an engine file that hashes differently from the file that the rules come from. The message gives the two hashes.
+  The second is a set `DM_GAMES_DIR`. The third is a frame step stub that the trace cannot express.
   In `nxb build`, an engine that differs stops the rewrite stage with exit code 1 and the same message. A jump table that no rule knows stops with exit code 1, the address and the function name.
 - **NRO modules.** `nxb nro <RomFS image> <out dir> [<nrr name>]` collects the NRO modules that the `.nrr` files list. It has the command line of `nro_collect.py`.
   It reads the archive index of the large archive by ranges. It gives exit code 4 for an image of another format, for hashes that are left after the index (the scan of the script is not ported),
@@ -149,14 +149,13 @@ The synthetic large modules took 1 to 3.5 s against 183 to 672 s. The NRO collec
 
 The older script gave the 25 real modules and the other rows below the first row.
 The script then changed in 551 lines. Version 0.5.1 ports these changes: the acquire order of locks (`ldaxr`), the Trinity barrier, `changed.tsv`, the observation gates at each instruction that can move,
-`BACK_MIN`, the recognizers of jump tables, the proof of tail calls and the finders `ue_cvar`, `ue_malloc`, `fps_target` and `snowdrop_pools`.
+`BACK_MIN`, the recognizers of jump tables, the proof of tail calls and the finders `ue_cvar`, `ue_malloc`, `ue_region`, `fps_target` and `snowdrop_pools`.
 The rules in `data/rewrite-rules` come from the current engine (147 files). A pin holds the hash of each engine file that the rules use.
 After an engine change, make the rules again with `nxb rewrite-rules`, and compare the oracle cases again.
 
 Not tested: rules on real code of the builds that have no local sample, and modules with words that the decoder does not cover.
 Not rechecked with the current script: three more titles (their images are not extracted).
-The finders `ue_cvar`, `ue_malloc`, `fps_target` and `snowdrop_pools` have no real positive sample. The layouts of three more titles and some frame step stubs are **synthetic**.
-**Not ported:** the finder `ue_region`. A main module with `SwitchVirtualAddressSpaceSize` stops with exit code 4.
+The finders `ue_cvar`, `ue_malloc`, `ue_region`, `fps_target` and `snowdrop_pools` have no real positive sample. `ue_region` is tested on synthetic main modules (`crates/nxb-rewrite/tests/region.rs`, made by `tools/gen_synth_region.py` with the script). The layouts of three more titles and some frame step stubs are **synthetic**.
 
 ## Host stages around the app
 
@@ -269,7 +268,13 @@ The default platform is `ios`, as in the reference script. Use `--platform mac-a
 | `--team-id`, `--framework`, `--shell-framework`, `--prepare-xcode`, `--xcode-workspace` | the iOS options. They call the code of `nxb ios` | **no device test.** Each stage was checked with a real `xcodebuild`. Nobody ran the stages in one run |
 | `--provisional`, `--survey-only`, `--no-heap-check`, `--profile-out` | the survey options (refer to the next section) | see the next section |
 | `--allow-shader-regressions` | accepted, no effect. No regression check is in the build | not applicable |
-| `--program N` for N more than 0, `--platform mac` | exit code 4 | not ported |
+| `--platform mac` | the development build: extract, shader split, Mac shaders and Mac host, then the command that runs the game (`cd <work>/run && DM_ROOT=... <work>/tools/dmhost <work>/patched_<package>`). The command is printed and not started. The pipeline prebuild (`DM_PSO_PREBUILD=tool`) starts the host and is not run. `DM_JIT_CAPTURE` is not set. `--seen-shaders` adds `DM_PSO_ARCHIVE` and a `tee` of the host log. Apple silicon is needed, as for `mac-app` | unit tests for the environment, the command text and `programs.tsv`. Not run on a game |
+| `--program N` | the title ID of the game is the application's + N. The packages are read as the application (`--app`) and `--program=<title ID>` picks the Program NCA. Exit code 2 for a NUP and a dump folder | **synthetic.** The picking of the Program NCA is tested on a package of two programs |
+
+A profile with a `programs` key (the engine has one, `010049900F546000`) lists the other programs as `<index>=<title ID>`.
+For `mac-app` and `mac`, each of them is built as a game of its own in its own work folder, up to the Mac shaders (the stages before the host).
+The default folder is `<title ID>_build`. With `--work-dir D`, it is `D/program-<N>`. `mac-app` packs them with the first program.
+`mac` writes `<work>/programs.tsv` and puts `DM_PROGRAMS=<file>` into the command. A build of an iOS target packs the first program only.
 
 The pipeline archive is an optimization. If it gives an error, the build writes a `[RED]` line and packs the app without an archive. The exit code is 0.
 The Mac host stage makes the font file `nintendo_ext.ttf`. The shader stage reports `total` from its first progress event.
@@ -296,14 +301,16 @@ A game that has no profile in the engine gets a survey. `nxb build` examines the
 and a provisional profile, and then builds with this profile. The profile is in `<work>/profile/<title ID>/`, or in `D/<title ID>/` with `--profile-out D`.
 `--provisional` does the same for a game that has a profile. The app name then ends with `-provisional`.
 `--survey-only` writes `survey.md` and stops with exit code 0. Without a profile, it writes no profile.
+At build time, `nxb build` decides which captures a profile needs from the files of `RomFS.img` (`host/build_sources.rs`), as the reference script `profile_guess.build_sources` does.
+It reads SPIR-V files, Trinity packs, GLSL files, Unreal paks (with their IoStore tables), PKZ, GFPAK and Unreal 3 archives with Oodle blocks, the NRO modules and the Frostbite `layout.toc`.
+A package without `RomFS.img` uses the counts of the survey. `nxb profile guess` always uses the counts of the survey.
+The survey report has the census of the rewrite sites (`nxb_rewrite::census`) of every module except `rtld`.
 
 Some checks of the reference script start the game on the Mac. `nxb build` does not start the game. These checks are not ported:
 
 - The heap check and the region check. A game that has one of them stops with exit code 4. The build writes the profile first. The message names `--no-heap-check`.
   With `--no-heap-check`, the build omits the two checks and keeps the memory layout that the survey guessed. **A run of the game did not check this layout.**
 - The shader captures (Vulkan, OpenGL, `glslc`, Unreal decode and others). The build writes a `[RED]` line for each capture that it leaves out.
-- The census of the rewrite sites in the survey report. The report says that it did not run.
-- The source checks at build time (Unreal paks, Frostbite headers).
 
 `nxb profile` has four commands: `guess`, `show`, `check` and `manifest`. `guess` writes the values of the survey, `show` shows a profile,
 `check` compares the guess with a registered profile, and `manifest` lists a RomFS image.

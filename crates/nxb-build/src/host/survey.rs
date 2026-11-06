@@ -1,8 +1,8 @@
 //! The survey of a game with no profile (`scripts/build_ipa_from_nsp.py` `survey`): what the code modules and the
 //! RomFS manifest show, written as `survey.md`, and the facts the provisional profile is made from.
 //!
-//! Not ported: the rewrite-site census (`dm/tools/insn_census.py`, a pass of the AArch64 decoder). The caller hands its
-//! text in (`census`), or the report says it was not run.
+//! The rewrite-site census (`dm/tools/insn_census.py`) is `nxb_rewrite::census`. A caller that has the text of the
+//! census (`--census FILE` of `nxb profile guess`) hands it in (`census`).
 
 use super::guess::{Facts, Guess, facts_of, guess};
 use super::guess_src::{nro_modules, shader_sources, survey_inputs};
@@ -29,7 +29,7 @@ pub struct SurveyInput {
     pub dlc: bool,
     /// The engine folder (the host hooks come from its `dm`).
     pub engine: PathBuf,
-    /// The text of the rewrite-site census, when the caller has run it.
+    /// The text of the rewrite-site census. `None`: the survey counts the sites of each module itself.
     pub census: Option<String>,
 }
 
@@ -79,6 +79,24 @@ pub fn check_aarch64(exefs: &Path, what: &str) -> Result<(), SurveyError> {
     Err(SurveyError::Refused(format!(
         "{what} is a 32-bit ARM program (main.npdm: the 64-bit instruction flag is clear): Apple silicon cannot run 32-bit ARM code, and this repository runs a game's own AArch64 code, so it cannot be ported"
     )))
+}
+
+/// The census of the modules of `ExeFS` (the script runs `insn_census.py` on each, `rtld` left out: the host replaces
+/// it). The first line of each module names its path, as the script prints the path it was given.
+pub fn census_text<'a>(
+    exefs: &Path,
+    names: impl Iterator<Item = &'a str>,
+) -> Result<String, SurveyError> {
+    let mut out = String::new();
+    for n in names.filter(|n| *n != "rtld") {
+        let path = exefs.join(n);
+        let data = std::fs::read(&path)
+            .map_err(|e| SurveyError::Failed(format!("[RED] {}: {e}", path.display())))?;
+        let text = nxb_rewrite::census(&path.to_string_lossy(), &data)
+            .map_err(|e| SurveyError::Failed(e.to_string()))?;
+        out.push_str(&text);
+    }
+    Ok(out)
 }
 
 /// The output of `nso_syms.py <host> - <ExeFS>`: the SDK surface against the host hooks (`forced` hooks included).
@@ -277,10 +295,11 @@ pub fn survey(i: &SurveyInput) -> Result<Survey, SurveyError> {
         String::new(),
         "```".into(),
     ]);
-    match &i.census {
-        Some(c) => r.extend(c.trim_end().lines().map(str::to_string)),
-        None => r.push("(not run: the rewrite-site census is the decoder pass of insn_census.py, which this port does not have)".into()),
-    }
+    let census = match &i.census {
+        Some(c) => c.clone(),
+        None => census_text(&ex.join("ExeFS"), mods.iter().map(|(n, _)| n.as_str()))?,
+    };
+    r.extend(census.trim_end().lines().map(str::to_string));
     r.extend([
         "```".into(),
         String::new(),

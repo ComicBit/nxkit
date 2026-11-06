@@ -515,13 +515,16 @@ pub struct RunNeeded {
 
 /// The runs of the game a provisional profile for this survey needs: the heap check (virtual address memory and a
 /// heap, unless `no_heap_check` or the profile is stamped), the address region check (virtual address memory, unless
-/// `no_heap_check` or stamped for this rewrite) and the shader captures (`shader_sources`).
+/// `no_heap_check` or stamped for this rewrite) and the shader captures (`shader_sources`). With the RomFS `rom`, the
+/// captures follow from its files and the modules of the profile in `stamps` (`build_sources`). Without it, they follow
+/// from the survey's markers.
 pub fn runs_needed(
     s: &Survey,
     exefs: &Path,
     no_heap_check: bool,
     stamps: Option<&str>,
     rewrite: &str,
+    rom: Option<&super::rom::Rom>,
 ) -> Result<Vec<RunNeeded>, String> {
     let mut v = Vec::new();
     let text = stamps.unwrap_or("");
@@ -547,12 +550,24 @@ pub fn runs_needed(
         .map(str::to_string)
         .collect();
     let nro_dir = exefs.parent().map(|p| p.join("romfs_nro"));
-    let inp = super::guess_src::survey_inputs(
-        &s.facts,
-        &keep,
-        nro_dir.as_deref().filter(|d| d.is_dir()),
-        &[],
-    )?;
+    let inp = match rom {
+        Some(r) => {
+            let mut mods = TsvFile::parse(text).words("modules");
+            if mods.is_empty() {
+                mods.push("main".into());
+            }
+            mods.retain(|m| {
+                exefs.join(m).is_file() || exefs.join(format!("{m}.patched.bin")).is_file()
+            });
+            super::build_sources::build_inputs(&s.facts, exefs, r, &mods)?
+        }
+        None => super::guess_src::survey_inputs(
+            &s.facts,
+            &keep,
+            nro_dir.as_deref().filter(|d| d.is_dir()),
+            &[],
+        )?,
+    };
     let src = super::guess_src::shader_sources(&inp);
     for (k, x) in [
         ("vk_capture", &src.vk_capture),

@@ -230,8 +230,20 @@ pub fn pick_programs<'a>(
     base: &'a [Nca],
     update: Option<&'a [Nca]>,
 ) -> Result<(&'a Nca, Option<&'a Nca>, Option<&'a Nca>)> {
-    let bp = pick(base, ContentType::Program, None)
-        .ok_or_else(|| ExtractError::format("no Program NCA in the base NSP"))?;
+    pick_program(base, update, None)
+}
+
+/// [`pick_programs`] for one program of a multi-program application (`nx_extract --program=<title ID>`): the Program NCA
+/// of that title ID, or the lowest one without it.
+pub fn pick_program<'a>(
+    base: &'a [Nca],
+    update: Option<&'a [Nca]>,
+    program: Option<u64>,
+) -> Result<(&'a Nca, Option<&'a Nca>, Option<&'a Nca>)> {
+    let bp = pick(base, ContentType::Program, program).ok_or_else(|| match program {
+        Some(p) => ExtractError::format(format!("no Program NCA {p:016x} in the base NSP")),
+        None => ExtractError::format("no Program NCA in the base NSP"),
+    })?;
     let up = match update {
         Some(u) => Some(
             pick(u, ContentType::Program, Some(bp.title_id)).ok_or_else(|| {

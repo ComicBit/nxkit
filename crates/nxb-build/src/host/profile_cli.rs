@@ -174,7 +174,7 @@ fn guess_cmd(a: &Args) -> Result<i32, String> {
             }
         );
     }
-    let runs = runs_needed(&s, &exefs, a.on("--no-heap-check"), None, "")?;
+    let runs = runs_needed(&s, &exefs, a.on("--no-heap-check"), None, "", None)?;
     for r in &runs {
         println!("needs a run of the game ({}): {}", r.step, r.why);
     }
