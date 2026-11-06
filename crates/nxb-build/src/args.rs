@@ -42,7 +42,8 @@ pub struct Args {
     /// `--companion-app`: the companion app binary embedded next to the built app (`Contents/MacOS/nxnative`), default:
     /// built from the engine's sources by clang + swiftc (`host::companion`) into `<work>/app/nxnative`.
     pub companion: Option<PathBuf>,
-    /// Worker threads.
+    /// Worker threads, `--threads N`. The default is this Mac's P-core equivalents, `round(P + 0.4 × E)`
+    /// (10 on an M2 Max with 8 P and 4 E cores).
     pub threads: usize,
     /// `--load-limit <percent>`: the pipeline archive starts more compiler runs only while CPU and memory use stay
     /// below this share of the machine (default 90).
@@ -248,13 +249,18 @@ fn validate(a: &Args) -> Result<(), (i32, String)> {
     Ok(())
 }
 
+/// The default of `--threads`: the P-core equivalents of this Mac.
+pub(crate) fn default_threads() -> usize {
+    nxb_sched::Budget::detect(nxb_sched::DEFAULT_E_FACTOR, 0).tokens as usize
+}
+
 /// Parses the command line.`Err((code, message))`.
 pub fn parse(argv: &[String]) -> Result<Args, (i32, String)> {
     let mut a = Args {
         platform: "ios".into(),
         mac_sign: "-".into(),
         progress: "auto".into(),
-        threads: 10,
+        threads: default_threads(),
         load_limit: 90,
         ..Args::default()
     };
@@ -401,6 +407,13 @@ mod tests {
         );
         assert_eq!(code(&["dir", "--program", "x"]), Some(2));
         assert_eq!(parse(&v(&["dir"])).map(|a| a.load_limit), Ok(90));
+        let threads = parse(&v(&["dir"])).map(|a| a.threads).unwrap();
+        assert_eq!(threads, default_threads());
+        assert!(threads >= 1);
+        assert_eq!(
+            parse(&v(&["dir", "--threads", "4"])).map(|a| a.threads),
+            Ok(4)
+        );
         assert_eq!(
             parse(&v(&["dir", "--load-limit", "75%"])).map(|a| a.load_limit),
             Ok(75)

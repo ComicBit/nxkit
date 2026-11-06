@@ -81,18 +81,21 @@ const MIN_RUNS: usize = 3;
 /// it needs.
 const ARCHIVE_NICE: i32 = 10;
 
-/// The streamed archive's run limits: at least [`MIN_RUNS`], at most one compiler run per slot and as many as the
-/// memory budget holds for a group of twice the average size (a group is at most 4x, PROGRESS X8: about 1.9 GiB per
-/// 1,000 bases). In between, runs start while CPU and memory stay below `load_percent`.
+/// The streamed archive's run limits: at most one compiler run per slot and as many as the memory budget holds for a
+/// group of twice the average size (a group is at most 4x, PROGRESS X8: about 1.9 GiB per 1,000 bases), at least one.
+/// [`MIN_RUNS`] always go when the budget holds them. In between, runs start while CPU and memory stay below
+/// `load_percent`.
 fn run_limits(c: &nxb_archive::Config, load_percent: u8) -> nxb_sched::Limits {
     let slots = u64::from((c.tokens / c.cost.max(1)).max(1));
     let per = c.mem_per_batch * (2 * GROUP_TARGET as u64) / 1000 + (512 << 20);
-    let ceiling = slots.min(c.mem_budget / per.max(1)).max(MIN_RUNS as u64) as usize;
+    let fit = slots.min(c.mem_budget / per.max(1)).max(1);
+    let floor = fit.min(MIN_RUNS as u64) as usize;
+    let ceiling = fit as usize;
     let share = f64::from(load_percent.clamp(10, 100)) / 100.0;
     nxb_sched::Limits {
         cpu: share,
         mem: share,
-        ..nxb_sched::Limits::new(MIN_RUNS, ceiling, per)
+        ..nxb_sched::Limits::new(floor, ceiling, per)
     }
 }
 
@@ -408,10 +411,20 @@ mod tests {
         // 26 GiB / (1.9 GiB × 0.8 + 0.5 GiB) = 12.8, 12 slots
         assert_eq!((l.floor, l.ceiling), (3, 12));
         assert!((l.cpu - 0.9).abs() < 1e-9 && (l.mem - 0.9).abs() < 1e-9);
+        // 16 GB Mac: 10 GiB budget, 4 runs fit
         c.mem_budget = 10 * gib;
-        assert_eq!(run_limits(&c, 50).ceiling, 4);
-        c.mem_budget = gib;
-        assert_eq!(run_limits(&c, 90).ceiling, 3);
+        let l = run_limits(&c, 50);
+        assert_eq!((l.floor, l.ceiling), (3, 4));
+        // 8 GB Mac: 2 GiB budget, one run, not three regardless of memory
+        c.mem_budget = 2 * gib;
+        let l = run_limits(&c, 90);
+        assert_eq!((l.floor, l.ceiling), (1, 1));
+        c.mem_budget = 0;
+        assert_eq!(run_limits(&c, 90).ceiling, 1);
+        // a 4-core Mac with metal-tt (two cores a run): 2 slots
+        (c.tokens, c.cost, c.mem_budget) = (4, 2, 26 * gib);
+        let l = run_limits(&c, 90);
+        assert_eq!((l.floor, l.ceiling), (2, 2));
     }
 
     fn test_config() -> nxb_archive::Config {
