@@ -2,13 +2,14 @@
 #![allow(missing_docs)]
 
 pub mod helper;
+pub mod shared_store;
 pub mod shuffle;
 pub mod softfloat;
 pub mod tensor;
 pub mod texture;
 
 use crate::accessor::Accessor;
-use crate::ir::{Block, Inst, Ir, OperandType, StorageKind};
+use crate::ir::{Block, Inst, Ir, OperandType};
 use crate::opt::Env;
 use crate::translation::props::ShaderStage;
 use helper::Hfm;
@@ -49,20 +50,7 @@ pub fn run_pass(ir: &mut Ir, blocks: &mut [Block], env: &mut Env, ctx: &mut Xfor
     // VectorComponentSelect: QueryHostHasVectorIndexingBug is false
     texture::run_pass(ir, blocks, env, ctx)?;
     if ctx.stage == ShaderStage::Compute && *ctx.used_features & feature::SHARED_MEMORY != 0 {
-        // SharedStoreSmallIntCas
-        for b in blocks.iter() {
-            for &n in &b.ops {
-                if ir.is_op(n)
-                    && ir.op(n).inst == Inst::Store
-                    && matches!(
-                        ir.op(n).storage_kind,
-                        StorageKind::SharedMemory8 | StorageKind::SharedMemory16
-                    )
-                {
-                    return Err("unported: SharedStoreSmallIntCas".into());
-                }
-            }
-        }
+        shared_store::run_pass(ir, blocks, ctx)?;
     }
     if *ctx.used_features & feature::SHUFFLE != 0 {
         shuffle::run_pass(ir, blocks, ctx)?;

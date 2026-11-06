@@ -71,12 +71,74 @@ pub(super) fn ast(ctx: &mut Ctx) -> R {
 
 pub(super) fn isberd(ctx: &mut Ctx) -> R {
     let x = x(ctx);
+    if let Some(stage) = ctx.acc.query_ampere_stage_memory().map(<[i32]>::to_vec) {
+        // A task or mesh shader's stage input: mode 0x78 the workgroup's number, 0x38 a word of the payload its task
+        // wrote and 0xb8 a word it wrote itself
+        let mode = x.bits(72, 80);
+        if !matches!(mode, 0x78 | 0x38 | 0xb8) {
+            return Err(fail(
+                ctx,
+                &format!("ISBERD mode {mode:02x} in a task or mesh shader"),
+            ));
+        }
+        let addr = if mode == 0x78 {
+            c(ctx, stage_word(&stage, 0))
+        } else {
+            let a = gpr(ctx, x.ra());
+            let k = c(
+                ctx,
+                stage_word(&stage, if mode == 0xb8 { 2 } else { 1 })
+                    + x.signed_field(40, 64) as i32,
+            );
+            ctx.i_add(a, k)
+        };
+        return emit_load(
+            ctx,
+            StorageKind::SharedMemory,
+            LsSize2::B32,
+            addr,
+            x.rd(),
+            0,
+        );
+    }
     if x.rd() < RZ {
         let d = gpr(ctx, x.rd());
         let a = gpr(ctx, x.ra());
         ctx.copy_to(d, a);
     }
     Ok(())
+}
+
+fn stage_word(stage: &[i32], i: usize) -> i32 {
+    stage.get(i).copied().unwrap_or(0)
+}
+
+/// A task or mesh shader's stage output (0x927), `[Ra + offset], Rb`, mode at 72..80: 0xb8 a word of the task's payload,
+/// 0xf8 a word of a mesh shader's attributes, 0x88 the primitive count byte and 0x80 a primitive index byte. Bytes go
+/// through the shared store of a small integer. The zero count every thread writes first (mode 0x88 from RZ) is left out
+/// because the stage memory starts at zero.
+pub(super) fn stage_out(ctx: &mut Ctx) -> R {
+    let x = x(ctx);
+    let stage = ctx.acc.query_ampere_stage_memory().map(<[i32]>::to_vec);
+    let mode = x.bits(72, 80);
+    let Some(stage) = stage.filter(|_| matches!(mode, 0xb8 | 0xf8 | 0x88 | 0x80)) else {
+        return Err(fail(
+            ctx,
+            &format!("stage output store mode {mode:02x} outside a task or mesh shader"),
+        ));
+    };
+    if mode == 0x88 && x.rb() == RZ {
+        return Ok(());
+    }
+    let word = mode == 0xb8 || mode == 0xf8;
+    let a = gpr(ctx, x.ra());
+    let k = c(
+        ctx,
+        stage_word(&stage, if word { 2 } else { 3 }) + x.signed_field(40, 64) as i32,
+    );
+    let addr = ctx.i_add(a, k);
+    let size = if word { LsSize2::B32 } else { LsSize2::U8 };
+    emit_store(ctx, StorageKind::SharedMemory, size, addr, x.rb(), 0)
 }
 
 pub(super) fn lepc(ctx: &mut Ctx) -> R {

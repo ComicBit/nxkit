@@ -99,6 +99,7 @@ pub enum AEmit {
     AHmnmx2,
     AOut,
     AIsberd,
+    AStageOut,
     ALepc,
 }
 
@@ -489,6 +490,7 @@ fn build() -> Tables {
     a(t, 0x040, InstName::Hadd2, AEmit::AHmnmx2, 0, false, true);
     a(t, 0x124, InstName::Out, AEmit::AOut, 0, false, true);
     x(t, 0x923, InstName::Isberd, AEmit::AIsberd, 0, false, true);
+    x(t, 0x927, InstName::Ast, AEmit::AStageOut, 0, false, false);
     x(t, 0x34e, InstName::Lepc, AEmit::ALepc, 0, false, true);
     x(t, 0x357, InstName::Nop, AEmit::ANop, 0, false, false);
     x(t, 0x957, InstName::Nop, AEmit::ANop, 0, false, false);

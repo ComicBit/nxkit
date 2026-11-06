@@ -298,3 +298,35 @@ fn f2ip_rejects_a_register_in_c() {
     let e = ampere_cs_text(&[f2ip, AEXIT]).expect_err("fail");
     assert!(e.contains("F2IP form"), "{e}");
 }
+
+#[test]
+fn task_and_mesh_stage_memory_lives_in_shared_memory() {
+    let stage = r#", "stage_memory": [0, 16, 32, 64]"#;
+    // ISBERD R1, R2 mode 0x78 and 0x38, AST [R2 + 4], R3 in modes 0xb8, 0x80 and 0x88 from RZ
+    let isberd = |mode: u64| (0x923 | APT | 1 << 16 | 2 << 24, mode << 8);
+    let ast = |mode: u64, rb: u64| (0x927 | APT | 2 << 24 | rb << 32 | 4 << 40, mode << 8);
+    let ops = [
+        isberd(0x78),
+        isberd(0x38),
+        ast(0xb8, 3),
+        ast(0x80, 3),
+        ast(0x88, 255),
+        AEXIT,
+    ];
+    let t = ampere_cs_text_with(stage, &ops).expect("emit");
+    // the workgroup number is the constant 0, the payload words are at 0x10 + 4 and 0x20 + 4
+    assert!(t.contains("op 35 0 0 0 d=l0, s=#0,"), "{t}");
+    assert!(t.contains("s=R1:2,#10,"), "{t}");
+    assert!(t.contains("s=R1:2,#24,"), "{t}");
+    // a word store, a byte store, and no store for the zero count byte
+    assert!(t.contains("op 6c 8 0 0 d= s=#0,l16,R1:3,"), "{t}");
+    assert!(t.contains("op 6c 9 0 0 d= s=#0,l21,R1:3,"), "{t}");
+    assert_eq!(t.matches("op 6c ").count(), 2, "{t}");
+}
+
+#[test]
+fn stage_output_store_outside_a_task_or_mesh_shader_is_refused() {
+    let ast = (0x927 | APT | 3 << 32, 0xb8 << 8);
+    let e = ampere_cs_text(&[ast, AEXIT]).expect_err("fail");
+    assert!(e.contains("outside a task or mesh shader"), "{e}");
+}

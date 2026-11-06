@@ -303,7 +303,9 @@ fn fill_block(stage: Stage, ctx: &mut Ctx, code: &[u8], start: u64, block: &mut 
             ),
             0x389 | 0x589 | 0x989 | 0xf89 => ctx.features |= feature::SHUFFLE,
             opc::LDL | 0x387 | 0x987 => ctx.features |= feature::LOCAL_MEMORY,
-            0x984 | 0x388 | 0x988 | 0x98c | 0x38c | 0xf8c => ctx.features |= feature::SHARED_MEMORY,
+            0x927 | 0x984 | 0x388 | 0x988 | 0x98c | 0x38c | 0xf8c => {
+                ctx.features |= feature::SHARED_MEMORY
+            }
             0x986 | 0x386 | 0x98e | 0x9a8 | 0x3a8 | 0x9a9 | 0x59f | 0xb9b | 0x99b | 0x99d
             | 0x9a0 | 0x9a2 => ctx.features |= feature::STORE,
             _ => {}
