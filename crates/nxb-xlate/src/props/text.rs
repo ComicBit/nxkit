@@ -1,6 +1,6 @@
 //! Parser of the probe's `props` dump (one attempt section, see `Probe.Props` in `tools/xlate-probe/Probe.cs`).
 
-use super::props::*;
+use super::*;
 use crate::attr::Stage;
 use crate::structured::types::AggType;
 use crate::types::SamplerType;

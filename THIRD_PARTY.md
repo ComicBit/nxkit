@@ -1,7 +1,8 @@
 # Third-party notes
 
 This repository has no external Rust dependencies. `Cargo.lock` lists only the crates of the workspace.
-On macOS, `nxb-sys` links the system zlib (`/usr/lib/libz`) dynamically. No third-party source code is in the tree. The only third-party material is the rewrite rule data below.
+On macOS, `nxb-sys` links the system zlib (`/usr/lib/libz`) dynamically. The shader translator front end is a Rust port of the Ryujinx
+shader translator, see below. The other third-party material is the rewrite rule data below.
 
 ## Formats and algorithms written from public documentation
 
@@ -20,6 +21,25 @@ taken from other implementations.
 | SHA-1, SHA-256 | `nxb-model`, `nxb-sys` | FIPS 180-4. The test vectors are the published ones |
 | AArch64 decoding and patching | `nxb-a64`, `nxb-rewrite` | the Arm Architecture Reference Manual |
 | Property lists (XML and binary) | `nxb-plist`, `nxb-pack` | public Apple documentation and observed output |
+
+## Shader translator ported from Ryujinx
+
+The crate `nxb-maxwell` and the front end of `nxb-xlate` (every module except `msl`) are a Rust port of the Ryujinx shader
+translator (`Ryujinx.Graphics.Shader`). The port also carries the changes of the nxnative fork of that translator
+(`dm/third_party/ryujinx` in nxnative). That fork keeps the Ryujinx licence file. The MSL back end `nxb-xlate::msl` is new code.
+Ryujinx is published under the MIT licence. This is the full notice of the licence:
+
+```
+MIT License
+
+Copyright (c) Ryujinx Team and Contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
 
 ## Rewrite rules from nxnative
 
@@ -61,7 +81,7 @@ and refuses to run (exit code 4) when they differ. The same notice is in `data/r
 |---|---|---|
 | Apple tools (`metal`, `metallib`, `air-opt`, `air-as`, `codesign`, `metal-tt`, `metal-pack`, `xcrun`) | Apple licence | started from your own Xcode. Not redistributed |
 
-## If code is ported later
+## If more code is ported
 
-If code from the translator or from spirv-cross is translated into this repository, the change must add the original copyright
+If more code from another project is translated into this repository, the change must add the original copyright
 notice and the licence text to this file. The change must also list which files come from which source.

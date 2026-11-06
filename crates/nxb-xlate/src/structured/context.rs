@@ -4,8 +4,8 @@
 use super::ast::*;
 use super::types::AggType;
 use super::{GotoStatement, IoDef, StructFunction, StructInfo, StructResources};
-use crate::codegen::props::Definitions;
 use crate::ir::{Block, FALSE, Inst, Ir, NodeId, Opd, OperandType, StorageKind, TRUE};
+use crate::props::Definitions;
 use std::collections::{HashMap, HashSet};
 
 pub struct Context<'a> {

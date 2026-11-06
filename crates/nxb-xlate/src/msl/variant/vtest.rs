@@ -3,13 +3,13 @@
 #![allow(dead_code)]
 
 use crate::attr::Stage;
-use crate::codegen::props::Props;
 use crate::driver::Program;
 use crate::ir::{Inst, IoVariable, StorageKind};
 use crate::job::parse_jobs;
 use crate::msl::emit::Options;
 use crate::msl::library::build;
 use crate::msl::{Context, StageInputs, Translated, Varying};
+use crate::props::Props;
 use crate::structured::ast::{A, BlockType};
 use crate::structured::types::AggType;
 use crate::structured::{StructFunction, StructInfo};
@@ -164,8 +164,8 @@ impl V {
 
     /// A storage buffer the vertex shader writes `v` to.
     pub(super) fn store_buffer(&mut self, v: A) {
-        use crate::codegen::props::{BufferDef, Field};
         use crate::driver::BufferInfo;
+        use crate::props::{BufferDef, Field};
         let ty = AggType(AggType::U32.0 | AggType::ARRAY.0);
         self.s.props.properties.storage_buffers.push(BufferDef {
             layout: 1,
@@ -196,7 +196,7 @@ impl V {
 
     /// A constant buffer `name` of vec4 words at `binding`.
     pub(super) fn cb(&mut self, binding: i32, name: &str) {
-        use crate::codegen::props::{BufferDef, Field};
+        use crate::props::{BufferDef, Field};
         self.s.props.properties.constant_buffers.push(BufferDef {
             layout: 0,
             set: 0,

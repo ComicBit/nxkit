@@ -6,8 +6,8 @@
 use super::args::Res;
 use super::io::Plan;
 use super::types::{cast, literal, msl_type, scalar};
-use crate::codegen::props::Props;
 use crate::ir::{Inst, OperandType};
+use crate::props::Props;
 use crate::structured::StructInfo;
 use crate::structured::ast::{A, Kind, OpData};
 use crate::structured::types::AggType;

@@ -8,8 +8,8 @@ use super::emit::{Em, R, Shader};
 use super::inst_mem::{Place, Space, swizzle_or_index};
 use super::io::{Plan, varying};
 use super::types::scalar;
-use crate::codegen::props::Definitions;
 use crate::ir::IoVariable;
+use crate::props::Definitions;
 use crate::structured::ast::OpData;
 use crate::structured::types::AggType;
 
