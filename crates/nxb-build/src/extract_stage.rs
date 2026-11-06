@@ -174,6 +174,7 @@ fn packages(a: &Args, b: &Build, p: &Progress) -> Result<usize, String> {
         html: true,
         base_outputs: true,
         app: b.src.app_flag,
+        program: (b.program != 0).then_some(b.src.app),
         discard_images: false,
         allow_damaged: a.allow_damaged,
         manifest: false,
@@ -258,6 +259,12 @@ pub(crate) fn split(a: &Args, b: &Build, p: &Progress) -> Result<String, String>
 pub(crate) fn run(a: &Args, b: &Build, p: &Progress) -> Result<String, String> {
     for n in &b.src.notes {
         p.say(n);
+    }
+    if b.program != 0 {
+        p.say(&format!(
+            "program {} of the application: title ID {}",
+            b.program, b.title
+        ));
     }
     let images = match b.src.source {
         Source::Packages => packages(a, b, p)?,

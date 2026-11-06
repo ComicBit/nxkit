@@ -20,7 +20,7 @@ pub(crate) fn expand(p: &Path) -> PathBuf {
 }
 
 /// The switches of an environment file (`env_file_pairs`): `KEY=VALUE` lines, `#` starts a comment.
-fn env_pairs(path: &Path) -> Result<Vec<(String, String)>, String> {
+pub(crate) fn env_pairs(path: &Path) -> Result<Vec<(String, String)>, String> {
     let text = std::fs::read_to_string(path).map_err(|e| {
         crate::exit::fail(
             2,

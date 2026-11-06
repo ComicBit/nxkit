@@ -19,6 +19,23 @@ pub struct AppParts {
     pub lang: String,
 }
 
+/// The control data the game's languages come from (the packed version's, else the base game's) and the game language
+/// (`DM_LANG`) that `--language` asks for.
+pub(crate) fn language(a: &Args, work: &Path, package: &str) -> Result<(PathBuf, String), String> {
+    let ex = work.join("extract").join(package);
+    let base_ex = work.join("extract/v0");
+    let control =
+        settings::languages_control(&[&ex, &base_ex]).unwrap_or_else(|| ex.join("control.nacp"));
+    let have = settings::languages(&control);
+    let want = match &a.language {
+        Some(l) => settings::language_code(l)
+            .ok_or_else(|| format!("unknown language {l} (--language)"))?,
+        None => "en-US",
+    };
+    let lang = settings::game_language(want, a.language.is_some(), &have)?;
+    Ok((control, lang))
+}
+
 /// Make the parts in `<work>/app`: the companion app (given by `--companion-app`, else built and reused while its
 /// inputs are unchanged), the icon from the packed version's `icon.jpg` (else the previous app's), the settings.
 pub fn prepare(a: &Args, b: &Build, previous: Option<&Path>) -> Result<AppParts, String> {
@@ -45,17 +62,7 @@ pub fn prepare(a: &Args, b: &Build, previous: Option<&Path>) -> Result<AppParts,
             .map(|p| p.join("Contents/Resources/AppIcon.icns"))
             .filter(|p| p.is_file()),
     };
-    // the game's languages from the packed version's control data, else the base game's
-    let base_ex = w.join("extract/v0");
-    let control =
-        settings::languages_control(&[&ex, &base_ex]).unwrap_or_else(|| ex.join("control.nacp"));
-    let have = settings::languages(&control);
-    let want = match &a.language {
-        Some(l) => settings::language_code(l)
-            .ok_or_else(|| format!("unknown language {l} (--language)"))?,
-        None => "en-US",
-    };
-    let lang = settings::game_language(want, a.language.is_some(), &have)?;
+    let (control, lang) = language(a, w, &b.package)?;
     let out = dir.join(nxb_pack::macapp::SETTINGS_JSON);
     let env = |k: &str| match k {
         "GFXAPI" => Some("nvn".to_string()),

@@ -74,6 +74,7 @@ fn input_from_package(a: &Args, b: &Build, p: &Progress, dst: &Path) -> Result<(
         threads: a.threads,
         base_outputs,
         app: b.src.app_flag,
+        program: (b.program != 0).then_some(b.src.app),
         allow_damaged: a.allow_damaged,
         manifest: true,
         ..nxb_extract::Request::default()

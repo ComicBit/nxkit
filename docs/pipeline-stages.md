@@ -266,7 +266,13 @@ The default platform is `ios`, as in the reference script. Use `--platform mac-a
 | `--team-id`, `--framework`, `--shell-framework`, `--prepare-xcode`, `--xcode-workspace` | the iOS options. They call the code of `nxb ios` | **no device test.** Each stage was checked with a real `xcodebuild`. Nobody ran the stages in one run |
 | `--provisional`, `--survey-only`, `--no-heap-check`, `--profile-out` | the survey options (refer to the next section) | see the next section |
 | `--allow-shader-regressions` | accepted, no effect. No regression check is in the build | not applicable |
-| `--program N` for N more than 0, `--platform mac` | exit code 4 | not ported |
+| `--platform mac` | the development build: extract, shader split, Mac shaders and Mac host, then the command that runs the game (`cd <work>/run && DM_ROOT=... <work>/tools/dmhost <work>/patched_<package>`). The command is printed and not started. The pipeline prebuild (`DM_PSO_PREBUILD=tool`) starts the host and is not run. `DM_JIT_CAPTURE` is not set. `--seen-shaders` adds `DM_PSO_ARCHIVE` and a `tee` of the host log. Apple silicon is needed, as for `mac-app` | unit tests for the environment, the command text and `programs.tsv`. Not run on a game |
+| `--program N` | the title ID of the game is the application's + N. The packages are read as the application (`--app`) and `--program=<title ID>` picks the Program NCA. Exit code 2 for a NUP and a dump folder | **synthetic.** The picking of the Program NCA is tested on a package of two programs |
+
+A profile with a `programs` key (the engine has one, `010049900F546000`) lists the other programs as `<index>=<title ID>`.
+For `mac-app` and `mac`, each of them is built as a game of its own in its own work folder, up to the Mac shaders (the stages before the host).
+The default folder is `<title ID>_build`. With `--work-dir D`, it is `D/program-<N>`. `mac-app` packs them with the first program.
+`mac` writes `<work>/programs.tsv` and puts `DM_PROGRAMS=<file>` into the command. A build of an iOS target packs the first program only.
 
 The pipeline archive is an optimization. If it gives an error, the build writes a `[RED]` line and packs the app without an archive. The exit code is 0.
 The Mac host stage makes the font file `nintendo_ext.ttf`. The shader stage reports `total` from its first progress event.

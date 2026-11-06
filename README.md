@@ -124,7 +124,8 @@ limits it. The own front end is not byte-identical in the validated mode.
 - `nxb build` was run with a registered profile on one title (Mac app). A game without a profile gets a provisional profile. The heap check, the region check and the shader captures start the game, and they are not ported.
   Without `--no-heap-check`, such a game stops with exit code 4. With it, the memory layout is a guess. Nobody checked it with a run. The shader step and the stages after it were **not** run for the Switch 2 package.
 - Not ported in `nxb build`: the census of the rewrite sites and the source checks of Unreal paks and Frostbite headers.
-  Also not ported: `--program N` for N more than 0, `--platform mac` and the header of the settings file for one multi-program profile. `--allow-shader-regressions` has no effect. `--mac-sign` was not run with a real identity.
+  `--platform mac` (the development build) ends with the command that runs the game on the Mac. It does not run the pipeline prebuild, which starts the host. It does not set `DM_JIT_CAPTURE` either.
+  `--program N` and the other programs of a multi-program profile are built for `--platform mac` and `mac-app`. They were checked with synthetic files only. An iOS build of a profile with `programs` packs the first program only. `--allow-shader-regressions` has no effect. `--mac-sign` was not run with a real identity.
 - iOS: no device test. The IPA writer is serial.
 - The overlap of stages is partial. The shader step does not start while the extract runs. Nobody timed a cold full run on a quiet machine. Each gain from overlap, the host and the raw path is an estimate.
 - `nxb cache` exists. The shader step does not write cache entries at this time, thus the cache is empty. `--shader-manifest` and `--partial` have unit tests only.
@@ -178,7 +179,7 @@ The tests for this are small. Refer to the section 0.5.0 of the changelog.
 
 | command | purpose |
 |---|---|
-| `nxb build` | the whole build. `nxb build --platform mac-app` (or `ios`) runs all ported stages. `--dry-run` prints the stage graph and the cache keys. It takes NSP, NSZ, XCI, XCZ, merged packages (`--app`), `.nup` (`--nup`), dump folders (`--dump`) and DLC (`--aoc`). A game without a profile gets a provisional profile (`--provisional`, `--survey-only`, `--no-heap-check`, `--profile-out`). Exit codes: 0, 1, 2, 3, 4, 6 and 130. Refer to [docs/pipeline-stages.md](docs/pipeline-stages.md) |
+| `nxb build` | the whole build. `nxb build --platform mac-app` (or `mac`, `ios`) runs all ported stages. `--dry-run` prints the stage graph and the cache keys. It takes NSP, NSZ, XCI, XCZ, merged packages (`--app`), `.nup` (`--nup`), dump folders (`--dump`) and DLC (`--aoc`). A game without a profile gets a provisional profile (`--provisional`, `--survey-only`, `--no-heap-check`, `--profile-out`). Exit codes: 0, 1, 2, 3, 4, 6 and 130. Refer to [docs/pipeline-stages.md](docs/pipeline-stages.md) |
 | `nxb profile` | `guess`, `show`, `check` and `manifest`: the survey values of a game and the checks of a profile |
 | `nxb extract` | NSP, XCI, NSZ, XCZ, Switch 2 package (`.nup`, no keys needed) or dump folder (`--dump`) to RomFS images, ExeFS, control data and icon |
 | `nxb split` | shader split of extracted images into package records and tables. Exit code 4 means unsupported format |
@@ -205,7 +206,8 @@ Run `nxb help build` for the full usage. Refer to [docs/pipeline-stages.md](docs
 
 | option | meaning |
 |---|---|
-| `--platform mac-app\|ios` | the target. The default is `ios` |
+| `--platform mac\|mac-app\|ios` | the target. `mac` is the development build: it prints the command that runs the game. The default is `ios` |
+| `--program N` | one program of a multi-program application is a game of its own. Its title ID is the application's title ID + N |
 | `--engine DIR`, `-k KEYS`, `--work-dir D`, `-o OUT`, `--progress json` | the engine folder, the keys file, the work folder, the output and the NDJSON events |
 | `--nup FILE`, `--dump FOLDER`, `--app ID`, `--title-id ID`, `--aoc PACKAGE` | the inputs: a Switch 2 package, a dump folder, a game in a merged package, DLC |
 | `--env-file`, `--motion`, `--no-motion`, `--seen-shaders`, `--romfs bundle\|separate`, `--keep-extracted`, `--show-fps` | the options of the reference script |
