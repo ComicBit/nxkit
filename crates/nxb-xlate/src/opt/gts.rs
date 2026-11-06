@@ -296,7 +296,7 @@ fn multi_target(
         None => {
             let returns = !ir.op(node).dests.is_empty();
             let made = if targets.is_empty() {
-                gts_fn::raw_target(ir, env, inst, kind, returns)?
+                super::gts_raw::raw_target(ir, env, inst, kind, returns)?
             } else {
                 gts_fn::multi_target(ir, env, inst, kind, returns, &targets)?
             };

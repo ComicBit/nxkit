@@ -153,3 +153,36 @@ fn full_opt_vs_dump() {
     }
     eprintln!("full opt identical {ok}/{keys} ({errs} errors)");
 }
+
+#[test]
+fn removing_a_use_keeps_a_producer_whose_other_result_is_in_use() {
+    use crate::ir::{Block, StorageKind};
+    let mut ir = Ir::default();
+    let one = ir.const_(1);
+    let coord = ir.local();
+    let n0 = ir.new_op(Inst::Copy, StorageKind::None, Some(coord), &[one]);
+    let (d0, d1) = (ir.local(), ir.local());
+    let read = ir.new_tex_op(
+        Inst::TextureSample,
+        crate::types::SamplerType::TEXTURE_2D,
+        0,
+        0,
+        0,
+        0,
+        0,
+        &[Some(d0), Some(d1)],
+        &[coord],
+    );
+    let (x, y) = (ir.local(), ir.local());
+    let u0 = ir.new_op(Inst::Copy, StorageKind::None, Some(x), &[d0]);
+    let u1 = ir.new_op(Inst::Copy, StorageKind::None, Some(y), &[d1]);
+    let mut block = Block {
+        ops: vec![n0, read, u0, u1],
+        ..Block::default()
+    };
+    remove_node(&mut ir, &mut block, 2);
+    // the read stays for its second result, so its coordinate stays in use
+    assert!(!ir.data(coord).use_ops.is_empty());
+    remove_node(&mut ir, &mut block, 2);
+    assert!(ir.data(coord).use_ops.is_empty());
+}
