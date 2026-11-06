@@ -12,7 +12,7 @@ use crate::codegen::props::{self as cp, Props};
 use crate::driver::{BufferInfo, Core, Program, TexInfo};
 use crate::ir::Ir;
 use crate::job::Job;
-use crate::structured::StructResources;
+use crate::structured::{StructInfo, StructResources};
 use crate::structured::program::{FunctionIn, make_structured_program};
 use crate::structured::types::AggType;
 use crate::types::AttributeType;
@@ -197,12 +197,12 @@ fn tex_info(l: Vec<tp::TextureDescriptor>) -> Vec<TexInfo> {
         .collect()
 }
 
-/// `TranslatorContext.Translate()` of a context (no geometry-as-compute).
-pub fn translate_context(
+/// The structured program of a context with its properties and resource lists (`spirv` is empty).
+pub fn structure_context(
     tc: &TranslatorContext,
     acc: &mut Accessor,
     debug_mode: bool,
-) -> Result<Program, String> {
+) -> Result<(StructInfo, Props, Program), String> {
     let mut t = run_to_xform(tc, acc)?;
     let mut user: Vec<crate::translation::pipeline::TransformedFunction> =
         std::mem::take(&mut t.funcs);
@@ -258,6 +258,16 @@ pub fn translate_context(
         helper_functions_mask: 0,
         io_definitions: Vec::new(),
     };
+    Ok((info, props, program))
+}
+
+/// `TranslatorContext.Translate()` of a context (no geometry-as-compute).
+pub fn translate_context(
+    tc: &TranslatorContext,
+    acc: &mut Accessor,
+    debug_mode: bool,
+) -> Result<Program, String> {
+    let (info, props, program) = structure_context(tc, acc, debug_mode)?;
     let spirv = generate(info, props)?;
     Ok(Program { spirv, ..program })
 }
