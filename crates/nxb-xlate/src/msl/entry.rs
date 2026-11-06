@@ -14,6 +14,30 @@ use std::fmt::Write;
 pub struct EntryName<'a> {
     /// The function name.
     pub name: &'a str,
+    /// The return type instead of `main0_out` or `void`.
+    pub ret: Option<&'a str>,
+    /// The stage input parameter instead of `main0_in in [[stage_in]]`. Empty for none.
+    pub in_param: Option<&'a str>,
+    /// Parameters after the standard ones.
+    pub params: &'a [String],
+    /// Statements before the output is declared.
+    pub pro: &'a [String],
+    /// The statements that end the entry where the body falls through, instead of the default tail.
+    pub exit: Option<&'a [String]>,
+}
+
+impl<'a> EntryName<'a> {
+    /// An entry with the standard signature and tail.
+    pub fn new(name: &'a str) -> EntryName<'a> {
+        EntryName {
+            name,
+            ret: None,
+            in_param: None,
+            params: &[],
+            pro: &[],
+            exit: None,
+        }
+    }
 }
 
 /// The kind keyword of a shader.
@@ -30,7 +54,12 @@ fn memory(m: &MemoryDef) -> R<(String, i32)> {
     Ok((msl_type(scalar(m.ty))?, m.array_length.max(1)))
 }
 
-fn shared_params(s: &Structured, res: &args::Res, plan: &io::Plan, shader: Shader) -> R<Shared> {
+pub(super) fn shared_params(
+    s: &Structured,
+    res: &args::Res,
+    plan: &io::Plan,
+    shader: Shader,
+) -> R<Shared> {
     let mut p = Shared::default();
     let d = |a: &str, b: &str| (a.to_string(), b.to_string());
     if res.has_args {
@@ -73,7 +102,7 @@ fn tg_bytes(s: &Structured) -> i64 {
 }
 
 /// The text of one entry function around a body.
-fn entry_text(
+pub(super) fn entry_text(
     s: &Structured,
     e: &EntryName<'_>,
     shader: Shader,
@@ -83,10 +112,13 @@ fn entry_text(
 ) -> R<String> {
     let early = shader == Shader::Fragment && s.props.definitions.early_z_force;
     let has_out = shader != Shader::Compute && !plan.out_members.is_empty();
-    let ret = if has_out { "main0_out" } else { "void" };
+    let ret = e.ret.unwrap_or(if has_out { "main0_out" } else { "void" });
     let mut params = Vec::new();
-    if !plan.in_members.is_empty() {
-        params.push("main0_in in [[stage_in]]".to_string());
+    match e.in_param {
+        Some("") => {}
+        Some(p) => params.push(p.to_string()),
+        None if !plan.in_members.is_empty() => params.push("main0_in in [[stage_in]]".to_string()),
+        None => {}
     }
     if res.has_args {
         params.push(format!("constant {SET_TYPE}& {SET_NAME} [[buffer(0)]]"));
@@ -94,6 +126,7 @@ fn entry_text(
     for b in &plan.builtins {
         params.push(format!("{} {} [[{}]]", b.ty, b.name, b.attr));
     }
+    params.extend(e.params.iter().cloned());
     let mut t = String::new();
     let attr = if early {
         "[[early_fragment_tests]] "
@@ -107,6 +140,9 @@ fn entry_text(
         e.name,
         params.join(", ")
     );
+    for l in e.pro {
+        let _ = writeln!(t, "    {l}");
+    }
     if has_out {
         t.push_str("    main0_out out = {};\n");
     }
@@ -128,7 +164,14 @@ fn entry_text(
     }
     t.push_str(body);
     let last = body.trim_end().lines().last().map(str::trim);
-    if matches!(last, Some("return out;" | "return;")) {
+    if last.is_some_and(|l| l.starts_with("return")) {
+        t.push_str("}\n");
+        return Ok(t);
+    }
+    if let (Shader::Vertex, Some(exit)) = (shader, e.exit) {
+        for l in exit {
+            let _ = writeln!(t, "    {l}");
+        }
         t.push_str("}\n");
         return Ok(t);
     }
@@ -194,26 +237,44 @@ pub fn build(s: &Structured, ctx: &Context<'_>, opt: &Options) -> R<Translated> 
                 .into(),
         );
     }
+    let main = bodies.first().ok_or("program without a main function")?;
+    let vx = if shader == Shader::Vertex {
+        let w = res.bindings.iter().any(facts::writes);
+        Some(variant::vertex::bodies(&mut em, &plan, main.clone(), w)?)
+    } else {
+        None
+    };
     let mut msl = prelude::header(s.props.host.reduced_precision);
     msl.push_str(&prelude::helpers(&em.helpers, res.border));
     msl.push_str(&res.text);
     msl.push_str(&plan.in_struct());
     msl.push_str(&plan.out_struct());
+    if let Some(vx) = &vx {
+        msl.push_str(&variant::vertex::decls(&plan, vx)?);
+    }
     for i in 1..bodies.len() {
         let _ = writeln!(msl, "{};", em.signature(i)?);
     }
     for (i, b) in bodies.iter().enumerate().skip(1) {
         let _ = write!(msl, "{}\n{{\n{b}}}\n", em.signature(i)?);
     }
-    let main = bodies.first().ok_or("program without a main function")?;
-    msl.push_str(&entry_text(
-        s,
-        &EntryName { name: "main0" },
-        shader,
-        &res,
-        &plan,
-        main,
-    )?);
+    match &vx {
+        Some(vx) => msl.push_str(&variant::vertex::entries(
+            s,
+            &res,
+            &plan,
+            vx,
+            &variant::vertex::Frame::default(),
+        )?),
+        None => msl.push_str(&entry_text(
+            s,
+            &EntryName::new("main0"),
+            shader,
+            &res,
+            &plan,
+            main,
+        )?),
+    }
 
     let mut notes = s.notes.clone();
     notes.extend(em.notes.iter().cloned());
@@ -240,6 +301,9 @@ pub fn build(s: &Structured, ctx: &Context<'_>, opt: &Options) -> R<Translated> 
         vs_pad,
         ..Reflection::default()
     };
+    if let Some(vx) = &vx {
+        r.entries = variant::vertex::fields(vx);
+    }
     r.raster = facts::raster(shader, &plan, usage.discard, &r.bindings);
     let mut varyings = plan.varyings.clone();
     varyings.sort_by_key(|v| v.location);

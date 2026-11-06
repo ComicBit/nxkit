@@ -38,7 +38,7 @@ pub fn vertex_inputs(p: &Plan) -> Vec<VertexInput> {
 }
 
 /// A binding the shader writes through.
-fn writes(b: &Binding) -> bool {
+pub(super) fn writes(b: &Binding) -> bool {
     b.rw == Some(true)
         || b.msl_type.contains("access::write")
         || b.msl_type.contains("access::read_write")

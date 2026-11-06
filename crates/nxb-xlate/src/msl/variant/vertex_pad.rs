@@ -2,7 +2,8 @@
 //!
 //! Metal links a pixel shader only when every user input is a vertex output. Maxwell reads a default of
 //! `(0, 0, 0, 1)` for an attribute the previous stage did not write. The pad gives the vertex shader such outputs with
-//! the type and the interpolation the pixel shader declares and the default value.
+//! the type the pixel shader declares and the default value. The interpolation qualifier is an attribute of the
+//! pixel shader input only, a vertex output cannot carry it.
 
 use super::super::StageInputs;
 use super::super::io::Plan;
@@ -15,20 +16,13 @@ pub struct Pad {
     pub location: u32,
     /// The MSL type of the member.
     pub ty: String,
-    /// The interpolation qualifier of the pixel shader input, or empty.
-    pub interpolation: String,
 }
 
 impl Pad {
     /// The member declaration in `main0_out`.
     pub fn member(&self) -> String {
-        let q = if self.interpolation.is_empty() {
-            String::new()
-        } else {
-            format!(", {}", self.interpolation)
-        };
         format!(
-            "{} dm_pad{l} [[user(locn{l}{q})]];",
+            "{} dm_pad{l} [[user(locn{l})]];",
             self.ty,
             l = self.location
         )
@@ -46,22 +40,20 @@ impl Pad {
 }
 
 /// Add the pad members to the plan and return the padded locations in order. The first partner that reads a
-/// location decides its type and interpolation.
+/// location decides its type.
 pub fn apply(plan: &mut Plan, partners: &[StageInputs]) -> Vec<u32> {
-    let mut want: BTreeMap<u32, (&str, &str)> = BTreeMap::new();
+    let mut want: BTreeMap<u32, &str> = BTreeMap::new();
     for v in partners.iter().flat_map(|p| p.varyings.iter()) {
-        want.entry(v.location)
-            .or_insert((v.msl_type.as_str(), v.interpolation.as_str()));
+        want.entry(v.location).or_insert(v.msl_type.as_str());
     }
     let mut miss = Vec::new();
-    for (l, (ty, interp)) in want {
+    for (l, ty) in want {
         if plan.user_locs.contains(&l) {
             continue;
         }
         let pad = Pad {
             location: l,
             ty: ty.to_string(),
-            interpolation: interp.to_string(),
         };
         plan.out_members.push(pad.member());
         plan.pads.push(pad);
@@ -98,8 +90,8 @@ mod tests {
         let a = partner(&[(1, "float4", ""), (3, "float4", "flat")]);
         let b = partner(&[(3, "float4", ""), (2, "int4", "flat")]);
         assert_eq!(apply(&mut p, &[a, b]), vec![2, 3]);
-        assert_eq!(p.out_members[1], "int4 dm_pad2 [[user(locn2, flat)]];");
-        assert_eq!(p.out_members[2], "float4 dm_pad3 [[user(locn3, flat)]];");
+        assert_eq!(p.out_members[1], "int4 dm_pad2 [[user(locn2)]];");
+        assert_eq!(p.out_members[2], "float4 dm_pad3 [[user(locn3)]];");
         assert_eq!(p.pads[0].init(), "out.dm_pad2 = int4(0);");
         assert_eq!(
             p.pads[1].init(),

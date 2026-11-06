@@ -88,6 +88,12 @@ pub struct Em<'a> {
     pub notes: Vec<String>,
     /// The prelude helper functions the body calls (see `prelude`).
     pub helpers: BTreeSet<&'static str>,
+    /// The lines a vertex entry writes at each return of the main function instead of the default tail.
+    pub exit: Option<Vec<String>>,
+    /// The stores of integer values to user outputs of a vertex shader: function, location and component.
+    pub layer_src: Vec<(usize, i32, i32)>,
+    /// The type of the last operand `get` converted, before the conversion.
+    pub(super) last_src: Option<AggType>,
 }
 
 impl<'a> Em<'a> {
@@ -120,6 +126,9 @@ impl<'a> Em<'a> {
             drv: DrvReads::default(),
             notes: Vec::new(),
             helpers: BTreeSet::new(),
+            exit: None,
+            layer_src: Vec::new(),
+            last_src: None,
         }
     }
 
@@ -174,12 +183,19 @@ impl<'a> Em<'a> {
     pub(super) fn get(&mut self, ty: AggType, a: A) -> R<Val> {
         if let Kind::Operand { ty: ot, value, .. } = self.info.ast.kind(a) {
             match ot {
-                OperandType::Constant => return Ok(Val::new(literal(ty, *value), ty)),
-                OperandType::Undefined => return Ok(Val::new(literal(ty, 0), ty)),
+                OperandType::Constant => {
+                    self.last_src = None;
+                    return Ok(Val::new(literal(ty, *value), ty));
+                }
+                OperandType::Undefined => {
+                    self.last_src = None;
+                    return Ok(Val::new(literal(ty, 0), ty));
+                }
                 _ => {}
             }
         }
         let v = self.eval(a)?;
+        self.last_src = Some(v.ty);
         Ok(self.as_type(v, ty))
     }
 

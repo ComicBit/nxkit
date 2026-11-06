@@ -162,6 +162,38 @@ impl V {
         self.io(StorageKind::Output, IoVariable::UserDefined, loc);
     }
 
+    /// A storage buffer the vertex shader writes `v` to.
+    pub(super) fn store_buffer(&mut self, v: A) {
+        use crate::codegen::props::{BufferDef, Field};
+        use crate::driver::BufferInfo;
+        let ty = AggType(AggType::U32.0 | AggType::ARRAY.0);
+        self.s.props.properties.storage_buffers.push(BufferDef {
+            layout: 1,
+            set: 0,
+            binding: 0,
+            name: "fp_s0".into(),
+            fields: vec![Field {
+                ty,
+                array_length: 0,
+                name: "data".into(),
+            }],
+        });
+        self.s.program.sbufs.push(BufferInfo {
+            binding: 0,
+            slot: 0,
+            cb_slot: 0,
+            cb_offset: i64::from(crate::msl::abi::C0_SSBO_VS / 4),
+            flags: 1,
+        });
+        let zero = self.k(0);
+        let op = self.op(
+            Inst::Store,
+            StorageKind::StorageBuffer,
+            vec![zero, zero, zero, v],
+        );
+        self.put(op);
+    }
+
     pub(super) fn translate_with(&self, partners: &[StageInputs]) -> Translated {
         let ctx = Context {
             chain: "V",
@@ -206,7 +238,11 @@ pub(super) fn simple() -> V {
     b.out(1);
     let x = b.attr(0, 0, F32);
     let one = b.k(ONE);
-    let add = b.op(Inst::Add, StorageKind::None, vec![x, one]);
+    let add = b.op(
+        Inst(Inst::Add.0 | Inst::FP32),
+        StorageKind::None,
+        vec![x, one],
+    );
     let y = b.def(F32, add);
     b.store(IoVariable::Position, None, 0, y);
     b.store(IoVariable::UserDefined, Some(1), 2, y);
