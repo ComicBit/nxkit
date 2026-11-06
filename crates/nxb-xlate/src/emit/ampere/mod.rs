@@ -85,6 +85,7 @@ pub fn dispatch(ctx: &mut EmitterContext<'_, '_>, e: AEmit) -> Result<(), String
         AAld => mem::ald(ctx),
         AAst => mem::ast(ctx),
         AIsberd => mem::isberd(ctx),
+        AStageOut => mem::stage_out(ctx),
         ALepc => mem::lepc(ctx),
         ALdg => mem::ldg(ctx),
         AStg => mem::stg(ctx),
