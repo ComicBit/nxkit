@@ -99,7 +99,9 @@ The raw path is not byte-identical to Apple's output. It does not use `air-opt` 
 
 - `air-bc` splits the module into one module for each entry point and prunes the function constants.
 - The own optimizer in `air-bc` does `mem2reg`, removal of trivial phi nodes, block-local common subexpression removal and removal of dead code.
+  `mem2reg` also removes the loads and stores of a promoted variable in blocks that no path reaches. Such a load reads `undef`.
 - `air-front` writes the bitcode and the `MTLB` container itself. The call is `build_raw`. The commands `nxb airc raw`, `rawcmp` and `rawcheck` use it.
+- `airc rawcheck` writes one JSON line for each input. A built library has `lib_sha256`. A reject or a failed build has `error` with the reason.
 - The raw libraries are larger than Apple's libraries (1.33 times on 40 samples, measured).
 
 **Default since 0.4.0.** The raw path is on for each Mac shader that the front end accepts. Before, it was on only for shaders on a raw allow list.

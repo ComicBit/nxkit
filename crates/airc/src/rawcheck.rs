@@ -1,6 +1,7 @@
 //! `airc rawcheck`: the raw container path (no Apple tool in the build) over a list, `-j` threads in process:
 //! library size, build time per input, and with `--validate` Apple's `air-validate` on each library (a check, not a
-//! build step). One JSON line per input on stdout, a summary on stderr. `--ref-store DIR` adds the size of Apple's
+//! build step). One JSON line per input on stdout (`lib_sha256` for a built library, `error` with the reason for a
+//! reject or a failed build), a summary on stderr. `--ref-store DIR` adds the size of Apple's
 //! library for the same source (`lib_size_ref` is not stored, so the reference `ref.air` size is reported instead).
 
 use std::io::Write;
@@ -72,8 +73,13 @@ pub fn run(opts: &Opts) -> i32 {
                     Err(Ok(_)) => ("front", 0, None),
                     Err(Err(_)) => ("raw", 0, None),
                 };
+                let error = match &r {
+                    Err(Ok(rej)) => format!(", \"error\": \"{}\"", json_escape(&rej.0)),
+                    Err(Err(e)) => format!(", \"error\": \"{}\"", json_escape(e)),
+                    Ok(lib) => format!(", \"lib_sha256\": \"{}\"", crate::sha256::hex(lib)),
+                };
                 let line = format!(
-                    "{{\"path\": \"{}\", \"source_sha256\": \"{sha}\", \"stage\": \"{stage}\", \"size\": {size}, \"validates\": {}, \"ms\": {ms:.2}}}\n",
+                    "{{\"path\": \"{}\", \"source_sha256\": \"{sha}\", \"stage\": \"{stage}\", \"size\": {size}, \"validates\": {}, \"ms\": {ms:.2}{error}}}\n",
                     input.display(),
                     valid.map(|v| v.to_string()).unwrap_or_else(|| "null".into())
                 );
@@ -114,4 +120,26 @@ pub fn run(opts: &Opts) -> i32 {
         );
     }
     0
+}
+
+/// `s` as the body of a JSON string.
+fn json_escape(s: &str) -> String {
+    let mut o = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '"' => o.push_str("\\\""),
+            '\\' => o.push_str("\\\\"),
+            c if (c as u32) < 0x20 => o.push_str(&format!("\\u{:04x}", c as u32)),
+            c => o.push(c),
+        }
+    }
+    o
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn json_escape_quotes_backslashes_and_controls() {
+        assert_eq!(super::json_escape("a\"b\\c\nd"), "a\\\"b\\\\c\\u000ad");
+    }
 }
