@@ -8,6 +8,7 @@ use crate::emit::mem::memory::{emit_load_constant, extract_small_int, get_bit_of
 use crate::ir::Opd;
 use crate::ir::ops::{FALSE, TRUE, regtype};
 use crate::maxwell::ampere::AmpOp;
+use crate::maxwell::ampere_table::reads_constant_bank;
 use crate::maxwell::enums::*;
 
 fn c(ctx: &mut Ctx, v: i32) -> Opd {
@@ -85,44 +86,100 @@ pub(super) fn uldc(ctx: &mut Ctx) -> R {
     }
     if x.opcode() == 0xabb {
         let idx = ctx.ir.register(x.bits(24, 30), regtype::UNIFORM);
+        let slot = c(ctx, x.bits(54, 59));
         load_constant(
             ctx,
             &x,
-            x.bits(54, 59),
+            slot,
             idx,
             x.signed_field(38, 54) as i32,
             true,
+            None,
         )
     } else {
         let (bank, offset) = map_c0(ctx, x.bits(54, 59), x.signed_field(38, 54) as i32);
+        let slot = c(ctx, bank);
         let z = c(ctx, 0);
-        load_constant(ctx, &x, bank, z, offset, true)
+        load_constant(ctx, &x, slot, z, offset, true, None)
     }
 }
 
 pub(super) fn ldc(ctx: &mut Ctx) -> R {
     let x = x(ctx);
-    if x.bit(91) || x.bits(78, 80) != 0 {
-        return Err(fail(ctx, "LDC with a bindless bank or an address mode"));
+    let mode = x.bits(78, 80);
+    if x.bit(91) || mode == 1 {
+        return Err(fail(
+            ctx,
+            "LDC with a bindless bank or the .IL address mode",
+        ));
     }
-    if x.ra() == RZ {
-        let (bank, offset) = map_c0(ctx, x.bits(54, 59), x.signed_field(38, 54) as i32);
-        let z = c(ctx, 0);
-        load_constant(ctx, &x, bank, z, offset, false)
-    } else {
-        let idx = gpr(ctx, x.ra());
-        load_constant(
+    if mode != 0 {
+        // .IS and .ISL: the bank is the instruction's plus Ra's upper half, the offset Ra's lower half plus the instruction's
+        let ra = gpr(ctx, x.ra());
+        let bank = c(ctx, x.bits(54, 59));
+        let sh = c(ctx, 16);
+        let hi = ctx.shift_right_u32(ra, sh);
+        let slot = ctx.i_add(bank, hi);
+        let m = c(ctx, 0xffff);
+        let idx = ctx.bitwise_and(ra, m);
+        let banks = runtime_banks(ctx, x.bits(54, 59));
+        return load_constant(
             ctx,
             &x,
-            x.bits(54, 59),
+            slot,
             idx,
             x.signed_field(38, 54) as i32,
             false,
+            Some(banks),
+        );
+    }
+    if x.ra() == RZ {
+        let (bank, offset) = map_c0(ctx, x.bits(54, 59), x.signed_field(38, 54) as i32);
+        let slot = c(ctx, bank);
+        let z = c(ctx, 0);
+        load_constant(ctx, &x, slot, z, offset, false, None)
+    } else {
+        let idx = gpr(ctx, x.ra());
+        let slot = c(ctx, x.bits(54, 59));
+        load_constant(
+            ctx,
+            &x,
+            slot,
+            idx,
+            x.signed_field(38, 54) as i32,
+            false,
+            None,
         )
     }
 }
 
-fn load_constant(ctx: &mut Ctx, x: &AmpOp, bank: i32, index: Opd, offset: i32, uniform: bool) -> R {
+/// `ARuntimeBanks`: the banks a run-time bank of LDC .IS can be. The shader's own constant segment (c1), the
+/// instruction's bank and every bank the other constant reads name. c0 is left out.
+fn runtime_banks(ctx: &Ctx, bank: i32) -> u32 {
+    let mut banks = 1u32 << 1 | 1u32 << bank;
+    for f in &ctx.tc.program.functions {
+        for b in &f.blocks {
+            for op in &b.ops {
+                let y = AmpOp::of(op);
+                if reads_constant_bank(&y) && !y.bit(91) {
+                    let (bank, _) = map_c0(ctx, y.bits(54, 59), y.signed_field(38, 54) as i32);
+                    banks |= 1u32 << bank;
+                }
+            }
+        }
+    }
+    banks & !1u32
+}
+
+fn load_constant(
+    ctx: &mut Ctx,
+    x: &AmpOp,
+    slot: Opd,
+    index: Opd,
+    offset: i32,
+    uniform: bool,
+    banks: Option<u32>,
+) -> R {
     let size = x.bits(73, 76);
     if size > 5 {
         return Err(fail(ctx, &format!("constant load size {size}")));
@@ -140,10 +197,9 @@ fn load_constant(ctx: &mut Ctx, x: &AmpOp, bank: i32, index: Opd, offset: i32, u
     };
     let mut k = 0;
     while k < (if size == 5 { 2 } else { 1 }) && rd + k < zero {
-        let slot = c(ctx, bank);
         let kk = c(ctx, k);
         let off = ctx.i_add(word_offset, kk);
-        let mut value = emit_load_constant(ctx, slot, off)?;
+        let mut value = emit_load_constant(ctx, slot, off, banks)?;
         if size < 4 {
             let bo = get_bit_offset(ctx, addr);
             value = extract_small_int(ctx, size, bo, value);
@@ -244,7 +300,7 @@ pub(super) fn vote(ctx: &mut Ctx) -> R {
     let p = pred(ctx, &x, 87, 90, false);
     let vote = emit_vote(ctx, VoteMode(x.bits(72, 74)), p)?;
     if let Some(v) = vote {
-        set_pred(ctx, x.bits(81, 84), v, false);
+        set_pred(ctx, x.bits(81, 84), v, to_uniform);
     }
     let rd = rd_of(&x, to_uniform);
     if rd != if to_uniform { URZ } else { RZ } {

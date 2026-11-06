@@ -1,7 +1,7 @@
 //! The Ampere (sm_86) opcode table of `InstEmitAmpere.cs`: opcode to name, props and emitter id. ALU instructions are
 //! looked up by their low 9 opcode bits, the others by all 12, which is looked up first.
 
-use super::ampere::opc;
+use super::ampere::{AmpOp, opc};
 use super::names::InstName;
 use super::table::props;
 use std::sync::OnceLock;
@@ -432,6 +432,19 @@ pub fn lookup(opcode: usize) -> Option<Entry> {
 /// `HasUniformGuard`.
 pub fn has_uniform_guard(opcode: usize) -> bool {
     lookup(opcode).is_some_and(|e| e.uniform)
+}
+
+/// `ReadsConstantBank`: the instruction reads a constant buffer word with its bank in bits 54..59 (LDC, ULDC, or an ALU
+/// operation in form 3 or 5, a uniform one has neither).
+pub fn reads_constant_bank(x: &AmpOp) -> bool {
+    let op = x.opcode();
+    if matches!(op, 0xb82 | 0xab9 | 0xabb) {
+        return true;
+    }
+    let t = tables();
+    t.exact[op & 0xfff].is_none()
+        && t.alu[op & 0x1ff].is_some_and(|e| !e.uniform)
+        && matches!(x.form(), 3 | 5)
 }
 
 /// `WritesRd`.

@@ -87,7 +87,7 @@ pub(super) fn ldc(ctx: &mut EmitterContext<'_, '_>) -> Result<(), String> {
         }
         let ci = ctx.ir.const_(index);
         let offset = ctx.i_add(word_offset, ci);
-        let mut value = emit_load_constant(ctx, slot, offset)?;
+        let mut value = emit_load_constant(ctx, slot, offset, None)?;
         if is_small_int {
             let bo = get_bit_offset(ctx, addr);
             value = extract_small_int(ctx, op.ls_size().0, bo, value);
@@ -98,12 +98,13 @@ pub(super) fn ldc(ctx: &mut EmitterContext<'_, '_>) -> Result<(), String> {
     Ok(())
 }
 
-/// `EmitLoadConstant`: the accessor reports no bound constant buffers (`QueryConstantBufferUse` is 0), so a run-time slot
-/// selects nothing.
+/// `EmitLoadConstant`: `banks` are the banks a run-time slot can be (Ampere's LDC .IS). The accessor reports no bound
+/// constant buffers (`QueryConstantBufferUse` is 0), so without `banks` a run-time slot selects nothing.
 pub(crate) fn emit_load_constant(
     ctx: &mut EmitterContext<'_, '_>,
     slot: Opd,
     offset: Opd,
+    banks: Option<u32>,
 ) -> Result<Opd, String> {
     let c2 = ctx.ir.const_(2);
     let vec_index = ctx.shift_right_u32(offset, c2);
@@ -121,7 +122,25 @@ pub(crate) fn emit_load_constant(
             elem_index,
         ))
     } else {
-        Ok(ctx.ir.const_(0))
+        let mut value = ctx.ir.const_(0);
+        let mut mask = banks.unwrap_or(0);
+        while mask != 0 {
+            let cb_index = mask.trailing_zeros() as i32;
+            let binding = ctx.rm.get_constant_buffer_binding(ctx.acc, cb_index)?;
+            let ci = ctx.ir.const_(cb_index);
+            let is_current = ctx.i_compare_equal(slot, ci);
+            let z = ctx.ir.const_(0);
+            let current = ctx.load_b3(
+                StorageKind::ConstantBuffer,
+                binding,
+                z,
+                vec_index,
+                elem_index,
+            );
+            value = ctx.conditional_select(is_current, current, value);
+            mask &= !(1u32 << cb_index);
+        }
+        Ok(value)
     }
 }
 
