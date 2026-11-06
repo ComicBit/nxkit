@@ -147,7 +147,8 @@ pub fn plan(a: &Args) -> Result<Build, String> {
     let engine = a
         .engine
         .clone()
-        .ok_or("--engine <engine folder> is required (profiles under dm/games)")?;
+        .or_else(|| std::env::var_os("NXB_ENGINE").map(PathBuf::from))
+        .ok_or("--engine <engine folder> (or NXB_ENGINE) is required (profiles under dm/games)")?;
     let work = a
         .work_dir
         .clone()
