@@ -6,6 +6,22 @@ use crate::ir::inst::Inst;
 use crate::ir::ops::Opd;
 use crate::maxwell::enums::{BoolOp, FComp, IDstFmt, ISrcDstFmt, VectorSelect};
 
+/// `FlushDenormal`: a denormal operand of a `.FTZ` comparison compares as zero. A constant is decided here.
+pub fn flush_denormal(ctx: &mut EmitterContext<'_, '_>, v: Opd) -> Opd {
+    if ctx.ir.ty(v) == crate::ir::ops::OperandType::Constant {
+        return if ctx.ir.as_float(v).is_subnormal() {
+            ctx.ir.const_f(0.0)
+        } else {
+            v
+        };
+    }
+    let abs = ctx.fp_absolute(v);
+    let min = ctx.ir.const_f(f32::MIN_POSITIVE);
+    let less = ctx.fp_compare_less(abs, min);
+    let zero = ctx.ir.const_f(0.0);
+    ctx.conditional_select(less, zero, v)
+}
+
 /// `GetIntMin(IDstFmt)`.
 pub fn get_int_min_d(t: IDstFmt) -> Result<i64, String> {
     Ok(match t {
