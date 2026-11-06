@@ -107,8 +107,8 @@ expect: reject gnu-attr:noinline
 static __attribute__((noinline)) void f() { }
 
 === param-attr
-expect: reject param-attr:thread_index_in_simdgroup
-kernel void k(uint i [[thread_index_in_simdgroup]]) { }
+expect: reject param-attr:threads_per_simdgroup
+kernel void k(uint i [[threads_per_simdgroup]]) { }
 
 === fn-prototype
 expect: reject fn-prototype
@@ -705,6 +705,31 @@ float f(float v) { return extract_bits(v, 0u, 1u); }
 expect: reject insert_bits-form
 uint f(uint v, int w) { return insert_bits(v, w, 0u, 1u); }
 
+=== simd-builtins
+expect: accept
+struct I { float4 u [[user(locn0)]]; bool ff [[front_facing]]; };
+kernel void k(device uint* p [[buffer(0)]], uint l [[thread_index_in_simdgroup]])
+{
+    uint h = mulhi(p[0], p[1]);
+    int2 hi = mulhi(int2(1, 2), int2(3, 4));
+    float f = simd_shuffle(as_type<float>(h), ushort(l));
+    int2 si = simd_shuffle(hi, ushort(l ^ 1u));
+    bool b = simd_any(f > 0.0) && simd_all(si.x > 0);
+    p[2] = b ? h : 0u;
+}
+
+=== mulhi-form
+expect: reject mulhi-form
+float f(float a) { return mulhi(a, a); }
+
+=== simd_shuffle-form
+expect: reject simd_shuffle-form
+float f(float a) { return simd_shuffle(a, a); }
+
+=== simd-vote-form
+expect: reject simd-vote-form
+bool f(float a) { return simd_any(a); }
+
 === call-unknown-builtin
 expect: reject call:atomic_fetch_add_explicit
 void f(device uint* p) { atomic_fetch_add_explicit(p, 1u, 0); }
@@ -729,7 +754,7 @@ float4 f(texture2d<float> t, texture2d_array<float> ta, texturecube<float> tc, d
     float4 r = t.read(px) + t.read(px, 0u);
     w.write(a, px);
     uint wd = t.get_width() + t.get_height(0u) + ta.get_array_size() + t.get_num_mip_levels();
-    float lod = t.calculate_clamped_lod(s, uv) + t.calculate_unclamped_lod(s, uv);
+    float lod = t.calculate_clamped_lod(s, uv) + t.calculate_unclamped_lod(s, uv) + ta.calculate_clamped_lod(s, uv);
     return a + b + g + r + c;
 }
 

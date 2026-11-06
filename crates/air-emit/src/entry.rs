@@ -307,6 +307,7 @@ const BUILTINS: &[(&str, &str)] = &[
     ),
     ("point_coord", "air.point_coord"),
     ("sample_id", "air.sample_id"),
+    ("thread_index_in_simdgroup", "air.thread_index_in_simdgroup"),
 ];
 
 /// Emits an entry point, returns its definition text.
@@ -416,6 +417,8 @@ pub fn emit_entry(cx: &mut ModCx, f: &Func) -> R<String> {
                         } else if let Some(u) = attr_arg(fa, "user") {
                             md.extend([s("air.fragment_input"), s(&format!("user({u})"))]);
                             md.extend(interp(fa));
+                        } else if attr(fa, "front_facing").is_some() {
+                            md.push(s("air.front_facing"));
                         } else {
                             return Err(Error::unsupported("stage_in:fragment-field"));
                         }

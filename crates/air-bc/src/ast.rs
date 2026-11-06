@@ -95,6 +95,8 @@ pub enum Op {
     Bin(String, Vec<String>, Ty, Val, Val),
     /// fneg with flags
     FNeg(Vec<String>, Ty, Val),
+    /// freeze T v
+    Freeze(Ty, Val),
     /// icmp/fcmp: is_float, flags, predicate, type, a, b
     Cmp(bool, Vec<String>, String, Ty, Val, Val),
     /// select flags, cond, a, b

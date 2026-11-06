@@ -94,3 +94,17 @@ fn the_fp_contract_pragma_stops_fmuladd() {
     );
     assert!(!file.contains("fmuladd"), "{file}");
 }
+
+#[test]
+fn user_call_sites_and_derivatives_have_separate_attribute_groups() {
+    let ir = emit(
+        "struct O { float4 c0 [[color(0)]]; };\nstruct I { float4 u [[user(locn0)]]; };\n\
+         float d(float x) { return dfdx(x); }\n\
+         fragment O main0(I in [[stage_in]]) { O o = {}; o.c0 = float4(d(in.u.x), d(in.u.y), 0.0, 1.0); return o; }\n",
+    );
+    assert!(ir.contains("@_ZL1df(float noundef %v8) #11"), "{ir}");
+    assert_eq!(ir.matches("attributes #11 ").count(), 1, "{ir}");
+    assert!(ir.contains("attributes #11 = { convergent nobuiltin \"no-builtins\" }"));
+    assert!(ir.contains("declare float @air.dfdx.f32(float) #12"));
+    assert!(ir.contains("attributes #12 = { convergent nounwind willreturn }"));
+}
