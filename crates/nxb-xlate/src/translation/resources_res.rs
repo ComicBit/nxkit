@@ -243,6 +243,19 @@ impl ResourceReservations {
         offset
     }
 
+    /// The output offsets in the order of `Offsets` (a .NET `Dictionary` without removals enumerates in insertion order,
+    /// and the offsets are assigned in increasing order).
+    pub fn output_offsets(&self) -> Vec<(IoDefinition, i32)> {
+        let mut v: Vec<(IoDefinition, i32)> = self
+            .offsets
+            .iter()
+            .filter(|(d, _)| d.storage_kind == StorageKind::Output)
+            .map(|(d, o)| (*d, *o))
+            .collect();
+        v.sort_by_key(|(_, o)| *o);
+        v
+    }
+
     /// `IsVectorOrArrayVariable`.
     pub fn is_vector_or_array_variable(v: IoVariable) -> bool {
         v == IoVariable::ClipDistance || v == IoVariable::Position

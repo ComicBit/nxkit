@@ -63,6 +63,7 @@ fn xform_vs_dump() {
                     stage,
                     used_features: &mut features,
                     hfm: &mut hfm,
+                    definitions: None,
                 };
                 run_pass(&mut ir, &mut cfg.blocks, &mut env, &mut ctx)
             },

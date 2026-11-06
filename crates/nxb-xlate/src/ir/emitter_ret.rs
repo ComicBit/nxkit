@@ -1,5 +1,5 @@
 //! `EmitterContext.EmitStart` and `PrepareForReturn`, for the paths the job accessor can reach (graphics without transform
-//! feedback emulation, geometry or vertex-as-compute: those fail closed).
+//! feedback emulation). The geometry and vertex-as-compute parts are in `emitter_geom.rs`.
 
 use super::emitter::EmitterContext;
 use super::inst::{IoVariable, StorageKind};
@@ -22,7 +22,7 @@ impl EmitterContext<'_, '_> {
             self.store_io(StorageKind::Output, IoVariable::PointSize, None, ps);
         }
         if self.vertex_as_compute {
-            return Err("unported: vertex as compute".into());
+            self.emit_start_vertex_as_compute()?;
         }
         Ok(())
     }
@@ -51,12 +51,12 @@ impl EmitterContext<'_, '_> {
         {
             self.prepare_for_vertex_return()?;
         } else if stage == Stage::Geometry {
-            return Err("unported: geometry return".into());
+            self.geometry_return()?;
         } else if stage == Stage::Fragment {
             self.fragment_return()?;
         }
         if self.vertex_as_compute {
-            return Err("unported: vertex as compute return".into());
+            self.vertex_as_compute_return()?;
         }
         Ok(true)
     }

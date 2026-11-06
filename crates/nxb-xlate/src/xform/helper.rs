@@ -246,4 +246,9 @@ impl<'a> B<'a> {
     pub(crate) fn push(&mut self, n: NodeId) {
         self.ops.push(n);
     }
+
+    /// The operations appended so far.
+    pub(crate) fn take(self) -> Vec<NodeId> {
+        self.ops
+    }
 }

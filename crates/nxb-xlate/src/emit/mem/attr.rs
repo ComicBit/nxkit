@@ -6,8 +6,11 @@ use crate::emit::attrmap;
 use crate::ir::emitter::EmitterContext;
 use crate::ir::inst::{IoVariable, StorageKind};
 use crate::ir::ops::{Opd, regtype};
-use crate::maxwell::enums::IpaOp;
-use crate::maxwell::insts::{InstAl2p, InstAld, InstAst, InstIpa, InstIsberd};
+use crate::maxwell::enums::{IpaOp, OutType};
+use crate::maxwell::insts::{
+    InstAl2p, InstAld, InstAst, InstIpa, InstIsberd, InstOutC, InstOutI, InstOutR,
+};
+use crate::maxwell::names::Emit;
 use crate::translation::props::support_buffer;
 
 const TESS_COORD_X: i32 = 0x2f0;
@@ -393,7 +396,29 @@ pub(super) fn isberd(ctx: &mut EmitterContext<'_, '_>) -> Result<(), String> {
     Ok(())
 }
 
-/// OUT (geometry shaders): `EmitVertex` and `EndPrimitive` are not part of the supported paths.
-pub(super) fn out(_ctx: &mut EmitterContext<'_, '_>) -> Result<(), String> {
-    Err("unported: OUT (geometry emit and cut)".into())
+/// OUT (geometry shaders): `EmitVertex` and `EndPrimitive`.
+pub(super) fn out(ctx: &mut EmitterContext<'_, '_>) -> Result<(), String> {
+    let raw = ctx.curr_op.raw;
+    let out_type = match ctx.curr_op.emit {
+        Some(Emit::OutR) => InstOutR(raw).out_type(),
+        Some(Emit::OutI) => InstOutI(raw).out_type(),
+        _ => InstOutC(raw).out_type(),
+    };
+    let emit = out_type.0 & OutType::Emit.0 != 0;
+    let cut = out_type.0 & OutType::Cut.0 != 0;
+    if !(emit || cut) {
+        ctx.acc.log("Invalid OUT encoding.");
+    }
+    if emit {
+        if ctx.tc.definitions.last_in_vertex_pipeline {
+            // The position is only rewritten for the viewport transform disable and the depth mode, which fail in
+            // `prepare_for_vertex_return`, so there is no saved position to restore after the vertex.
+            ctx.prepare_for_vertex_return()?;
+        }
+        ctx.emit_vertex()?;
+    }
+    if cut {
+        ctx.end_primitive()?;
+    }
+    Ok(())
 }
