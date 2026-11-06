@@ -150,9 +150,6 @@ fn kernel(job: &Job, code: &[u8], ctx: &Context<'_>, opt: &Options, t: i32) -> R
 
 /// All libraries of a geometry shader: `_b`, `_bg0` to `_bg4` and `_bgv`.
 pub fn translate(job: &Job, code: &[u8], ctx: &Context<'_>, opt: &Options) -> R<Translated> {
-    if job.tf {
-        return Err("unported: transform feedback of a geometry shader".into());
-    }
     let mut libs = Vec::new();
     for t in 0..INPUT_TOPOLOGIES {
         libs.push(kernel(job, code, ctx, opt, t)?);

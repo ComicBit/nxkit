@@ -52,7 +52,10 @@ The emitter produces everything a vertex shader needs from one trace. The code i
 
 - The vertex outputs are padded to the inputs of every paired pixel shader. A varying the pixel shader reads and the vertex shader does not write gets a default. The locations are in `vs_pad`.
 - An attribute that the shader only uses as an integer is declared `uint`. The emitter probes this and builds the shader again.
-- The entries `main0_z`, `main0_discard`, `main0_l`, `main0_lz` and `main0_gs` are further entries of the `_b` library. `entries` and `msl_entry_kind` in `_b.json` name them.
+- The entries `main0_z`, `main0_discard`, `main0_l`, `main0_lz`, `main0_gs` and `main0_tf` are further entries of the `_b` library. `entries` and `msl_entry_kind` in `_b.json` name them.
+- `main0_tf` is the transform feedback capture of a vertex job that has `tf`. It runs the vertex function and stores the captured user outputs to the feedback buffers. It returns nothing. `entry_tf` in `_b.json` names it and `tf_strides` has the bytes per vertex of each of the four buffers (0 for a buffer without capture).
+  The buffer `b` is bound at slot 8 + b as `dm_tf<b>`. The state `dm_tf_capture` is at slot 14. Vertex `v` of instance `i` writes record `(i - base_instance) * count + v - first`, and only if the record is below `dm_tf.args.x`.
+  An output that the shader does not write is stored as 0. Component w of such an output is stored as 1.0. `_bv` and `_bp` have no `main0_tf`.
 - `_bv` is the library with shadow inputs for integer attributes. The shadows sit at attribute indices 16 to 30. The field `vin` in `_b.json` lists them.
 - `_bp` is the library that pulls the vertices from a buffer with `dm_fetch`. The field `pull` in `_b.json` names the entries and the buffer slot 16.
 - `raster` has `pos_attr`, `pos_w`, `uv_from_attr`, `uv_affine` and `screen`. They come from the stores of the main function. A shader with a branch, a loop or a call has no raster facts.
@@ -108,13 +111,14 @@ The own front end and the Apple tools compile the MSL as before.
 A geometry shader runs as a compute kernel. One job of stage `gs` gives the libraries `_b` (a copy of `_bg0`), `_bg0` to `_bg4` and `_bgv`. Each has its own `.json`.
 The kernels `_bg0` to `_bg4` are one per input topology. They write the output vertices and the index buffer. The library `_bgv` draws that output.
 The `.json` of a kernel has the member `geometry` (`vertices`, `invocations`, `output`, `index_stride`, `stride` in words). The `.json` of `_bgv` has `geometry_reader`, `geometry_output` and `entry_z`.
+A geometry job with `tf` gives `_bgv` the entry `main0_tf` like a vertex job, with `entry_tf` and `tf_strides` in its `.json`. The capture takes its vertex from `dm_tf.order[record]`, so the records follow the order of the kernel output.
 
 A task or mesh shader is a job of stage `cs` with the member `mesh_stage`. The code has no SPH. The job carries `stage_memory`, `shared` and `local` as the engine lays them out,
 and the translator refuses a job whose layout differs. The body of the shader is one function. The wrapper is a Metal `[[object]]` function for `ts` and a `[[mesh]]` function for `ms`.
 The `.json` has `stage` `ts` or `ms`, `msl_entry_kind` null and `mesh_stage` (`kind`, `threads`, `payload`, `task`). A mesh function also has `entry_z`.
 The translator fails with `mesh stage failed` when the shader uses shared memory of its own or the sizes do not fit Metal.
 
-Tessellation, transform feedback and vertex as compute are not ported. Each gives `Failure` with the reason `not ported` and a detail that names the stage.
+Tessellation and vertex as compute are not ported. Each gives `Failure` with the reason `not ported` and a detail that names the stage.
 The lean geometry kernels `_bl0`, `_bl1` and `_bl3` are not emitted.
 
 ## Open points

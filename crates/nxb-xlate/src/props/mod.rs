@@ -61,7 +61,8 @@ impl Definitions {
         v == IoVariable::FragmentOutputColor
     }
 
-    /// `HasPerLocationInputOrOutputComponent`: only with transform feedback, which the back end does not port.
+    /// `HasPerLocationInputOrOutputComponent`: only with transform feedback in the definitions. The job accessor never
+    /// enables it. A capture is the entry `main0_tf` of the MSL back end, which reads the finished outputs.
     pub fn has_per_location_input_or_output_component(
         &self,
         v: IoVariable,
@@ -69,7 +70,7 @@ impl Definitions {
         _component: i32,
         is_output: bool,
     ) -> bool {
-        // fail closed: `msl::translate` refuses transform feedback before this can matter
+        // `msl::library::build` refuses definitions with transform feedback before this can matter
         let _ = (v, is_output);
         false
     }

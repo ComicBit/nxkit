@@ -2,7 +2,7 @@
 //!
 //! The base library is built by `library::build`. Its pieces are the hooks for the variants:
 //! `entry::entry_text` takes the name and the form of the function, so a variant writes another entry (`main0_z`,
-//! `main0_gs`, `main0_discard`, `main0_l`, `main0_lz`, `main0_u`, `main0_m`) around the same helper functions. The
+//! `main0_gs`, `main0_tf`, `main0_discard`, `main0_l`, `main0_lz`, `main0_u`, `main0_m`) around the same helper functions. The
 //! vertex pulling (`_bp`), vertex input (`_bv`), fetch (`_bf`) and side (`_bx`) libraries are separate sources that
 //! the same emitter writes with other options. The vertex pad takes `Context::partners`.
 //!
@@ -15,6 +15,9 @@ pub mod pixel;
 pub mod pixel_derived;
 pub mod pull;
 pub mod side;
+pub mod tf;
+#[cfg(test)]
+mod tf_tests;
 pub mod vertex;
 pub mod vertex_pad;
 #[cfg(test)]

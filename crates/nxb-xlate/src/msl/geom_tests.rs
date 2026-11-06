@@ -140,20 +140,6 @@ fn a_bad_header_fails_the_translation() {
 }
 
 #[test]
-fn transform_feedback_is_not_ported() {
-    let e = run(
-        &job(r#", "tf": [null, null, null, null]"#),
-        &code(0, &[out_i(3)]),
-    )
-    .expect_err("tf");
-    assert_eq!(e.reason, "not ported");
-    assert_eq!(
-        e.detail,
-        "unported: transform feedback of a geometry shader"
-    );
-}
-
-#[test]
 fn tessellation_is_not_ported() {
     for stage in ["hs", "ds"] {
         let json = format!(r#"[{{"key": "t", "stage": "{stage}"}}]"#);
@@ -199,18 +185,116 @@ fn metal_compiles_the_geometry_libraries() {
     }
 }
 
+const TF: &str = r#", "tf": [{"stride": 16, "outputs": [[1, 4]]}, [], [], []]"#;
+
+fn tf_reader() -> Translated {
+    run(&job(TF), &code(0, &[out_i(3)])).expect("translate")
+}
+
 #[test]
-fn transform_feedback_of_a_vertex_shader_is_not_ported() {
-    let j = parse_jobs(r#"[{"key": "v", "stage": "vs", "tf": [null, null, null, null]}]"#)
-        .expect("job")
-        .remove(0);
-    let mut c: Vec<u8> = [1u32 << 10; 1]
+fn only_the_reader_captures_a_geometry_job() {
+    let t = tf_reader();
+    for l in &t.libraries {
+        assert_eq!(
+            l.msl.contains("main0_tf"),
+            l.suffix == "_bgv",
+            "{}",
+            l.suffix
+        );
+    }
+}
+
+#[test]
+fn the_reader_capture_takes_its_vertex_from_the_order_buffer() {
+    let t = tf_reader();
+    let m = &t.libraries.last().expect("reader").msl;
+    assert!(m.contains("vertex void main0_tf("), "{m}");
+    assert!(m.contains("device uint* dm_tf0 [[buffer(8)]]"), "{m}");
+    assert!(
+        m.contains("constant dm_tf_capture& dm_tf [[buffer(14)]]"),
+        "{m}"
+    );
+    assert!(m.contains("if (dm_linear < dm_tf.args.x)"), "{m}");
+    assert!(
+        m.contains("gl_VertexIndex = dm_tf.order[dm_linear];"),
+        "{m}"
+    );
+    assert!(
+        m.contains("dm_tf0[dm_tf.offset[0] / 4 + dm_linear * 4 + 0] = "),
+        "{m}"
+    );
+}
+
+#[test]
+fn the_reader_reflection_has_the_capture_fields() {
+    let t = tf_reader();
+    let r = t
+        .libraries
+        .last()
+        .expect("reader")
+        .reflection
+        .as_ref()
+        .expect("reflection");
+    let e = r
+        .entries
         .iter()
-        .flat_map(|w| w.to_le_bytes())
+        .find(|(k, _)| k == "entry_tf")
+        .map(|(_, v)| v);
+    assert_eq!(e.and_then(|v| v.as_str()), Some("main0_tf"));
+    let s: Vec<i64> = extra(r, "tf_strides")
+        .and_then(|v| v.as_list())
+        .expect("strides")
+        .iter()
+        .filter_map(|v| v.as_i64())
         .collect();
-    c.resize(0x50, 0);
-    c.extend([0u64, RET, 0, 0].iter().flat_map(|w| w.to_le_bytes()));
-    let e = run(&j, &c).expect_err("tf");
-    assert_eq!(e.reason, "not ported");
-    assert_eq!(e.detail, "unported: transform feedback of a vertex shader");
+    assert_eq!(s, [16, 0, 0, 0]);
+    assert!(extra(r, "geometry_reader").is_some());
+    for l in &t.libraries[..6] {
+        let r = l.reflection.as_ref().expect("reflection");
+        assert!(extra(r, "tf_strides").is_none(), "{}", l.suffix);
+    }
+}
+
+#[test]
+fn a_geometry_job_without_a_layout_has_no_capture() {
+    let t = run(
+        &job(r#", "tf": [null, null, null, null]"#),
+        &code(0, &[out_i(3)]),
+    )
+    .expect("translate");
+    assert!(t.libraries.iter().all(|l| !l.msl.contains("main0_tf")));
+}
+
+/// The reader with its capture entry compiles. Run by hand: `cargo test -p nxb-xlate -- --ignored metal`.
+#[test]
+#[ignore]
+fn metal_compiles_the_geometry_capture() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scratch");
+    std::fs::create_dir_all(&dir).expect("scratch");
+    let t = tf_reader();
+    let l = t.libraries.last().expect("reader");
+    let src = dir.join("geomtf.metal");
+    let air = dir.join("geomtf.air");
+    std::fs::write(&src, &l.msl).expect("write");
+    let o = std::process::Command::new("xcrun")
+        .args([
+            "-sdk",
+            "macosx",
+            "metal",
+            "-c",
+            "-O1",
+            "-fpreserve-invariance",
+            "-std=metal3.0",
+        ])
+        .arg(&src)
+        .arg("-o")
+        .arg(&air)
+        .output()
+        .expect("run metal");
+    assert!(
+        o.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&o.stderr),
+        l.msl
+    );
 }

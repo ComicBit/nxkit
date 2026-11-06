@@ -66,13 +66,8 @@ fn build_with(s: &Structured, ctx: &Context<'_>, opt: &Options, ints: &[u32]) ->
         .mesh_stage
         .as_ref()
         .map_or(job.stage.as_str(), |m| m.kind.as_str());
-    if job.tf || s.props.definitions.transform_feedback_enabled {
-        let what = if job.stage == "vs" {
-            "vertex"
-        } else {
-            stage_name
-        };
-        return Err(format!("unported: transform feedback of a {what} shader"));
+    if s.props.definitions.transform_feedback_enabled {
+        return Err("unported: transform feedback layout in the shader definitions".into());
     }
     // A task or mesh shader keeps its memory in the threadgroup, so past the limit it is refused.
     let spill = if shader != Shader::Compute {
@@ -152,6 +147,10 @@ fn build_with(s: &Structured, ctx: &Context<'_>, opt: &Options, ints: &[u32]) ->
         }
         _ => None,
     };
+    let capture = match (&job.tf, shader) {
+        (Some(tf), Shader::Vertex) => Some((tf, variant::tf::body(&mut em, &plan, tf)?)),
+        _ => None,
+    };
     let lib = Lib {
         in_struct: plan.in_struct(),
         fetch: false,
@@ -161,6 +160,14 @@ fn build_with(s: &Structured, ctx: &Context<'_>, opt: &Options, ints: &[u32]) ->
             let frame = variant::vertex::Frame::default();
             entries.text = variant::vertex::entries(s, &res, &plan, vx, &frame)?;
             entries.entries = variant::vertex::fields(vx);
+            if let Some((tf, body)) = &capture {
+                let reader = s.geometry_reader;
+                entries
+                    .text
+                    .push_str(&variant::tf::entry(s, &res, &plan, body, tf, reader)?);
+                entries.entries.push(variant::tf::entry_field());
+                entries.extra.push(variant::tf::strides_field(tf));
+            }
         }
         (None, Shader::Fragment) => {
             let derived = variant::pixel_derived::derived(&s.info, &plan, opt.dual_source);
