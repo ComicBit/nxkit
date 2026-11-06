@@ -249,6 +249,14 @@ fn gaps_metal_compiles_the_samples() {
         ("cs_first_store", first_store_sample(false)),
         ("cs_hmma", hmma_sample()),
         ("cs_wide", super::wide_tests::wide_sample(&[0, 1, 2, 5], 0)),
+        (
+            "ps_pool",
+            super::pool_tests::pool_sample(1 << 20, 0, 0x4000_0000, false, false),
+        ),
+        (
+            "ps_pool_sep",
+            super::pool_tests::pool_sample(64, 7, 0x2a, true, false),
+        ),
     ];
     for (n, b) in samples {
         let src = dir.join(format!("gaps_{n}.metal"));

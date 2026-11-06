@@ -7,7 +7,8 @@
 use super::abi::{self, Kind};
 use super::buffers;
 use super::emit::R;
-use super::handles::decode;
+use super::handles::{Decoded, decode};
+use super::pool;
 use super::refl::Binding;
 use super::usage::Usage;
 use crate::codegen::props::{BufferDef, Props, TextureDef};
@@ -43,6 +44,8 @@ pub struct Tx {
     pub sampler: Option<String>,
     /// The twin sampler for border colours and its bit, on the sampler of a plain sample.
     pub twin: Option<(String, u32)>,
+    /// The member is a pointer to a pool table (see `pool`).
+    pub pool: bool,
 }
 
 /// The resources of a program as the argument buffer holds them.
@@ -64,6 +67,8 @@ pub struct Res {
     pub border: bool,
     /// The argument buffer has members.
     pub has_args: bool,
+    /// A fragment shader tests depth early because its pool marks only (see `pool::early`).
+    pub early: bool,
 }
 
 /// The number in `<lowercase>_<letter><digits>`.
@@ -124,6 +129,7 @@ struct Builder<'a> {
     res: Res,
     members: String,
     id: u32,
+    marks: bool,
 }
 
 fn find_info<'a>(l: &'a [TexInfo], d: &TextureDef) -> R<&'a TexInfo> {
@@ -234,15 +240,33 @@ impl Builder<'_> {
         Ok(())
     }
 
+    /// A pool member: a pointer to the table the host keeps (see `pool`).
+    fn pool_member(&mut self, name: &str, elem: &str, dec: &Decoded) {
+        if elem != "sampler" && !self.marks {
+            self.res.text.push_str(pool::MARK);
+            self.marks = true;
+        }
+        self.res.text.push_str(&pool::strukt(name, elem));
+        let ty = pool::member_type(name);
+        let b = self.member(&ty, name, 1, dec.kind);
+        dec.apply(b);
+        b.elem = Some(elem.to_string());
+    }
+
     fn texture(&mut self, d: &TextureDef) -> R<()> {
         let info = find_info(&self.program.textures, d)?.clone();
         let key = (d.set, d.binding);
         let array = d.array_length != 1;
         if d.ty == SamplerType::NONE {
-            let dec = decode(&info, false, true, false, array);
-            let ty = arrayed("sampler".into(), d.array_length)?;
-            let b = self.member(&ty, &d.name, d.array_length, dec.kind);
-            dec.apply(b);
+            let pooled = pool::decode(&info, true, d.array_length);
+            if let Some(dec) = &pooled {
+                self.pool_member(&d.name, "sampler", dec);
+            } else {
+                let dec = decode(&info, false, true, false, array);
+                let ty = arrayed("sampler".into(), d.array_length)?;
+                let b = self.member(&ty, &d.name, d.array_length, dec.kind);
+                dec.apply(b);
+            }
             self.res.texs.insert(
                 key,
                 Tx {
@@ -250,29 +274,40 @@ impl Builder<'_> {
                     def: d.clone(),
                     sampler: None,
                     twin: None,
+                    pool: pooled.is_some(),
                 },
             );
             return Ok(());
         }
         let buffer = d.ty.0 & SamplerType::MASK == 2;
         let comp = "float";
-        let ty = arrayed(texture_type(d.ty, comp, None)?, d.array_length)?;
-        let dec = decode(&info, false, false, buffer, array);
-        let fetch1d =
-            dec.kind == Kind::Tex && dec.reg.is_some_and(|r| self.fetch1d.contains(&(r as i32)));
+        let elem = texture_type(d.ty, comp, None)?;
+        let pooled = pool::decode(&info, false, d.array_length);
         let sized = self.usage.sized.contains(&key);
-        let b = self.member(&ty, &d.name, d.array_length, dec.kind);
-        dec.apply(b);
-        b.fetch1d = fetch1d;
-        b.fetch1d_size = fetch1d && sized;
+        if let Some(dec) = &pooled {
+            self.pool_member(&d.name, &elem, dec);
+        } else {
+            let ty = arrayed(elem, d.array_length)?;
+            let dec = decode(&info, false, false, buffer, array);
+            let fetch1d = dec.kind == Kind::Tex
+                && dec.reg.is_some_and(|r| self.fetch1d.contains(&(r as i32)));
+            let b = self.member(&ty, &d.name, d.array_length, dec.kind);
+            dec.apply(b);
+            b.fetch1d = fetch1d;
+            b.fetch1d_size = fetch1d && sized;
+        }
         let mut sampler = None;
         let needs = !d.separate && self.usage.sampled.contains(&key);
         if needs {
             let sn = format!("{}Smplr", d.name);
-            let sd = decode(&info, false, true, false, array);
-            let ty = arrayed("sampler".into(), d.array_length)?;
-            let b = self.member(&ty, &sn, d.array_length, sd.kind);
-            sd.apply(b);
+            if let Some(sd) = pool::decode(&info, true, d.array_length) {
+                self.pool_member(&sn, "sampler", &sd);
+            } else {
+                let sd = decode(&info, false, true, false, array);
+                let ty = arrayed("sampler".into(), d.array_length)?;
+                let b = self.member(&ty, &sn, d.array_length, sd.kind);
+                sd.apply(b);
+            }
             sampler = Some(sn);
         }
         self.res.texs.insert(
@@ -282,6 +317,7 @@ impl Builder<'_> {
                 def: d.clone(),
                 sampler,
                 twin: None,
+                pool: pooled.is_some(),
             },
         );
         Ok(())
@@ -313,6 +349,7 @@ impl Builder<'_> {
                 def: d.clone(),
                 sampler: None,
                 twin: None,
+                pool: false,
             },
         );
         Ok(())
@@ -400,6 +437,7 @@ pub fn build(
         res: Res::default(),
         members: String::new(),
         id: 0,
+        marks: false,
     };
     let mut cbs: Vec<&BufferDef> = props
         .properties
@@ -440,6 +478,7 @@ pub fn build(
     b.border(props)?;
     let mut res = b.res;
     res.has_args = !b.members.is_empty();
+    res.early = pool::early(&res, usage);
     if res.has_args {
         res.text
             .push_str(&format!("struct {SET_TYPE}\n{{\n{}}};\n", b.members));
