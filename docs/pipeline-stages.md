@@ -299,6 +299,9 @@ A game that has no profile in the engine gets a survey. `nxb build` examines the
 and a provisional profile, and then builds with this profile. The profile is in `<work>/profile/<title ID>/`, or in `D/<title ID>/` with `--profile-out D`.
 `--provisional` does the same for a game that has a profile. The app name then ends with `-provisional`.
 `--survey-only` writes `survey.md` and stops with exit code 0. Without a profile, it writes no profile.
+At build time, `nxb build` decides which captures a profile needs from the files of `RomFS.img` (`host/build_sources.rs`), as the reference script `profile_guess.build_sources` does.
+It reads SPIR-V files, Trinity packs, GLSL files, Unreal paks (with their IoStore tables), PKZ, GFPAK and Unreal 3 archives with Oodle blocks, the NRO modules and the Frostbite `layout.toc`.
+A package without `RomFS.img` uses the counts of the survey. `nxb profile guess` always uses the counts of the survey.
 The survey report has the census of the rewrite sites (`nxb_rewrite::census`) of every module except `rtld`.
 
 Some checks of the reference script start the game on the Mac. `nxb build` does not start the game. These checks are not ported:
@@ -306,7 +309,6 @@ Some checks of the reference script start the game on the Mac. `nxb build` does 
 - The heap check and the region check. A game that has one of them stops with exit code 4. The build writes the profile first. The message names `--no-heap-check`.
   With `--no-heap-check`, the build omits the two checks and keeps the memory layout that the survey guessed. **A run of the game did not check this layout.**
 - The shader captures (Vulkan, OpenGL, `glslc`, Unreal decode and others). The build writes a `[RED]` line for each capture that it leaves out.
-- The source checks at build time (Unreal paks, Frostbite headers).
 
 `nxb profile` has four commands: `guess`, `show`, `check` and `manifest`. `guess` writes the values of the survey, `show` shows a profile,
 `check` compares the guess with a registered profile, and `manifest` lists a RomFS image.

@@ -19,6 +19,8 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
   The output is byte-identical to `dm/tools/ue_region.py` on 13 synthetic main modules (`crates/nxb-rewrite/tests/region.rs`).
 - The census of the rewrite sites (`dm/tools/insn_census.py`) as `nxb_rewrite::census`. The survey report of `nxb build` and `--census` of `nxb profile guess` have it now.
   The output is identical to the script on 3 synthetic modules. The `--sites` file of the script is not ported.
+- The source checks of `nxb build` read the files of `RomFS.img` (Unreal paks with IoStore tables, Frostbite, PKZ, GFPAK, Unreal 3, SPIR-V, GLSL, Trinity and the NRO imports),
+  as `profile_guess.build_sources` does. The counts are identical to the script on a synthetic RomFS (`crates/nxb-build/tests/sources.rs`).
 
 ## 0.5.1
 
