@@ -7,6 +7,7 @@
 
 pub mod abi;
 pub mod refl;
+pub mod walk;
 
 use crate::job::Job;
 pub use refl::Reflection;
