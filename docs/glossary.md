@@ -26,6 +26,7 @@ The documents use Simplified Technical English (ASD-STE100). The terms below are
 | manifest | The list of files of one store entry, with size and digest of each file. The store writes it last. |
 | partial build | A build with `--partial`. It builds only the shaders of the shader manifest and writes `_b_partial.json`. |
 | process bridge | The way to run the C# translator with one process for each batch. |
+| provisional profile | The game profile that `nxb build` writes for a game that has no registered profile. The survey of the game gives its values. It is not checked by a run of the game. |
 | own front end | The Rust compiler from MSL to AIR in this workspace (layer F). |
 | parity test | A test that compares the output of a stage with the output of the reference build scripts, byte for byte. |
 | PCE | P-core equivalent. PCE = P + e x E, with P and E the core counts and e the relative speed of an E core. |
@@ -35,10 +36,12 @@ The documents use Simplified Technical English (ASD-STE100). The terms below are
 | reference machine | An Apple M2 Max with 8 performance cores, 4 efficiency cores and 32 GB of memory. |
 | reference title | The one game that gave all measured numbers in these documents. |
 | overlap | Two stages of `nxb build` run at the same time. The events stay the same as in a run in series. |
+| Rust translator | The translator in the crates `nxb-xlate`, `nxb-maxwell` and `nxb-spvgen`. It is off by default since 0.5.1. `--xlate-rust on` or `NXB_XLATE_RUST=1` turns it on. |
 | rewrite rules | The registered patches for code modules (cuts, observation gates, frame step stubs and others), kept as data in `data/rewrite-rules`. |
 | reuse key | A digest of all inputs of a stage. If the key does not change, the stage uses its previous output. |
 | ShaderInterface | The typed description of the bindings and the inputs and outputs of one translated shader. The Rust translator writes it as `<key>.iface.json`. |
 | shader step | The stage that translates and compiles the shaders of a game into libraries. The command is `nxb shaders`. |
+| survey | The examination of the files of a game that has no profile. It writes `survey.md` and the values of the provisional profile. Use `--survey-only` to stop after it. |
 | stage | One part of the build: extract, rewrite, split, shader step, pipeline archive, pack, sign. |
 | Unsupported | The result of a tool for an input that it does not cover. The exit code is 4, and the caller runs the reference step. |
 | store | The content-addressed result store (`nxb-store`). |

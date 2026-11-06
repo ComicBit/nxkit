@@ -279,6 +279,52 @@ why = "AddressRegionManager constructor: length of the node area registered as a
 binding = "sdk"
 kind = "match"
 module = "sdk"
+name = "AddressRegionManager node area 1 GB → 62 MB"
+multi = false
+
+[[rule.function]]
+size = 328
+fingerprints = ["5f2f7a70fa5c25aeb7020f75dc785fd6ffe6c2f5c72d8fcb30e0ea9a0bb4bbc5"]
+
+[[rule.function.cut]]
+delta = 24
+old = "08fca752"
+new = "087ca052"
+why = "AddressRegionManager constructor: node area limit mov w8,#0x3fe00000 → mov w8,#0x3e00000"
+
+[[rule.function.cut]]
+delta = 164
+old = "09fca752"
+new = "097ca052"
+why = "AddressRegionManager constructor: length of the node area registered as an occupied region mov w9,#0x3fe00000 → mov w9,#0x3e00000"
+
+[[rule]]
+binding = "sdk"
+kind = "match"
+module = "sdk"
+name = "AddressRegionManager node area 1 GB → 62 MB"
+multi = false
+
+[[rule.function]]
+size = 300
+fingerprints = ["224e86858a769644c9ebfe39c77e214c7ac5f853c156118dd3136eba25ed64bf"]
+
+[[rule.function.cut]]
+delta = 24
+old = "08fca752"
+new = "087ca052"
+why = "AddressRegionManager constructor: node area limit mov w8,#0x3fe00000 → mov w8,#0x3e00000"
+
+[[rule.function.cut]]
+delta = 164
+old = "09fca752"
+new = "097ca052"
+why = "AddressRegionManager constructor: length of the node area registered as an occupied region mov w9,#0x3fe00000 → mov w9,#0x3e00000"
+
+[[rule]]
+binding = "sdk"
+kind = "match"
+module = "sdk"
 name = "AllocateAddressRegion: regions of 4 MB and more aligned to 2 MB, as SDK 20"
 multi = false
 

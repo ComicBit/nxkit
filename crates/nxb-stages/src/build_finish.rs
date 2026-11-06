@@ -156,6 +156,7 @@ fn finish_inner(
             &cross,
             &pixels,
             (&name, k.to_string(), &pc, c1),
+            &s.chain,
             Some((o.spirv, res)),
         )?;
         let lib = s.library(&v.full).map_err(|e| f("metal failed", e))?;

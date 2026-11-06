@@ -220,6 +220,9 @@ pub(crate) fn analyse(rw: &Rw, scan: &Scan) -> R<Analysis> {
                 if tgt.is_none() {
                     tgt = an.jump_offsets(&insl, j, true, true, true)?;
                 }
+                if tgt.is_none() {
+                    tgt = an.jump_zero_extended(&insl, j)?;
+                }
                 let Some(t) = tgt else {
                     return fail(format!(
                         "jump table at {:#x} in function {} ({fa:#x}..{fb:#x}): no bounds check guards the dispatch",

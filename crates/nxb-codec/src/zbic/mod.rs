@@ -1,21 +1,21 @@
 //! ZBIC (Nintendo's zstd variant, NSO flag bit 7 from system 22.0.0) decoder, std only. Ported from the `zbic`
 //! package (zstd with Atmosphere's ZBIC changes, `ZSTD_ZBIC_SUPPORT`): the frame magic is `ZBIC` and the FSE table
 //! descriptions are coded with binary interpolative coding (`FSE_readNCount_bic`). Everything else is zstd
-//! (RFC 8878). The block, literal and Huffman code is a copy of the std-only decoder of `nxb-split`, which another
-//! owner keeps. Checksums are not read: the loader holds every segment to its SHA-256.
-
-use crate::error::RewriteError;
+//! (RFC 8878). The block, literal and Huffman code is shared by `nxb-rewrite` and `nxb-split`. Checksums are not read: the loader holds every segment to its SHA-256.
 
 mod huf;
 mod ncount;
 
 use huf::Huf;
 
-fn err(m: &str) -> RewriteError {
-    RewriteError::Failed(format!("[RED] ZBIC: {m}"))
+/// A decoding error: the message starts with `[RED] ZBIC: `.
+pub type Error = String;
+
+fn err(m: &str) -> Error {
+    format!("[RED] ZBIC: {m}")
 }
 
-type R<T> = Result<T, RewriteError>;
+type R<T> = Result<T, Error>;
 
 fn hb(x: u32) -> u32 {
     31 - x.leading_zeros()
@@ -421,7 +421,7 @@ fn block(d: &[u8], st: &mut State, out: &mut Vec<u8>, frame_start: usize) -> R<(
 
 /// Output limit: a frame of RLE blocks expands about 30,000 times, so the caller passes the size the header names.
 /// Decompresses every ZBIC frame of `d` (skippable frames skipped) to exactly `limit` bytes at most.
-pub(crate) fn decompress(d: &[u8], limit: usize) -> R<Vec<u8>> {
+pub fn decompress(d: &[u8], limit: usize) -> R<Vec<u8>> {
     let mut out = Vec::new();
     let mut i = 0usize;
     while i < d.len() {

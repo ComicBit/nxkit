@@ -46,6 +46,18 @@ struct RegState {
     cancelled: bool,
 }
 
+/// The live groups of every registry in the process, for [`kill_everything`] (a signal handler does not know the registries).
+static ALL_LIVE: Mutex<BTreeSet<u32>> = Mutex::new(BTreeSet::new());
+
+/// Kills every live process group of every registry in this process (an interrupt of the whole run). Returns how many.
+pub fn kill_everything() -> usize {
+    let g = ALL_LIVE.lock().unwrap_or_else(PoisonError::into_inner);
+    for &pgid in g.iter() {
+        let _ = nxb_sys::process::kill_group(pgid, nxb_sys::process::Signal::Kill);
+    }
+    g.len()
+}
+
 impl ProcessRegistry {
     /// An empty registry.
     pub fn new() -> Self {
@@ -83,11 +95,19 @@ impl ProcessRegistry {
             return false;
         }
         g.live.insert(pgid);
+        ALL_LIVE
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(pgid);
         true
     }
 
     pub(crate) fn unregister(&self, pgid: u32) {
         self.lock().live.remove(&pgid);
+        ALL_LIVE
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&pgid);
     }
 }
 

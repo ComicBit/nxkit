@@ -5,7 +5,9 @@ use std::collections::{HashMap, HashSet};
 use nxb_a64::{Insn, Op, Reg};
 
 use crate::error::fail;
-use crate::pat::{canon, gn, ldrsw_idx, nops, pimm, preg, tx, wname, writes_named};
+use crate::pat::{
+    canon, gn, ldrsw_idx, nops, pimm, preg, tx, writes_reg, writes_reg_any, written_w,
+};
 use crate::rw::R;
 
 /// Context of the recognizers: the image and the jump tables found so far.
@@ -78,7 +80,7 @@ pub(crate) fn xnum(s: &str) -> i64 {
 
 /// Whether a write of `p` is named `name` (`x5`).
 pub(crate) fn wr_named(p: &Insn, name: &str) -> bool {
-    writes_named(p, name)
+    writes_reg(p, name)
 }
 
 impl An<'_> {
@@ -215,13 +217,7 @@ impl An<'_> {
         }
         let (src, _) = cmp_imm(&insl[lo0 + k - 2], false)?;
         let kl = ld;
-        let writes = |p: &Insn| -> HashSet<u32> {
-            if matches!(p.mn, "cmp" | "cmn" | "tst") {
-                HashSet::new()
-            } else {
-                p.writes.iter().filter_map(wname).collect()
-            }
-        };
+        let writes = |p: &Insn| -> HashSet<u32> { written_w(p) };
         let mut found = false;
         let mut q = kl as i64 - 3;
         while q >= 0 {
@@ -281,13 +277,18 @@ impl An<'_> {
         let mut idx: HashSet<u8> = HashSet::from([ix]);
         let mut masked: Option<(u8, u64, usize)> = None;
         let mut cmp: Option<usize> = None;
+        // a copy replaces the index (a check of its old value bounds nothing).`changed`: the index is written
+        // after the check that the walk finds
+        let (mut copies, mut changed): (HashSet<u8>, bool) = (HashSet::new(), false);
         let mut i = k0 as i64 - 1;
         while i >= 0 {
             let p = &ctx[i as usize];
             if let Some((a, b)) = mov_ww(p)
                 && idx.contains(&a)
             {
+                idx.remove(&a);
                 idx.insert(b);
+                copies.insert(a);
                 i -= 1;
                 continue;
             }
@@ -300,6 +301,12 @@ impl An<'_> {
                 continue;
             }
             let Some((cn, _)) = cmp_imm(p, far_base) else {
+                // a call counts for the caller-saved registers (Capstone lists only x30 as its write)
+                if writes_reg_any(p, &idx)
+                    || (matches!(p.mn, "bl" | "blr") && idx.iter().any(|r| *r <= 18))
+                {
+                    changed = true;
+                }
                 i -= 1;
                 continue;
             };
@@ -311,7 +318,7 @@ impl An<'_> {
                 let mut q = i - 1;
                 while q >= 0 {
                     let cq = &ctx[q as usize];
-                    let w: Vec<u32> = cq.writes.iter().filter_map(wname).collect();
+                    let w = written_w(cq);
                     if !w.contains(&u32::from(cn)) {
                         q -= 1;
                         continue;
@@ -319,13 +326,8 @@ impl An<'_> {
                     if let Some((_, b, v)) = and_imm(cq)
                         && b == mreg
                         && v == mmask
-                        && !(q as usize + 1..mpos).any(|z| {
-                            ctx[z]
-                                .writes
-                                .iter()
-                                .filter_map(wname)
-                                .any(|x| x == u32::from(mreg))
-                        })
+                        && !(q as usize + 1..mpos)
+                            .any(|z| written_w(&ctx[z]).contains(&u32::from(mreg)))
                     {
                         cmp = Some(i as usize);
                     }
@@ -337,8 +339,12 @@ impl An<'_> {
             }
             i -= 1;
         }
+        if cmp.is_some() && changed {
+            return Ok(None);
+        }
         if cmp.is_none() && copy_first {
-            cmp = self.check_before_copy(insl, lo0, k0, lo0 + k0, &idx);
+            let all: HashSet<u8> = idx.union(&copies).copied().collect();
+            cmp = self.check_before_copy(insl, lo0, k0, lo0 + k0, &all);
         }
         let Some(ci) = cmp else {
             return Ok(None);

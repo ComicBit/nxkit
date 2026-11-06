@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 
 mod handles;
 mod raster_vs;
-use handles::{c2_array, const_sampler, decode_tex, decode_ubo_tex, is_image};
+use handles::{c2_array, const_sampler, decode_tex, decode_ubo_img, decode_ubo_tex, is_image};
 mod screen;
 pub use raster_vs::raster_vs;
 pub use screen::screen_varyings;
@@ -133,6 +133,8 @@ pub fn reflect(key: &str, stage: &str, msl: &str, res: &Value) -> Result<Value, 
             e.set("kind", Value::str("sbuf"));
             e.set("index", int(n));
         } else if let Some((ut, us)) = decode_ubo_tex(&base_nm) {
+            // handle type 1: the word of the other half, which the host ORs in
+            let other = us.is_ok_and(|u| u != ut).then_some(us);
             if nm.ends_with("Smplr") {
                 match us {
                     Err(id) => {
@@ -143,14 +145,31 @@ pub fn reflect(key: &str, stage: &str, msl: &str, res: &Value) -> Result<Value, 
                         e.set("kind", Value::str("samp_ubo"));
                         e.set("reg", int(r));
                         e.set("off", int(o));
+                        if other.is_some() {
+                            e.set("soff", int(ut.1));
+                            e.set("sreg", int(ut.0));
+                        }
                     }
                 }
             } else if ty.contains("texture_buffer") {
-                e.set("kind", Value::str("?"));
+                e.set("kind", Value::str("tbuf_ubo"));
+                e.set("reg", int(ut.0));
+                e.set("off", int(ut.1));
             } else {
                 e.set("kind", Value::str("tex_ubo"));
                 e.set("reg", int(ut.0));
                 e.set("off", int(ut.1));
+                if let Some(Ok((r, o))) = other {
+                    e.set("soff", int(o));
+                    e.set("sreg", int(r));
+                }
+            }
+        } else if let Some((reg, off)) = decode_ubo_img(&nm) {
+            e.set("kind", Value::str("img_ubo"));
+            e.set("reg", int(reg));
+            e.set("off", int(off));
+            if word_followed(msl, &nm, ".atomic_") {
+                e.set("atomic", Value::Bool(true));
             }
         } else if let Some((off, soff)) = c2_array(&nm, &ty) {
             e.set(

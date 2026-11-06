@@ -12,245 +12,99 @@
 //! non-shader files with the shader step. `--dry-run` prints the graph and the keys.
 //!
 //! The rewrite (`patch_nso.py`) is made by [`rewrite`] when the work folder has no `patched_<package>` and the engine
-//! is the one the port was checked against (otherwise the work folder's output is taken, as before). Not ported yet,
+//! is the one the port was checked against (otherwise the build stops at the rewrite with the message of `nxb rewrite`, which exits with code 4: there is no fallback to a later stage without the patched modules). Not ported yet,
 //! taken from the work folder (the Python build's outputs) and named in the plan: the survey and profile steps. The
 //! shader step is an existing library folder (`--shaders`, or the work folder's `shader/cache/b-<chain>`), running the
 //! lead's `shaderbuild build` as a process from here is not wired yet.
 
+mod app_stage;
+mod args;
 pub mod events;
+mod extract_stage;
 pub mod graph;
 pub mod host;
+pub mod inputs;
 pub mod ios;
 pub mod ios_cli;
 mod iosbuild;
+mod options;
 pub mod order;
 pub mod pipeline;
+mod provisional;
 pub mod rewrite;
 
-use std::path::PathBuf;
+/// The exit code a failing stage asks for (the first one wins). Stage closures return `Result<String, String>`, so the
+/// class of an error (damaged data 3, not supported yet 4, bad arguments 2, missing key 6) travels beside the text.
+pub(crate) mod exit {
+    use std::sync::atomic::{AtomicI32, Ordering};
 
-/// The command line (the NSP script's names, extras: `--dry-run`, `--engine`, `--shaders`, `--companion-app`, `--threads`).
-#[derive(Clone, Debug, Default)]
-pub struct Args {
-    /// The folder holding one game's NSPs.
-    pub nsp_dir: PathBuf,
-    /// `-k/--keys`.
-    pub keys: Option<PathBuf>,
-    /// `--title-id`.
-    pub title_id: Option<String>,
-    /// `-p/--package`.
-    pub package: Option<String>,
-    /// `-o/--out`.
-    pub out: Option<PathBuf>,
-    /// `--app-name`.
-    pub app_name: Option<String>,
-    /// `--bundle-id`.
-    pub bundle_id: Option<String>,
-    /// `--platform` (`mac-app` or `ios`).
-    pub platform: String,
-    /// `--mac-sign` (only ad hoc `-`).
-    pub mac_sign: String,
-    /// `-l/--language`.
-    pub language: Option<String>,
-    /// `--work-dir`.
-    pub work_dir: Option<PathBuf>,
-    /// `--gpu` (`none` or architectures).
-    pub gpu: Option<String>,
-    /// `--progress`.
-    pub progress: String,
-    /// `--dry-run`: print the graph and the keys.
-    pub dry_run: bool,
-    /// `--engine`: the engine folder (profiles under `dm/games`).
-    pub engine: Option<PathBuf>,
-    /// `--shaders`: an existing `b-<chain>` library folder.
-    pub shaders: Option<PathBuf>,
-    /// `--companion-app`: the companion app binary embedded next to the built app (`Contents/MacOS/nxnative`), default:
-    /// built from the engine's sources by clang + swiftc (`host::companion`) into `<work>/app/nxnative`.
-    pub companion: Option<PathBuf>,
-    /// Worker threads.
-    pub threads: usize,
-    /// `--xlate`: the shader translator (default the engine's `dmsh_xlate_bin/dmsh_xlate`).
-    pub xlate: Option<PathBuf>,
-    /// `--xlate-host`: the translator host program and arguments, or `off` (default: found next to `--xlate`, or
-    /// env `NXB_XLATE_HOST`).
-    pub xlate_host: Option<String>,
-    /// `--dotnet-root` (default `DOTNET_ROOT`, else `dotnet --list-runtimes`).
-    pub dotnet_root: Option<PathBuf>,
-    /// `--own-front on|off|<verdicts>`: the own front end (default on: the shipped own-identical verdicts.
-    /// `NXB_OWN_FRONT=0` turns it off).
-    pub own_front: String,
-    /// `--also-ios`: the iOS shader libraries too, from the same translation (`<work>/shader/ios/b-<V>`, the NSP
-    /// script's layout), in the same shader step.
-    pub also_ios: bool,
-    /// `--shader-manifest <file>`: the keys the title used, one per line. Their shaders are built first.
-    pub manifest: Option<PathBuf>,
-    /// `--partial`: build only the manifest's shaders and flag the output as partial (needs `--shader-manifest`).
-    pub partial: bool,
+    static CODE: AtomicI32 = AtomicI32::new(0);
+
+    /// Records `code` unless an earlier failure recorded one.
+    pub(crate) fn set(code: i32) {
+        let _ = CODE.compare_exchange(0, code, Ordering::SeqCst, Ordering::SeqCst);
+    }
+
+    /// The recorded code, 0 when none.
+    pub(crate) fn get() -> i32 {
+        CODE.load(Ordering::SeqCst)
+    }
+
+    /// `msg` as an error of class `code`.
+    pub(crate) fn fail(code: i32, msg: impl Into<String>) -> String {
+        set(code);
+        msg.into()
+    }
 }
 
-/// `--companion-app` under its old name: compatibility alias for the reference build scripts.
-const COMPAT_ALIAS: &str = "--launcher";
-const VALUE: &[&str] = &[
-    "-k",
-    "--keys",
-    "--title-id",
-    "-p",
-    "--package",
-    "-o",
-    "--out",
-    "--app-name",
-    "--bundle-id",
-    "--platform",
-    "--mac-sign",
-    "-l",
-    "--language",
-    "--work-dir",
-    "--gpu",
-    "--progress",
-    "--engine",
-    "--shaders",
-    "--companion-app",
-    COMPAT_ALIAS,
-    "--threads",
-    "--xlate",
-    "--xlate-host",
-    "--dotnet-root",
-    "--own-front",
-    "--shader-manifest",
-];
-/// Options of the NSP script this port refuses by name (not implemented yet).
-const NOT_YET: &[&str] = &[
-    "--romfs",
-    "--prepare-xcode",
-    "--framework",
-    "--shell-framework",
-    "--team-id",
-    "--xcode-workspace",
-    "--env-file",
-    "--seen-shaders",
-    "--show-fps",
-    "--motion",
-    "--survey-only",
-    "--program",
-    "--allow-damaged",
-    "--allow-shader-regressions",
-    "--allow-other-metal",
-    "--profile-out",
-    "--provisional",
-    "--no-heap-check",
-    "--keep-extracted",
-    "--no-keep-extracted",
-];
-
-/// Parses the command line.`Err((code, message))`.
-pub fn parse(argv: &[String]) -> Result<Args, (i32, String)> {
-    let mut a = Args {
-        platform: "ios".into(),
-        mac_sign: "-".into(),
-        progress: "auto".into(),
-        threads: 10,
-        ..Args::default()
-    };
-    let mut i = 0;
-    while i < argv.len() {
-        let s = argv[i].as_str();
-        let (k, inline) = match s.split_once('=') {
-            Some((k, v)) if k.starts_with("--") => (k, Some(v.to_string())),
-            _ => (s, None),
-        };
-        if NOT_YET.contains(&k) {
-            return Err((
-                1,
-                format!("{k} is not implemented in nxb build yet (run the NSP script)"),
-            ));
-        }
-        if k == "--also-ios" {
-            a.also_ios = true;
-            i += 1;
-            continue;
-        }
-        if k == "--partial" {
-            a.partial = true;
-            i += 1;
-            continue;
-        }
-        if k == "--dry-run" {
-            a.dry_run = true;
-            i += 1;
-            continue;
-        }
-        if VALUE.contains(&k) {
-            let v = match inline {
-                Some(v) => v,
-                None => {
-                    i += 1;
-                    argv.get(i)
-                        .cloned()
-                        .ok_or((2, format!("argument {k}: expected one argument")))?
-                }
-            };
-            match k {
-                "-k" | "--keys" => a.keys = Some(v.into()),
-                "--title-id" => a.title_id = Some(v),
-                "-p" | "--package" => a.package = Some(v),
-                "-o" | "--out" => a.out = Some(v.into()),
-                "--app-name" => a.app_name = Some(v),
-                "--bundle-id" => a.bundle_id = Some(v),
-                "--platform" => a.platform = v,
-                "--mac-sign" => a.mac_sign = v,
-                "-l" | "--language" => a.language = Some(v),
-                "--work-dir" => a.work_dir = Some(v.into()),
-                "--gpu" => a.gpu = Some(v),
-                "--progress" => a.progress = v,
-                "--engine" => a.engine = Some(v.into()),
-                "--shaders" => a.shaders = Some(v.into()),
-                "--xlate" => a.xlate = Some(v.into()),
-                "--xlate-host" => a.xlate_host = Some(v),
-                "--dotnet-root" => a.dotnet_root = Some(v.into()),
-                "--own-front" => a.own_front = v,
-                "--shader-manifest" => a.manifest = Some(v.into()),
-                _ if k == "--companion-app" || k == COMPAT_ALIAS => a.companion = Some(v.into()),
-                _ => a.threads = v.parse().map_err(|_| (2, format!("--threads: {v}")))?,
+/// Stops the run on `SIGINT` or `SIGTERM`: every child process group is killed, the stage is closed as failed, the
+/// exit code is 130. Waits for the signal on a thread of its own (the handler only records the number).
+fn watch_interrupts(prog: std::sync::Arc<events::Progress>) {
+    if nxb_sys::stdio::catch_interrupts().is_err() {
+        return;
+    }
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            if let Some(sig) = nxb_sys::stdio::interrupted() {
+                let n = nxb_tool::kill_everything();
+                prog.end("interrupted", false);
+                prog.say(&format!(
+                    "[RED] interrupted (signal {sig}), {n} child process groups stopped"
+                ));
+                std::process::exit(130);
             }
-        } else if s.starts_with('-') {
-            return Err((2, format!("unrecognized arguments: {s}")));
-        } else if a.nsp_dir.as_os_str().is_empty() {
-            a.nsp_dir = s.into();
-        } else {
-            return Err((2, format!("unrecognized arguments: {s}")));
         }
-        i += 1;
-    }
-    if a.platform != "mac-app" && a.platform != "ios" {
-        return Err((
-            1,
-            format!(
-                "--platform {}: only mac-app and ios are implemented in nxb build",
-                a.platform
-            ),
-        ));
-    }
-    if a.mac_sign != "-" {
-        return Err((
-            1,
-            "--mac-sign: only ad-hoc signing (-) is implemented".into(),
-        ));
-    }
-    if a.partial && a.manifest.is_none() {
-        return Err((2, "--partial needs --shader-manifest <file>".into()));
-    }
-    if a.nsp_dir.as_os_str().is_empty() {
-        return Err((2, "the NSP folder is required".into()));
-    }
-    Ok(a)
+    });
 }
 
-/// `nxb build <args>`: returns the exit code.
+pub use args::{Args, parse};
+
+/// Whether the command line asks for `--progress json`.
+fn wants_json(argv: &[String]) -> bool {
+    argv.iter().any(|a| a == "--progress=json")
+        || argv
+            .windows(2)
+            .any(|w| w[0] == "--progress" && w[1] == "json")
+}
+
+/// `nxb build <args>`: returns the exit code. With `--progress json` standard output holds the NDJSON events only:
+/// the process's descriptor 1 is moved to standard error and the events go to the original standard output, so the
+/// lines the extract and split steps print (and any other library or child output) never mix into the events.
 pub fn main(argv: &[String]) -> i32 {
+    let json = wants_json(argv);
+    let mut sink: Box<dyn std::io::Write + Send> = Box::new(std::io::stdout());
+    if json && let Ok(f) = nxb_sys::stdio::stdout_to_stderr() {
+        sink = Box::new(f);
+    }
     let a = match parse(argv) {
         Ok(a) => a,
         Err((code, msg)) => {
-            println!("[RED] {msg}");
+            if json {
+                events::Progress::new(events::Mode::Json, sink).say(&format!("[RED] {msg}"));
+            } else {
+                println!("[RED] {msg}");
+            }
             return code;
         }
     };
@@ -259,63 +113,19 @@ pub fn main(argv: &[String]) -> i32 {
         "off" => events::Mode::Off,
         _ => events::Mode::Lines,
     };
-    let prog = std::sync::Arc::new(events::Progress::new(mode, Box::new(std::io::stdout())));
+    let prog = std::sync::Arc::new(events::Progress::new(mode, sink));
+    watch_interrupts(prog.clone());
     match graph::run(&a, &prog) {
         Ok(()) => 0,
         Err(e) => {
             prog.end("", false);
             prog.say(&format!("[RED] {e}"));
-            // Unsupported by contract: the caller runs the reference script (docs/integration-requests.md)
-            if e.starts_with("unsupported") { 4 } else { 1 }
+            // 3 damaged data, 4 not supported yet (the text starts with "unsupported" or the stage said so), 6 missing key
+            match exit::get() {
+                0 if e.starts_with("unsupported") => 4,
+                0 => 1,
+                c => c,
+            }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn v(s: &[&str]) -> Vec<String> {
-        s.iter().map(|x| x.to_string()).collect()
-    }
-
-    #[test]
-    fn command_line_as_the_nsp_script() {
-        let a = parse(&v(&[
-            "dir",
-            "--platform",
-            "mac-app",
-            "-k",
-            "k.keys",
-            "--gpu=none",
-            "--progress",
-            "json",
-        ]));
-        assert!(a.as_ref().is_ok_and(|a| a.keys.is_some()
-            && a.gpu.as_deref() == Some("none")
-            && a.progress == "json"));
-        assert_eq!(
-            parse(&v(&["dir", "--platform", "mac-app", "--romfs", "bundle"]))
-                .err()
-                .map(|e| e.0),
-            Some(1)
-        );
-        assert_eq!(
-            parse(&v(&["dir", "--platform", "mac-app", "--nope"]))
-                .err()
-                .map(|e| e.0),
-            Some(2)
-        );
-        assert_eq!(
-            parse(&v(&["dir", "--platform", "mac"])).err().map(|e| e.0),
-            Some(1)
-        );
-        // manifest-first and partial
-        let a = parse(&v(&["dir", "--shader-manifest", "m.txt", "--partial"])).unwrap();
-        assert!(a.partial && a.manifest.as_deref() == Some(std::path::Path::new("m.txt")));
-        assert_eq!(parse(&v(&["dir", "--partial"])).err().map(|e| e.0), Some(2));
-        assert!(parse(&v(&["dir"])).is_ok_and(|a| !a.partial && a.manifest.is_none()));
-        // the script's default platform is ios
-        assert!(parse(&v(&["dir"])).is_ok_and(|a| a.platform == "ios"));
     }
 }

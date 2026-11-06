@@ -139,6 +139,8 @@ pub fn run(bin: Binary, args: &[String], out: &mut dyn Write, err: &mut dyn Writ
         "nro" if bin == Binary::Nxb => return nxb_build::rewrite::nro_main(rest),
         // the registered patches as private rule files
         "rewrite-rules" if bin == Binary::Nxb => return nxb_build::rewrite::rules_main(rest),
+        // the provisional profile of a game with no profile (guess, show, check, manifest)
+        "profile" if bin == Binary::Nxb => return nxb_build::host::profile_cli::main(rest),
         // pack and sign stages
         "app" if bin == Binary::Nxb => return nxb_pack::cli::macapp::main(rest),
         "ipa" if bin == Binary::Nxb => return nxb_pack::cli::ipa::main(rest),

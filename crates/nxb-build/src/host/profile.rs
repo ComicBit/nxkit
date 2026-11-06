@@ -157,12 +157,14 @@ impl Profiles {
         Profiles {
             here: engine.join("dm/games"),
             extra: var("DM_GAMES_DIR")
+                .or_else(|| super::games().map(|g| g.0.to_string_lossy().into_owned()))
                 .unwrap_or_default()
                 .split(':')
                 .filter(|p| !p.is_empty())
                 .map(PathBuf::from)
                 .collect(),
-            extra_first: var("DM_GAMES_FIRST").is_some_and(|v| !v.is_empty()),
+            extra_first: var("DM_GAMES_FIRST")
+                .map_or_else(|| super::games().is_some_and(|g| g.1), |v| !v.is_empty()),
         }
     }
 

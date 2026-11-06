@@ -19,7 +19,7 @@ The shader step changes the GPU machine code of a game into Metal libraries. The
 | interface | contract |
 |---|---|
 | input from the split | package files `<stage>_<group>.bin` (`BTCDBTCD` records) and the tables `shader_map.tsv`, `shader_facts.tsv`, `shader_pairs.tsv`, `pso_pairs.tsv` |
-| translator | the `Translator` trait in `nxb-tool`. One call translates a batch of tasks. Each task has the job JSON of the reference build scripts. The implementations are the Rust translator, the translator host and the process bridge (see the section on the translator choice) |
+| translator | the `Translator` trait in `nxb-tool`. One call translates a batch of tasks. Each task has the job JSON of the reference build scripts. The implementations are the Rust translator (off by default), the translator host and the process bridge (see the section on the translator choice) |
 | output of the translator | `<key>.spv` and `<key>.res.json`. The Rust translator also writes `<key>.iface.json` (the `ShaderInterface`) |
 | output to the pack stage | `b-<V>/` folders, `inputs.tsv`, `_b_build.json`, `_b_cas.txt`, `c1_full.tsv`, `cb_extent.tsv`, the reuse keys |
 | output to the archive stage | `pso_pairs.tsv` and the reflection fields `entry`, `entry_z`, `pull`, `vertex_inputs`, `raster.primitive_id`, `bindings` |
@@ -48,19 +48,23 @@ vertex shaders that wait for their pixel shaders (`vs_pad`) and the summary at t
 
 ## Translator choice
 
-The step has three ways to translate one key. It tries them in this sequence for each key:
+The step has three ways to translate one key. **Since 0.5.1, the first way is off by default.** The step tries the ways in this sequence for each key:
 
-1. **The Rust translator** (`nxb-xlate`, `nxb-maxwell` and `nxb-spvgen`). It runs in the process. It is on by default.
-   `--xlate-rust off` (for `nxb shaders build`) or `NXB_XLATE_RUST=0` (also for `nxb build`) turns it off.
-   A key that it cannot do returns an error that starts with `unported:`. A panic is caught. In both cases, the key goes to the next way. The step counts each reason (`rust unported`, `rust error`, `rust panic`).
+1. **The Rust translator** (`nxb-xlate`, `nxb-maxwell` and `nxb-spvgen`). It runs in the process. It is off by default.
+   `--xlate-rust on` (for `nxb shaders build`) or `NXB_XLATE_RUST=1` (also for `nxb build`, which has no option for it) turns it on. The values `1`, `on` and `true` turn it on. Each other value leaves it off.
+   The cause is that the Rust translator does not follow the translator of the current engine. For example, it has no Maxwell denormal flush that the current engine translator has.
+   On the current engine, its output can thus differ from the output of the C# translator. Earlier documents (0.4.0 and 0.5.0) said that it is on by default. That was incorrect for the current engine.
+   When it is on, a key that it cannot do returns an error that starts with `unported:`. A panic is caught. In both cases, the key goes to the next way. The step counts each reason (`rust unported`, `rust error`, `rust panic`).
 2. **The translator host.** One process loads the C# translator and does the work of many batches. It is the default when the program `dmsh_xlate_host` is next to `dmsh_xlate`.
    `--xlate-host "PROGRAM [ARGS]"` or `NXB_XLATE_HOST` selects it, and `--xlate-host off` or `NXB_XLATE_HOST=off` turns it off. The host has a watchdog of 60 s plus 10 s for each key.
    A host that fails or hangs is killed and started again. After more than 6 restarts, a failed start or no answer to a ping in 10 s, the step stops to use the host. The counters for starts, restarts and fallbacks are in the run report.
 3. **The process bridge.** One C# process for each batch, as the reference build scripts do. It divides a bad batch until each bad key is alone.
 
-All three ways give the same bytes for the keys that were compared. The translation cache identity does not change, because the output is byte-identical. A key without a way that works is `translation failed`.
+The two C# ways (the host and the process bridge) give the same bytes. The Rust translator gave the same bytes only on the engine version that it was ported from (table below).
+Nobody compared it again with the current engine. The translation cache identity does not name the translator. Thus a store can hold the output of both. Do not turn the Rust translator on for a store that must stay equal to the C# output.
+A key without a way that works is `translation failed`.
 
-What the Rust translator does not do (the key goes to the C# translator):
+When the Rust translator is on, it does not do these parts (the key goes to the C# translator):
 
 - Geometry, tessellation, transform feedback and vertex shaders as compute. No local title has these (only one geometry shader exists in the corpus), thus nobody ported them without a corpus.
 - The function match for the fragment interlock.
@@ -68,7 +72,7 @@ What the Rust translator does not do (the key goes to the C# translator):
 - Some Ampere encodings.
 - Task and mesh shaders. The job writer refuses them.
 
-Evidence (measured, SPIR-V and `res.json` compared byte for byte with the C# translator, first-attempt jobs only):
+Evidence for the Rust translator (measured, SPIR-V and `res.json` compared byte for byte with the C# translator, first-attempt jobs only). These results are for the engine version of the port, not for the current engine:
 
 | corpus | keys | identical |
 |---|---|---|
@@ -84,6 +88,7 @@ The Ampere path is checked on one title.
 Time (measured, a subset of 160 keys or 261 shaders, load average about 10, own front end off): 16 s with the process bridge, 17 s with the Rust translator, and 20.2 s with the host against 20.7 s without it.
 There is no gain in this subset, because the Metal compile dominates. The translator part alone is faster: 802 jobs took 1.0 to 1.7 s with the host against 6.3 to 8.4 s with 19 process starts.
 In a full cold build, the number of .NET starts changes from 667 to about 1. That is an **estimate**. Nobody measured a full build with the host or with the Rust translator.
+Before the Rust translator can be the default again, the changes of the engine translator must be ported (refer to the known limits in the README).
 
 ## Shader interface
 
@@ -104,7 +109,7 @@ Tests: derived facts, a round trip of the schema, a refusal of a different versi
 
 | identity | function | made from |
 |---|---|---|
-| V (chain version) | names the folder `b-<V>/` that the host loads | the files in `chain-files.txt`, the translator options, `OUTPUT_VERSION` |
+| V (chain version) | names the folder `b-<V>/` that the host loads. Each `_b.json` file has the same value | the files in `chain-files.txt`, the translator options, `OUTPUT_VERSION` |
 | DOMAIN_FP | cache validity of each shader | the same file set, hashed for each module |
 | TOOL_FP | the external tools that made a result | translator identity, `spirv-cross` version, `metal` identity, SDK version, deployment target, PCH convention, front-end id |
 | BIN_ID | the `nxb` binary that ran | SHA-256 of the binary, rustc version, `Cargo.lock` digest, commit, flags |
@@ -119,6 +124,9 @@ The rules for these identities:
 5. The reuse key of the build contains BIN_ID. After a runtime fix, the shader step runs one more time, with cache hits only.
 6. The first release of the own front end changes V. The Metal cache format changes from `dmsh_mtlcache 2` to `3`,
    and its identity gets the front-end id. Apple libraries and own libraries thus do not share a cache entry.
+7. Since 0.5.1, the value of V in each `_b.json` file is the computed V. In 0.5.0, the vertex shader files had the constant `0ad559cdbb28`.
+   The folder name had the computed V. The two values were not equal. In a full Wonder run with the 0.5.0 code, the pipeline archive found no base library. The build packed the app without an archive.
+   The calculation of V reads the engine files that `dmsh_chain.py` names.
 
 ## Execution model
 
@@ -245,7 +253,8 @@ The results are for the reference title and the Mac target (measured).
 | translator bridge | 652 shaders | 652 `.spv` and `res.json` byte-identical |
 | `spirv-cross` and MSL passes | 649 pixel and 3 compute shaders | all `_b.metal` and `_b.json` byte-identical |
 | full step | one full run | 74,421 of 74,422 files byte-identical. The step does not write `_b_cas.txt` at this time. |
-| Rust translator | 16,268 keys of this title | all `.spv` and `res.json` byte-identical to the C# translator |
+| libraries and `_b.json`, current engine, C# translator, own front end off | a full run against a Python build of the same current engine. A sample of 41,883 libraries | 0 of 41,883 differ. 5 shaders are stubs that the Python run itself left (a 0-byte `.metal` and a 96-byte library). The raw tier and the own-identical tier were not part of this run |
+| Rust translator | 16,268 keys of this title, engine version of the port | all `.spv` and `res.json` byte-identical to the C# translator. Not repeated on the current engine |
 
 These parts are not ported at this time: geometry and mesh shaders (the reference title has none), some guards that do
 not fire on the reference title, the full iOS target (a sample of 787 shaders was compared), `_b_cas.txt`, and the calculation of V from Rust sources.
