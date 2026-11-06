@@ -240,9 +240,14 @@ pub fn plan(a: &Args) -> Result<Build, String> {
         });
     let have_split =
         std::fs::read_dir(work.join("shader/pkg")).is_ok_and(|mut d| d.next().is_some());
+    // the script names the stage after what it extracts ("extract v0"): the launcher shows "extract %@" with that part
+    let mut extracted: Vec<&str> = split_versions.iter().map(String::as_str).collect();
+    if !extracted.contains(&package.as_str()) {
+        extracted.push(&package);
+    }
     let mut nodes = vec![
         Node {
-            name: "extract".into(),
+            name: format!("extract {}", extracted.join(" + ")),
             deps: vec![],
             key: key(
                 "extract",

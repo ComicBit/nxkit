@@ -13,11 +13,12 @@ A switch turns it off: `NXB_OWN_RAW=0`. If the front end rejects a shader, Apple
 
 ## Status
 
-Version 0.6.1 is the ninth public release. It is early software. Read this section before you use it.
+Version 0.6.2 is the tenth public release. It is early software. Read this section before you use it.
 
 - Mac only for the build tools. The tools run on macOS on Apple silicon. Other systems are not supported.
 - The tools need Apple tools (`metal`, `metallib`, `air-opt`, `metal-tt`, `codesign`, `xcrun`) from your own Xcode.
-- Changed in this release: the Rust translator writes MSL directly and is the only translator. The C# translator, `spirv-cross` and the MSL text passes are gone.
+- Changed in this release: the rewrite step follows the engine `88c7e03f`, and the extract stage reports the bytes it writes.
+- Changed in 0.6.0: the Rust translator writes MSL directly and is the only translator. The C# translator, `spirv-cross` and the MSL text passes are gone.
   The options `--xlate*`, `--dotnet-root` and `--spirv-cross` and the command `nxb shaders recompile` are removed.
   Refer to [CHANGELOG.md](CHANGELOG.md).
 - One Rust translator writes MSL directly. It runs in the process of the shader step. The tools need no .NET runtime and no `spirv-cross`.
