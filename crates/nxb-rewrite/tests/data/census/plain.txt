@@ -1,0 +1,13 @@
+plain.nso: 4093 instructions decoded (3 undecodable words)
+  x18 use                6
+  svc                    4
+  mrs tpidr_el0          2
+  msr tpidr_el0          1
+  mrs tpidrro_el0        1
+  mrs cntpct_el0         1
+  mrs cntvct_el0         1
+  mrs cntfrq_el0         1
+  mrs cntpctss_el0       1
+  msr cntvctss_el0       1
+  sub sp, sp, xN         1
+  svc numbers: #5 x1, #0x1d x2, #0x7b x1

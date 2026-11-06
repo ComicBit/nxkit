@@ -359,6 +359,7 @@ fn run_inner(
         &windows,
         &mut log,
         ue.malloc.as_ref().map(|m| m.call),
+        ue.region.as_ref(),
     )?;
     let (mut fs_state, mut render_scale) = (0i64, false);
     if patches.frame.contains(&build_id) && opts.name == "main" {

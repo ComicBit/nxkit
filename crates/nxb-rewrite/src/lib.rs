@@ -4,6 +4,7 @@
 //! `NXB_REWRITE_*`).
 
 mod analyse;
+mod census;
 mod cuts;
 mod engine;
 mod error;
@@ -21,6 +22,7 @@ mod obs;
 mod pat;
 /// The registered patches of the engine.
 pub mod patches;
+mod region;
 mod rewrite;
 /// The registered patches as `rules/*.toml`.
 pub mod rules;
@@ -34,5 +36,6 @@ mod spinreg;
 mod tailcall;
 mod windows;
 
+pub use census::census;
 pub use error::RewriteError;
 pub use rewrite::{Options, Output, rewrite};

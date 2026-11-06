@@ -1,7 +1,7 @@
 //! The survey and the provisional profile against `build_ipa_from_nsp.py` (`survey`, `write_profile`).
 //! `NXB_ORACLE_SURVEY` holds `<name>/<title ID>_survey/survey.md` written by the script for the extraction
-//! `NXB_ORACLE_EXTRACTS/<name>`, `NXB_ORACLE_ENGINE` is the engine folder. The census block is taken from the script's
-//! report (it is not ported), the SDK surface block compares as a set of lines (the script lists areas of equal
+//! `NXB_ORACLE_EXTRACTS/<name>`, `NXB_ORACLE_ENGINE` is the engine folder. The census of this port is compared with the census block of the script's report,
+//! the SDK surface block compares as a set of lines (the script lists areas of equal
 //! count in the order of a hash set).
 
 use super::survey::{SurveyInput, survey};
@@ -102,7 +102,7 @@ fn survey_and_profile_equal_the_reference_script() {
             "\n```\n\n## Imports vs host",
         );
         let dlc = want.contains("DLC present");
-        let s = survey(&SurveyInput {
+        let input = SurveyInput {
             extract: PathBuf::from(&ex).join(&name),
             app,
             fallback_name: String::new(),
@@ -117,8 +117,30 @@ fn survey_and_profile_equal_the_reference_script() {
             dlc,
             engine: PathBuf::from(&engine),
             census: Some(census.to_string()),
+        };
+        let s = survey(&input).unwrap();
+        // the census of this port: the same lines, the module paths aside
+        let ours = survey(&SurveyInput {
+            census: None,
+            ..input.clone()
         })
         .unwrap();
+        let sites = |t: &str| -> Vec<String> {
+            block(
+                t,
+                "## Rewrite-site census (insn_census.py)\n\n```\n",
+                "\n```\n\n## Imports vs host",
+            )
+            .lines()
+            .map(
+                |l| match l.find(": ").filter(|_| l.contains(" instructions decoded")) {
+                    Some(i) => l[i..].to_string(),
+                    None => l.to_string(),
+                },
+            )
+            .collect()
+        };
+        assert_eq!(sites(&ours.report), sites(&want), "{name}: census");
         let (got, exp) = (normal(&s.report, &want), normal(&want, &s.report));
         if got != exp {
             let line = got
@@ -244,4 +266,29 @@ fn ipa_names() {
         ipa_name("\u{30b2}\u{30fc}\u{30e0}", 0xab),
         "00000000000000AB.ipa"
     );
+}
+
+#[test]
+fn the_census_text_counts_each_module_but_rtld() {
+    let fixtures =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../nxb-rewrite/tests/data/census");
+    let dir = std::env::temp_dir().join(format!("nxb-census-text-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::copy(fixtures.join("sites.nso"), dir.join("main")).unwrap();
+    std::fs::copy(fixtures.join("nothing.nso"), dir.join("sdk")).unwrap();
+    std::fs::write(dir.join("rtld"), b"not a module").unwrap();
+    let t = super::survey::census_text(&dir, ["rtld", "main", "sdk"].into_iter()).unwrap();
+    let want = |n: &str, f: &str| {
+        let text = std::fs::read_to_string(fixtures.join(f)).unwrap();
+        text.replacen(
+            &f.replace(".txt", ".nso"),
+            &dir.join(n).to_string_lossy(),
+            1,
+        )
+    };
+    assert_eq!(t, want("main", "sites.txt") + &want("sdk", "nothing.txt"));
+    let err = super::survey::census_text(&dir, ["missing"].into_iter()).unwrap_err();
+    assert!(err.to_string().starts_with("[RED] "), "{err}");
+    let _ = std::fs::remove_dir_all(&dir);
 }

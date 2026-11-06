@@ -26,10 +26,25 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ### Added
 
+- `nxb build --platform mac` (the development build) and `nxb build --program N` for N more than 0. They no longer give exit code 4.
+  `--platform mac` ends with the command that runs the game on the Mac. The pipeline prebuild, which starts the host, is not run.
+  The other programs of a multi-program profile are built for `mac` and `mac-app`. The first program is in `programs.tsv` (`mac`) or in the app (`mac-app`).
+- `nxb extract --program <title ID>` picks the Program NCA of one program of a multi-program application.
+- The finder `ue_region` in `nxb rewrite`. A main module with `SwitchVirtualAddressSpaceSize` no longer gives exit code 4.
+  The output is byte-identical to `dm/tools/ue_region.py` on 13 synthetic main modules (`crates/nxb-rewrite/tests/region.rs`).
+- The census of the rewrite sites (`dm/tools/insn_census.py`) as `nxb_rewrite::census`. The survey report of `nxb build` and `--census` of `nxb profile guess` have it now.
+  The output is identical to the script on 3 synthetic modules. The `--sites` file of the script is not ported.
+- The source checks of `nxb build` read the files of `RomFS.img` (Unreal paks with IoStore tables, Frostbite, PKZ, GFPAK, Unreal 3, SPIR-V, GLSL, Trinity and the NRO imports),
+  as `profile_guess.build_sources` does. The counts are identical to the script on a synthetic RomFS (`crates/nxb-build/tests/sources.rs`).
 - The split reads zip members compressed with bzip2 or lzma. The decoders are `nxb-split::bzip2` (new) and `nxb-split::unity::lzma`.
 - The split reads BND3 archives whose entry names are Shift JIS with double-byte characters. The decoder is `nxb-split::sjis` (new). Its table is made by `tools/gen_sjis_table.py`.
 - The split reads the CRA archive family (`nxb-split::cra`, new). The file tables come from the NROs of `DM_NRO_DIR`, and each NRO is scanned like main. New `jobs::plan_with` takes the NROs. It was checked with a synthetic fixture made by `tools/gen_cra_fixture.py`.
 - The extract reads a sparse base program together with its update NSP (`nxb-extract::sparse`, new). The base alone still stops with exit code 4. The reader follows the Atmosphere sparse storage and was checked with a synthetic fixture.
+
+### Fixed
+
+- The profile header follows the current engine `game.py`. It has the keys `fps_max` (`DM_GAME_FPS_MAX`) and `draw_barriers` (`DM_GAME_DRAW_BARRIERS_GAME`) now.
+  The key `tex_bc_cpu` is gone. The headers of all profiles, the multi-program header and the app settings files are identical to the engine scripts again.
 
 ## 0.5.1
 
@@ -48,7 +63,7 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 - **`nxb rewrite` follows the current engine.** The script `patch_nso.py` changed in 551 lines after 0.5.0. This release ports the changes.
   The rules in `data/rewrite-rules` come from the current engine (147 rule files). The pins give the two hashes in the message.
   `nxb build` stops at the rewrite step when the engine files differ from the pinned files. It gives exit code 1 and the message. `nxb rewrite` gives exit code 4.
-  **The finder `ue_region` is not ported.** A main module with `SwitchVirtualAddressSpaceSize` gives exit code 4.
+  The finder `ue_region` was not ported in this release.
 - `nxb build` has more inputs, more options and fixed exit codes (the next section).
 
 ### Added

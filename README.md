@@ -45,7 +45,7 @@ more titles.
 | Extract, XCI, merged packages (`--app`), dump folders | synthetic fixtures only | byte-identical to the reference extractors. No real sample was available |
 | Extract, NSZ | one real file and synthetic fixtures | the decoded NCA is identical to the output of the reference decompressor. The NCZ block mode was not checked on real data |
 | App icon, companion app | one title | byte-identical |
-| App settings file | 142 profiles, 425 outputs | byte-identical. One multi-program header is not ported |
+| App settings file | 142 profiles, 425 outputs | byte-identical. The header of the multi-program profile is ported. The headers of all profiles are identical to `game.py header` |
 | Mac host | one title | reuse key and decoder inputs are identical. The binary is not byte-identical, also not between two runs of the reference script |
 | Extract | two more titles (one with an update, `--updates-only`) | `RomFS.img`, ExeFS, control data and icon are byte-identical |
 | Shader step, Mac | one full run | 74,421 of 74,422 files are byte-identical. The listing `_b_cas.txt` differs by design |
@@ -56,7 +56,7 @@ more titles.
 | iOS stages (`nxb ios`) | generators and workspace writer on real and synthetic inputs, one title for the IPA | the generators are byte-identical. 75 of 75 IPA entries are equal in name, method, sizes, CRC and attributes. Two entries are equal in part only: the executable (only `__LINKEDIT` differs) and the font file |
 | Overlap in `nxb build` | one title, extract, split and shaders reused | the event streams are the same, except the times. 58,211 of 58,211 paths exist in both outputs. All files are byte-identical, except two rebuilt Mach-O files and their lines in `CodeResources` |
 | Shader step translator | MSL written by the Rust translator | not compared byte for byte with the reference build scripts. GPU tests validate it |
-| Rewrite (`nxb rewrite`), current engine (0.5.1) | 111 modules: 9 real, 4 synthetic and 98 NRO modules | `.patched.bin`, the six tables and `build_src.sha256` are byte-identical in 111 of 111. The finder `ue_region` is not ported |
+| Rewrite (`nxb rewrite`), current engine (0.5.1) | 111 modules: 9 real, 4 synthetic and 98 NRO modules | `.patched.bin`, the six tables and `build_src.sha256` are byte-identical in 111 of 111. |
 | Rewrite (`nxb rewrite`), earlier script | 25 real modules, with ZBIC, NRO and frame step stubs | all tables, `.patched.bin` and the fixups are byte-identical. 98 of 98 NRO modules also. The script changed after this comparison |
 | Profile files, survey and `nxb profile` (0.5.1) | 1,115 tables of 145 profiles, 11 extractions, 6 surveys | read and write of the tables: 1,115 of 1,115. Guess: 11 of 11. Survey and provisional profile: 6 of 6. Registered profile check: 10 of 10 |
 | Split, ZBIC segments (0.5.1) | the four modules of one Switch 2 package, and a synthetic file | each segment hash is correct |
@@ -103,7 +103,7 @@ limits it. The own front end is not byte-identical in the validated mode.
 - The own-identical allow list is not in this repository. Without it, only the raw path runs. A new Metal toolchain version has no verdicts, and it turns the own tiers off.
 - The pipeline archive uses Apple tools. "Equal" means that the loader finds each base library.
 - The app stage puts about 58,000 loose library files in the app. The reference script packs one image file. The host reads the two forms. `DMSH_IOS_PULL=0` is not ported.
-- The rewrite step is checked against the current script on 111 modules. Not ported: the finder `ue_region` (a main module with `SwitchVirtualAddressSpaceSize` stops with exit code 4).
+- The rewrite step is checked against the current script on 111 modules.
   The finders for Unreal and Snowdrop have no real positive sample. The layouts of three more titles and some frame step stubs are checked with synthetic files only.
   Three more titles were not checked again with the current script.
 - Each change of the engine changes the hashes that the rules pin. Make the rules again (`nxb rewrite-rules`) and compare the oracle cases. If the engine differs from the pin,
@@ -116,8 +116,9 @@ limits it. The own front end is not byte-identical in the validated mode.
 - XCI, merged packages, dump folders, NSZ block mode and DLC were checked with synthetic files only. One real NSZ file was checked. `nxb build` does not split the shader content of DLC.
 - `nxb build` was run with a registered profile on one title (Mac app). A game without a profile gets a provisional profile. The heap check, the region check and the shader captures start the game, and they are not ported.
   Without `--no-heap-check`, such a game stops with exit code 4. With it, the memory layout is a guess. Nobody checked it with a run. The shader step and the stages after it were **not** run for the Switch 2 package.
-- Not ported in `nxb build`: the census of the rewrite sites and the source checks of Unreal paks and Frostbite headers.
-  Also not ported: `--program N` for N more than 0, `--platform mac` and the header of the settings file for one multi-program profile. `--allow-shader-regressions` has no effect. `--mac-sign` was not run with a real identity.
+- `nxb build` reads the files of `RomFS.img` at build time (Unreal paks, Frostbite headers and the other source checks of the reference script). They were checked with synthetic files only.
+  `--platform mac` (the development build) ends with the command that runs the game on the Mac. It does not run the pipeline prebuild, which starts the host. It does not set `DM_JIT_CAPTURE` either.
+  `--program N` and the other programs of a multi-program profile are built for `--platform mac` and `mac-app`. They were checked with synthetic files only. An iOS build of a profile with `programs` packs the first program only. `--allow-shader-regressions` has no effect. `--mac-sign` was not run with a real identity.
 - iOS: no device test. The IPA writer is serial.
 - The overlap of stages is partial. The shader step does not start while the extract runs. Nobody timed a cold full run on a quiet machine. Each gain from overlap, the host and the raw path is an estimate.
 - `nxb cache` exists. The shader step does not write cache entries at this time, thus the cache is empty. `--shader-manifest` and `--partial` have unit tests only.
@@ -170,7 +171,7 @@ The tests for this are small. Refer to the section 0.5.0 of the changelog.
 
 | command | purpose |
 |---|---|
-| `nxb build` | the whole build. `nxb build --platform mac-app` (or `ios`) runs all ported stages. `--dry-run` prints the stage graph and the cache keys. It takes NSP, NSZ, XCI, XCZ, merged packages (`--app`), `.nup` (`--nup`), dump folders (`--dump`) and DLC (`--aoc`). A game without a profile gets a provisional profile (`--provisional`, `--survey-only`, `--no-heap-check`, `--profile-out`). Exit codes: 0, 1, 2, 3, 4, 6 and 130. Refer to [docs/pipeline-stages.md](docs/pipeline-stages.md) |
+| `nxb build` | the whole build. `nxb build --platform mac-app` (or `mac`, `ios`) runs all ported stages. `--dry-run` prints the stage graph and the cache keys. It takes NSP, NSZ, XCI, XCZ, merged packages (`--app`), `.nup` (`--nup`), dump folders (`--dump`) and DLC (`--aoc`). A game without a profile gets a provisional profile (`--provisional`, `--survey-only`, `--no-heap-check`, `--profile-out`). Exit codes: 0, 1, 2, 3, 4, 6 and 130. Refer to [docs/pipeline-stages.md](docs/pipeline-stages.md) |
 | `nxb profile` | `guess`, `show`, `check` and `manifest`: the survey values of a game and the checks of a profile |
 | `nxb extract` | NSP, XCI, NSZ, XCZ, Switch 2 package (`.nup`, no keys needed) or dump folder (`--dump`) to RomFS images, ExeFS, control data and icon |
 | `nxb split` | shader split of extracted images into package records and tables. Exit code 4 means unsupported format |
@@ -197,7 +198,8 @@ Run `nxb help build` for the full usage. Refer to [docs/pipeline-stages.md](docs
 
 | option | meaning |
 |---|---|
-| `--platform mac-app\|ios` | the target. The default is `ios` |
+| `--platform mac\|mac-app\|ios` | the target. `mac` is the development build: it prints the command that runs the game. The default is `ios` |
+| `--program N` | one program of a multi-program application is a game of its own. Its title ID is the application's title ID + N |
 | `--engine DIR`, `-k KEYS`, `--work-dir D`, `-o OUT`, `--progress json` | the engine folder, the keys file, the work folder, the output and the NDJSON events |
 | `--nup FILE`, `--dump FOLDER`, `--app ID`, `--title-id ID`, `--aoc PACKAGE` | the inputs: a Switch 2 package, a dump folder, a game in a merged package, DLC |
 | `--env-file`, `--motion`, `--no-motion`, `--seen-shaders`, `--romfs bundle\|separate`, `--keep-extracted`, `--show-fps` | the options of the reference script |

@@ -42,6 +42,7 @@ pub fn main(args: &[String]) -> i32 {
     let (mut mem, mut cache) = (1024u64, 512usize);
     let mut html = false;
     let mut app = None;
+    let mut program = None;
     let mut discard_images = false;
     let (mut allow_damaged, mut manifest) = (false, false);
     let mut aoc: Option<(PathBuf, Option<u64>)> = None;
@@ -56,6 +57,10 @@ pub fn main(args: &[String]) -> i32 {
             "--out" => out = next(i + 1).map(PathBuf::from),
             "--app" => match next(i + 1).and_then(|v| u64::from_str_radix(&v, 16).ok()) {
                 Some(v) => app = Some(v),
+                None => return usage(),
+            },
+            "--program" => match next(i + 1).and_then(|v| u64::from_str_radix(&v, 16).ok()) {
+                Some(v) => program = Some(v),
                 None => return usage(),
             },
             "--digests" => digests = next(i + 1).map(PathBuf::from),
@@ -183,6 +188,7 @@ pub fn main(args: &[String]) -> i32 {
         base_outputs,
         split,
         app,
+        program,
         discard_images,
         allow_damaged,
         manifest,

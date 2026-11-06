@@ -13,8 +13,7 @@ use crate::keys::KeySet;
 use crate::nca::{Nca, open_package};
 use crate::storage::{FileStorage, Storage};
 use crate::version::{
-    base_data, display_version, open_romfs_with, pick_programs, read_control, read_exefs,
-    title_name,
+    base_data, display_version, open_romfs_with, pick_program, read_control, read_exefs, title_name,
 };
 use crate::write::{ImageJob, ImageResult, write_images};
 
@@ -47,6 +46,9 @@ pub struct Request {
     /// content meta for the base game and the Patch content meta of `app | 0x800` for each update. None: every
     /// Application content meta's NCAs are kept and the lowest Program NCA is the game.
     pub app: Option<u64>,
+    /// The program to read from a multi-program application (`nx_extract --program=<title ID>`). None: the lowest
+    /// Program NCA, the application's own.
+    pub program: Option<u64>,
     /// Compute the images' digests without writing the images (`RomFS.img` is not created).
     pub discard_images: bool,
     /// `nx_extract --allow-damaged`: files whose data fails the hash check are written as read, listed, flagged in the
@@ -72,6 +74,7 @@ impl Default for Request {
             html: false,
             split: None,
             app: None,
+            program: None,
             discard_images: false,
             allow_damaged: false,
             manifest: false,
@@ -224,7 +227,7 @@ pub fn extract(req: &Request) -> Result<Summary> {
     let mut logs = Vec::new();
     let base_shared;
     {
-        let (bp, _, ctrl) = pick_programs(&base, None)?;
+        let (bp, _, ctrl) = pick_program(&base, None, req.program)?;
         if req.base_outputs || req.updates.is_empty() {
             refuse_sparse(bp)?;
         }
@@ -250,7 +253,7 @@ pub fn extract(req: &Request) -> Result<Summary> {
         base_shared = shared;
     }
     for ((u, u_log), (_, out)) in updates.iter().zip(&req.updates) {
-        let (bp, up, ctrl) = pick_programs(&base, Some(u))?;
+        let (bp, up, ctrl) = pick_program(&base, Some(u), req.program)?;
         let up = up.ok_or_else(|| ExtractError::format("no update program"))?;
         let mut log = format!(
             "{base_log}{u_log}title {:016x}, update {:016x}\n",

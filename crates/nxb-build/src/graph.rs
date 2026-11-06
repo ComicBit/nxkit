@@ -50,8 +50,12 @@ pub struct Node {
 /// Everything a build needs to know before it starts.
 #[derive(Debug)]
 pub struct Build {
-    /// Base title ID.
+    /// The game's title ID. With `--program N`: the program's (the application's + N).
     pub title: String,
+    /// `--program N`: which program of a multi-program application (0: the application's own).
+    pub program: u64,
+    /// A Mac-only build for development (`--platform mac`): the Mac host and the command that runs the game, no app.
+    pub mac_run: bool,
     /// Base NSP, updates (version, path).
     pub base: PathBuf,
     /// Updates.
@@ -87,6 +91,8 @@ impl Build {
     pub(crate) fn for_test(work: PathBuf, profile: PathBuf) -> Build {
         Build {
             title: "0400000000000000".into(),
+            program: 0,
+            mac_run: false,
             base: PathBuf::new(),
             updates: Vec::new(),
             package: "v0".into(),
@@ -120,7 +126,14 @@ impl Build {
 
 /// Discovers the inputs and builds the graph.
 pub fn plan(a: &Args) -> Result<Build, String> {
-    let src = crate::inputs::discover(a)?;
+    let mut src = crate::inputs::discover(a)?;
+    // one program of a multi-program application is a game of its own: its title ID is the application's + N, and the
+    // packages are still read as the application
+    let program = u64::from(a.program.unwrap_or(0));
+    if program != 0 {
+        src.app_flag = Some(src.app);
+        src.app += program;
+    }
     let title = format!("{:016X}", src.app);
     let (base, updates) = (src.base.clone(), src.updates.clone());
     // the folder the build folder and the output default into: the input folder, or the one holding the .nup file
@@ -279,21 +292,26 @@ pub fn plan(a: &Args) -> Result<Build, String> {
         key: key("host", &[("work", work.display().to_string())]),
         reused: None,
     });
-    let app_deps: Vec<usize> = (2..nodes.len()).collect();
-    nodes.push(Node {
-        name: "Mac app".into(),
-        deps: app_deps,
-        key: key(
-            "app",
-            &[
-                ("out", out.display().to_string()),
-                ("package", package.clone()),
-            ],
-        ),
-        reused: None,
-    });
+    let mac_run = a.platform == "mac";
+    if !mac_run {
+        let app_deps: Vec<usize> = (2..nodes.len()).collect();
+        nodes.push(Node {
+            name: "Mac app".into(),
+            deps: app_deps,
+            key: key(
+                "app",
+                &[
+                    ("out", out.display().to_string()),
+                    ("package", package.clone()),
+                ],
+            ),
+            reused: None,
+        });
+    }
     let mut b = Build {
         title,
+        program,
+        mac_run,
         base,
         updates,
         package,
@@ -343,7 +361,12 @@ pub fn describe(b: &Build) -> String {
     for (t, v, p) in &b.src.dlc {
         let _ = writeln!(s, "dlc {t:016X} v{v} {}", p.display());
     }
-    let _ = writeln!(s, "app {}", b.out.display());
+    if b.program != 0 {
+        let _ = writeln!(s, "program {} of the application", b.program);
+    }
+    if !b.mac_run {
+        let _ = writeln!(s, "app {}", b.out.display());
+    }
     for (i, n) in b.nodes.iter().enumerate() {
         let deps: Vec<String> = n.deps.iter().map(|d| b.nodes[*d].name.clone()).collect();
         let _ = writeln!(
@@ -366,12 +389,9 @@ pub fn describe(b: &Build) -> String {
     s
 }
 
-/// Runs the build. Stages overlap where the graph allows ([`crate::order`]): the Mac host from the start, the app's
-/// companion app, icon and settings once the extract and the host are done (beside the shader step), the first
-/// archive streamed beside the shader step ([`crate::pipeline`]); the events stay those of a run one after another.
+/// Runs the build ([`crate::stages::run_nodes`]; the events stay those of a run one after another). A multi-program
+/// application builds its other programs too (`crate::programs`), a Mac-only build ends with the run command.
 pub fn run(a: &Args, p: &std::sync::Arc<Progress>) -> Result<(), String> {
-    use crate::order::{Stage, Work};
-    use std::sync::Mutex;
     let mut b = plan(a)?;
     if a.dry_run {
         print!("{}", describe(&b));
@@ -410,104 +430,11 @@ pub fn run(a: &Args, p: &std::sync::Arc<Progress>) -> Result<(), String> {
     if a.platform == "ios" {
         return crate::iosbuild::run(a, &b, p);
     }
-    p.plan_more(b.nodes.len());
-    let b = &b;
-    let streamed: Mutex<Option<String>> = Mutex::new(None);
-    let archive_error: Mutex<Option<String>> = Mutex::new(None);
-    let no_archive = std::sync::atomic::AtomicBool::new(false);
-    // the script's rule: a pipeline archive that fails is no archive for the app (the host builds its bases on the first
-    // start), the build goes on
-    let give_up = |e: String| -> crate::order::Outcome {
-        p.say(&format!(
-            "[RED] pipeline archive: {e}; the app is packed without one and builds its pipeline bases on its first start (--gpu none skips this step)"
-        ));
-        no_archive.store(true, std::sync::atomic::Ordering::SeqCst);
-        Ok("failed, the app is packed without one".into())
-    };
-    let (archive_error, no_archive) = (&archive_error, &no_archive);
-    let parts: Mutex<Option<crate::host::app::AppParts>> = Mutex::new(None);
-    let (streamed, parts) = (&streamed, &parts);
-    let previous = b.out.is_dir().then(|| b.out.clone());
-    let host = b.nodes.iter().position(|n| n.name == "Mac host");
-    let mut stages: Vec<Stage<'_>> = Vec::new();
-    for (i, n) in b.nodes.iter().enumerate() {
-        let mut deps = n.deps.clone();
-        let work = match (&n.reused, i, n.name.as_str()) {
-            // reused images still need their patched modules: the rewrite runs (or stops the build) here
-            (Some(r), 0, _) => {
-                let r = r.clone();
-                Work::Turn(Box::new(move || {
-                    let note =
-                        crate::rewrite::ensure(&b.engine, &b.profile.0, &b.work, &b.package)?;
-                    Ok(format!(
-                        "reused: {r}{}",
-                        note.map(|n| format!(", {n}")).unwrap_or_default()
-                    ))
-                }))
-            }
-            (Some(r), _, _) => Work::Reused(format!("reused: {r}")),
-            (_, 0, _) => Work::Turn(Box::new(move || crate::extract_stage::run(a, b, p))),
-            (_, 1, _) if b.split_fused() => Work::Reused("in the extract's pass".into()),
-            (_, 1, _) => Work::Turn(Box::new(move || crate::extract_stage::split(a, b, p))),
-            (_, 2, _) => Work::Turn(Box::new(move || {
-                crate::provisional::take_tables(b)?;
-                // the shader step and the first architecture's archive together (crate::pipeline)
-                let o = crate::pipeline::shaders_and_archive(a, b, p)?;
-                *streamed.lock().map_err(|_| "lock")? = o.archive;
-                *archive_error.lock().map_err(|_| "lock")? = o.archive_error;
-                Ok(o.shaders)
-            })),
-            (_, _, name) if name.starts_with("Pipeline archive") => {
-                let arch = name.trim_start_matches("Pipeline archive ");
-                Work::Turn(Box::new(move || {
-                    let made = streamed.lock().map_err(|_| "lock")?.take();
-                    let failed = archive_error.lock().map_err(|_| "lock")?.take();
-                    match (made, failed) {
-                        (Some(s), _) => Ok(s),
-                        (None, Some(e)) => give_up(e),
-                        (None, None) => match crate::pipeline::stage_pso(b, arch) {
-                            Ok(s) => Ok(s),
-                            Err(e) => give_up(crate::pipeline::archive_failure(&e)),
-                        },
-                    }
-                }))
-            }
-            (_, _, "Mac host") => Work::Early(Box::new(move || {
-                crate::host::machost::stage(&b.engine, &b.work, &b.title)
-            })),
-            _ => {
-                // the app's parts (companion app, icon, settings) need the extract and the host only: made ahead
-                let prev = previous.clone();
-                stages.push(Stage {
-                    name: None,
-                    deps: std::iter::once(0).chain(host).collect(),
-                    work: Work::Early(Box::new(move || {
-                        let made = crate::host::app::prepare(a, b, prev.as_deref())?;
-                        *parts.lock().map_err(|_| "lock")? = Some(made);
-                        Ok(String::new())
-                    })),
-                });
-                deps.push(stages.len() - 1);
-                let prev = previous.clone();
-                Work::Turn(Box::new(move || {
-                    let made = parts.lock().map_err(|_| "lock")?.take();
-                    crate::app_stage::stage_app(
-                        a,
-                        b,
-                        prev,
-                        made.ok_or("the app's parts were not made")?,
-                        no_archive.load(std::sync::atomic::Ordering::SeqCst),
-                    )
-                }))
-            }
-        };
-        stages.push(Stage {
-            name: Some(n.name.clone()),
-            deps,
-            work,
-        });
+    let programs = crate::programs::before_app(a, &b, p)?;
+    crate::stages::run_nodes(a, &b, p, &programs)?;
+    if b.mac_run {
+        return crate::mac_run::finish(a, &b, p);
     }
-    crate::order::run(p, stages)?;
     p.say(&format!("done: {}", b.out.display()));
     Ok(())
 }

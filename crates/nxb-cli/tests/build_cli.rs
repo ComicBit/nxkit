@@ -72,11 +72,11 @@ fn a_folder_without_a_package_is_a_clear_error() {
 fn exit_codes_by_class() {
     let d = tmp("codes");
     let p = d.to_str().unwrap();
-    // bad arguments 2, not implemented 4
+    // bad arguments 2, a folder with no package 1
     assert_eq!(build(&[p, "--platform", "tv"]).0, Some(2));
     assert_eq!(build(&[p, "--threads"]).0, Some(2));
-    assert_eq!(build(&[p, "--platform", "mac"]).0, Some(4));
-    assert_eq!(build(&[p, "--program", "3"]).0, Some(4));
+    assert_eq!(build(&[p, "--platform", "mac"]).0, Some(1));
+    assert_eq!(build(&[p, "--program", "3"]).0, Some(1));
     assert_eq!(
         build(&[p, "--platform", "mac-app", "--romfs", "separate"]).0,
         Some(2)
@@ -199,6 +199,21 @@ fn dump_folder_is_an_input() {
     ]);
     assert!(work.join("extract/v65536/RomFS.img").is_file(), "{out}");
     assert!(work.join("extract/v0/RomFS.img").is_file(), "{out}");
+    // a Mac-only build has the Mac host and no app
+    let (code, out, err) = run(&[d.to_str().unwrap(), "--platform", "mac"]);
+    assert_eq!(code, Some(0), "{out}{err}");
+    assert!(
+        out.contains("Mac host") && !out.contains("Mac app"),
+        "{out}"
+    );
+    assert!(!out.contains("\napp "), "{out}");
+    // a dump is one program's files
+    let (code, out, _) = run(&[d.to_str().unwrap(), "--program", "1"]);
+    assert_eq!(code, Some(2));
+    assert!(
+        out.contains("A dump folder is read as one program's files"),
+        "{out}"
+    );
     // the wrong game
     let (code, out, _) = run(&[d.to_str().unwrap(), "--title-id", "0100000000009000"]);
     assert_eq!(code, Some(1));
