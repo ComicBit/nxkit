@@ -29,6 +29,9 @@ impl Em<'_> {
 
     /// The body of function `i`: its locals and statements. The entry adds the trailing return of the main function.
     pub fn body(&mut self, i: usize) -> R<String> {
+        if let Some(b) = super::hmma::body(self, i)? {
+            return Ok(b);
+        }
         self.func = i;
         self.may_return = false;
         let f = self.info.functions.get(i).ok_or("unknown function")?;
