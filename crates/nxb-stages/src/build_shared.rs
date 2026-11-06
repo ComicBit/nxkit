@@ -1,27 +1,27 @@
 //! The state shared by every task of [`crate::build`] and its output helpers: libraries per target (Mac and, when asked
 //! for, iOS from the same MSL, `IOSOUT` in `dmsh_build.py`) through single-flight and the store, outputs cloned from
-//! the store, spirv-cross.
+//! the store.
 
 use crate::build::Span;
 use crate::build::fatal;
 use crate::build_finish::Gate;
 use crate::inputs::ShaderInputs;
-use crate::xlatehost::Xlate;
+use crate::xlate_cache::Xlate;
 use nxb_error::Fatal;
 use nxb_model::{ContentKey, FileDigest};
 use nxb_pyjson::{Value, dumps_indent};
 use nxb_sched::SingleFlight;
+use nxb_xlate::msl::StageInputs;
 use nxb_shader::pch;
-use nxb_shader::side::{self, Unit};
+use nxb_shader::side;
 use nxb_shader::target::{MAC, TargetConv};
 use nxb_store::Store;
-use nxb_tool::{Io, MetalTools, ProcessTool, Tool};
+use nxb_tool::{Io, MetalTools};
 use nxb_tool::{ProcessRegistry, Resolver, SdkRoots};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
 use std::time::Instant;
 
@@ -45,8 +45,6 @@ pub(crate) struct Libs {
 /// State shared by every task of a build.
 pub(crate) struct Shared {
     pub(crate) out: PathBuf,
-    pub(crate) work: PathBuf,
-    pub(crate) scratch: PathBuf,
     pub(crate) chain: String,
     pub(crate) ident: String,
     pub(crate) compiler_id: String,
@@ -55,10 +53,9 @@ pub(crate) struct Shared {
     pub(crate) pch: Option<PathBuf>,
     pub(crate) io: Io,
     pub(crate) store: Store,
-    pub(crate) sc: ProcessTool,
-    pub(crate) translator: crate::xlate_cache::CachedTranslator<Xlate>,
-    /// spirv-cross's build id (SHA-256 of the binary): part of the MSL cache key.
-    pub(crate) sc_id: String,
+    pub(crate) xlate: Xlate,
+    /// The inputs of the pixel shaders finished so far, for their vertex shaders.
+    pub(crate) inputs_of: Mutex<BTreeMap<String, StageInputs>>,
     pub(crate) inputs: ShaderInputs,
     pub(crate) pairs: BTreeMap<String, BTreeSet<String>>,
     pub(crate) flights: SingleFlight<ContentKey, Result<FileDigest, String>>,
@@ -74,7 +71,6 @@ pub(crate) struct Shared {
     pub(crate) used: Mutex<BTreeSet<String>>,
     pub(crate) spans: Mutex<Vec<Span>>,
     pub(crate) t0: Instant,
-    pub(crate) n: AtomicU64,
 }
 
 impl Shared {
@@ -99,37 +95,6 @@ impl Shared {
                 start: t.duration_since(self.t0),
                 wall: t.elapsed(),
             });
-    }
-
-    /// spirv-cross on a module: the SPIR-V through a temp file (spirv-cross seeks its input), the MSL from stdout.
-    pub(crate) fn cross(&self, spv: &[u8], args: &[String]) -> Result<String, String> {
-        // early cutoff: the MSL of a SPIR-V module under (spirv-cross id, arguments, SPIR-V bytes)
-        let key = ContentKey::builder("nxb.msl.v1")
-            .field_str("spirv-cross", &self.sc_id)
-            .field_str("args", &args.join("\0"))
-            .field("spv", spv)
-            .finish();
-        if let Ok(Some(m)) = self.store.lookup(&key)
-            && let Some(f) = m.files.first()
-            && let Ok(b) = self.store.read_blob(&f.digest.sha256)
-            && let Ok(t) = String::from_utf8(b)
-        {
-            return Ok(t);
-        }
-        let n = self.n.fetch_add(1, Ordering::Relaxed);
-        let dir = self.scratch.join("tmp");
-        let sp = dir.join(format!("x{n}.spv"));
-        fs::write(&sp, spv).map_err(|e| e.to_string())?;
-        let env = nxb_tool::EnvPolicy::spirv_cross(&dir).map_err(|e| e.to_string())?;
-        let inv = self.sc.invocation().args(args.iter()).arg(&sp).env(env);
-        let r = self.sc.run(&inv);
-        let _ = fs::remove_file(&sp);
-        let c = r.map_err(|e| e.stderr_head.trim().to_string())?;
-        let mut w = self.store.entry(key);
-        if w.add_bytes("msl", &c.stdout).is_ok() {
-            let _ = w.commit();
-        }
-        String::from_utf8(c.stdout).map_err(|e| e.to_string())
     }
 
     /// A source's libraries for every target of the build.
@@ -213,49 +178,44 @@ impl Shared {
         Ok(())
     }
 
-    /// A pixel shader's side libraries (`ps_libraries`): the unit compiled once per target and cut into `_b` and
-    /// `_bx`. `Ok(false)`: the unit does not build or cut (the caller builds the plain source).
-    pub(crate) fn side(&self, key: &str, u: &Unit) -> Result<bool, String> {
-        let Ok(l) = self.library(&u.source) else {
-            return Ok(false);
+    /// A pixel shader's side libraries: the unit compiled once per target and cut into `_b` and `_bx`, the functions
+    /// of `names` going to `_bx`. The error is a status and its detail.
+    pub(crate) fn side(&self, key: &str, src: &str, names: &[String]) -> Result<(), (String, String)> {
+        let metal = |e: String| ("metal failed".to_string(), e);
+        let internal = |e: String| ("internal error".to_string(), e);
+        let cut = |d: &FileDigest| {
+            let b = self.lib_bytes(d).map_err(metal)?;
+            side::cut(&b, names).map_err(|e| metal(e.to_string()))
         };
-        let names = u.side();
-        let mac = self
-            .lib_bytes(&l.mac)
-            .ok()
-            .and_then(|b| side::cut(&b, &names).ok());
+        let l = self.library(src).map_err(metal)?;
+        let mac = cut(&l.mac)?;
         let ios = match (&self.ios, &l.ios) {
-            (Some(_), Some(d)) => match self
-                .lib_bytes(d)
-                .ok()
-                .and_then(|b| side::cut(&b, &names).ok())
-            {
-                Some(c) => Some(Some(c)),
-                None => return Ok(false),
-            },
-            _ => Some(None),
+            (Some(t), Some(d)) => Some((t, cut(d)?)),
+            _ => None,
         };
-        let (Some((b, x)), Some(ios)) = (mac, ios) else {
-            return Ok(false);
-        };
-        self.write(key, "_b.metallib", &b)?;
-        self.write(key, "_bx.metallib", &x)?;
-        if let (Some(t), Some((b, x))) = (&self.ios, ios) {
-            fs::write(t.out.join(format!("{key}_b.metallib")), b).map_err(|e| e.to_string())?;
-            fs::write(t.out.join(format!("{key}_bx.metallib")), x).map_err(|e| e.to_string())?;
+        self.write(key, "_b.metallib", &mac.0).map_err(internal)?;
+        self.write(key, "_bx.metallib", &mac.1).map_err(internal)?;
+        if let Some((t, (b, x))) = ios {
+            fs::write(t.out.join(format!("{key}_b.metallib")), b)
+                .map_err(|e| internal(e.to_string()))?;
+            fs::write(t.out.join(format!("{key}_bx.metallib")), x)
+                .map_err(|e| internal(e.to_string()))?;
         }
-        Ok(true)
+        Ok(())
     }
 
-    /// `<key>_b.json` per target, with that target's `chain_metal` and `chain_compiler` (`MTL.with_compiler`).
-    pub(crate) fn write_json(&self, key: &str, mut refl: Value) -> Result<(), String> {
+    /// `<key><suffix>.json` per target, with that target's `chain_metal` and `chain_compiler` (`MTL.with_compiler`).
+    pub(crate) fn write_json(&self, key: &str, suffix: &str, mut refl: Value) -> Result<(), String> {
         refl.set("chain_metal", Value::str(MAC.record()));
         refl.set("chain_compiler", Value::str(self.ident.clone()));
-        self.write(key, "_b.json", dumps_indent(&refl, 1).as_bytes())?;
+        self.write(key, &format!("{suffix}.json"), dumps_indent(&refl, 1).as_bytes())?;
         if let Some(t) = &self.ios {
             refl.set("chain_metal", Value::str(t.conv.record()));
             refl.set("chain_compiler", Value::str(t.ident.clone()));
-            fs::write(t.out.join(format!("{key}_b.json")), dumps_indent(&refl, 1))
+            fs::write(
+                t.out.join(format!("{key}{suffix}.json")),
+                dumps_indent(&refl, 1),
+            )
                 .map_err(|e| e.to_string())?;
         }
         Ok(())

@@ -94,39 +94,6 @@ impl EnvPolicy {
             .set("SDKROOT", sdkroot.as_os_str())
     }
 
-    /// `spirv-cross`: `PATH` and `TMPDIR`.
-    pub fn spirv_cross(tmpdir: &Path) -> Result<Self, EnvPolicyError> {
-        EnvPolicy::empty()
-            .set("PATH", "/usr/bin:/bin")?
-            .set("TMPDIR", tmpdir.as_os_str())
-    }
-
-    /// The translator process bridge: `HOME`, `TMPDIR`, `PATH`, telemetry off, and the optional `DOTNET_ROOT`,
-    /// `XLATE_DEBUG`, `XLATE_REDUCED` with today's values.
-    pub fn translator(
-        home: &Path,
-        tmpdir: &Path,
-        dotnet_root: Option<&OsStr>,
-        xlate_debug: Option<&OsStr>,
-        xlate_reduced: Option<&OsStr>,
-    ) -> Result<Self, EnvPolicyError> {
-        let mut p = EnvPolicy::empty()
-            .set("PATH", "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin")?
-            .set("HOME", home.as_os_str())?
-            .set("TMPDIR", tmpdir.as_os_str())?
-            .set("DOTNET_CLI_TELEMETRY_OPTOUT", "1")?;
-        for (name, v) in [
-            ("DOTNET_ROOT", dotnet_root),
-            ("XLATE_DEBUG", xlate_debug),
-            ("XLATE_REDUCED", xlate_reduced),
-        ] {
-            if let Some(v) = v {
-                p = p.set(name, v)?;
-            }
-        }
-        Ok(p)
-    }
-
     /// The variables, sorted by name.
     pub fn vars(&self) -> impl Iterator<Item = (&OsStr, &OsStr)> {
         self.vars
@@ -183,21 +150,6 @@ mod tests {
             .collect();
         assert_eq!(names, ["HOME", "PATH", "SDKROOT", "TMPDIR"]);
         assert_eq!(p.get("SDKROOT"), Some(OsStr::new("/sdk")));
-    }
-
-    #[test]
-    fn translator_optional_vars() {
-        let p = EnvPolicy::translator(
-            Path::new("/h"),
-            Path::new("/t"),
-            None,
-            Some(OsStr::new("1")),
-            None,
-        )
-        .unwrap();
-        assert_eq!(p.get("XLATE_DEBUG"), Some(OsStr::new("1")));
-        assert_eq!(p.get("DOTNET_ROOT"), None);
-        assert_eq!(p.get("DOTNET_CLI_TELEMETRY_OPTOUT"), Some(OsStr::new("1")));
     }
 
     #[test]
