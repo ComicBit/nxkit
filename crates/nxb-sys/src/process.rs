@@ -33,6 +33,12 @@ pub fn kill_group(pgid: u32, sig: Signal) -> io::Result<()> {
     imp::kill_group(pgid, sig)
 }
 
+/// Set the nice value of every process in group `pgid` (`setpriority(PRIO_PGRP)`), from 0 (normal) to 20 (lowest).
+/// Children the group starts later inherit it. A group that no longer exists (`ESRCH`) is not an error.
+pub fn set_group_nice(pgid: u32, nice: i32) -> io::Result<()> {
+    imp::set_group_nice(pgid, nice)
+}
+
 /// CPU and memory of one reaped child.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct ChildUsage {
@@ -96,6 +102,7 @@ mod imp {
 
     unsafe extern "C" {
         fn killpg(pgrp: i32, sig: i32) -> i32;
+        fn setpriority(which: i32, who: u32, prio: i32) -> i32;
         fn waitid(idtype: u32, id: u32, infop: *mut SigInfoBuf, options: i32) -> i32;
         #[link_name = "wait4"]
         fn c_wait4(pid: i32, status: *mut i32, options: i32, rusage: *mut RUsage) -> i32;
@@ -159,6 +166,24 @@ mod imp {
         }
     }
 
+    pub(super) fn set_group_nice(pgid: u32, nice: i32) -> io::Result<()> {
+        const PRIO_PGRP: i32 = 1;
+        if pgid <= 1 {
+            return Err(io::Error::from(io::ErrorKind::InvalidInput));
+        }
+        // SAFETY: setpriority takes three integers and has no memory effects.
+        let rc = unsafe { setpriority(PRIO_PGRP, pgid, nice.clamp(0, 20)) };
+        if rc == 0 {
+            return Ok(());
+        }
+        let err = io::Error::last_os_error();
+        if err.raw_os_error() == Some(ESRCH) {
+            Ok(())
+        } else {
+            Err(err)
+        }
+    }
+
     pub(super) fn wait_exit_nowait(pid: u32) -> io::Result<()> {
         let mut info = SigInfoBuf([0; 256]);
         loop {
@@ -189,6 +214,10 @@ mod imp {
         Err(io::Error::from(io::ErrorKind::Unsupported))
     }
 
+    pub(super) fn set_group_nice(_pgid: u32, _nice: i32) -> io::Result<()> {
+        Err(io::Error::from(io::ErrorKind::Unsupported))
+    }
+
     pub(super) fn wait4(_pid: u32) -> io::Result<(i32, super::ChildUsage)> {
         Err(io::Error::from(io::ErrorKind::Unsupported))
     }
@@ -205,6 +234,25 @@ mod tests {
     fn refuses_own_and_init_group() {
         assert!(kill_group(0, Signal::Kill).is_err());
         assert!(kill_group(1, Signal::Kill).is_err());
+        assert!(set_group_nice(1, 10).is_err());
+    }
+
+    #[test]
+    fn lowers_a_groups_priority() {
+        let mut child = Command::new("/bin/sleep")
+            .arg("30")
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        set_group_nice(pid, 10).unwrap();
+        let ps = Command::new("/bin/ps")
+            .args(["-o", "nice=", "-p", &pid.to_string()])
+            .output()
+            .unwrap();
+        kill_group(pid, Signal::Kill).unwrap();
+        let _ = child.wait();
+        assert_eq!(String::from_utf8_lossy(&ps.stdout).trim(), "10");
     }
 
     #[test]

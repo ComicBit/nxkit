@@ -210,6 +210,10 @@ mod imp {
         let pid = child.id();
         let registered = Registered { reg, pgid: pid };
         reg.register(pid);
+        if inv.nice > 0 {
+            // a lower priority is a hint: a child that already exited or a refused call changes nothing about the run
+            let _ = nxb_sys::process::set_group_nice(pid, inv.nice);
+        }
 
         let stdin = child.stdin.take();
         let stdout = child.stdout.take();

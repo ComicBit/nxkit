@@ -73,6 +73,7 @@ pub fn main(args: &[String]) -> i32 {
         ) * (1u64 << 30) as f64) as u64,
         pack_threads: num("pack-threads", 1.0) as u32,
         direct: None,
+        nice: 0,
     };
     let mut c = c;
     if let Some(j) = g("nt-jobs").and_then(|v| v.parse().ok()) {

@@ -70,6 +70,8 @@ pub struct Config {
     pub pack_threads: u32,
     /// Run `applegpu-nt -j N` and `air-pack` directly instead of `metal-tt` (which passes no `-j`).
     pub direct: Option<Direct>,
+    /// Nice value of the compiler runs (0 normal, up to 20 lowest), so they yield the CPU to a step running beside.
+    pub nice: i32,
 }
 
 /// The tools `metal-tt` drives, called directly (`-j 1` costs half the CPU of `metal-tt`'s threads).
@@ -148,6 +150,8 @@ pub struct Report {
     pub seconds: (f64, f64, f64),
     /// Peak memory reserved by running batches.
     pub peak_mem: u64,
+    /// Most compiler runs at once (streamed archive).
+    pub peak_runs: usize,
     /// Output size.
     pub size: u64,
     /// The merged archive came from the store (key: the batches' keys in merge order).
@@ -218,6 +222,7 @@ pub(crate) fn compile(
     key: &ContentKey,
     store: &Store,
     reg: &ProcessRegistry,
+    headroom: Option<&nxb_sched::Headroom>,
 ) -> Result<(PathBuf, BatchReport), String> {
     let mut rep = BatchReport {
         bases: batch.len(),
@@ -234,6 +239,8 @@ pub(crate) fn compile(
         rep.reused = true;
         return Ok((p, rep));
     }
+    // held until the piece is in the store: a run counts against the load until its compilers exited
+    let _permit = headroom.map(nxb_sched::Headroom::acquire);
     let dir = c.work.join(key.to_hex());
     let tmp = dir.join("tmp");
     fs::create_dir_all(&tmp).map_err(|e| format!("{}: {e}", tmp.display()))?;
@@ -249,6 +256,7 @@ pub(crate) fn compile(
             name,
             &inv.env(env.clone())
                 .cwd(&dir)
+                .nice(c.nice)
                 .timeout(Duration::from_secs(3600)),
             reg,
         )
@@ -364,7 +372,7 @@ pub fn build(c: &Config) -> Result<Report, String> {
             );
             // the largest batches first (they set the wall time)
             Task::new(move |_| {
-                let r = compile(&cfg, &script, &batches[i], &key, &store, &reg);
+                let r = compile(&cfg, &script, &batches[i], &key, &store, &reg, None);
                 if let Ok(mut g) = results.lock() {
                     g[i] = Some(r);
                 }
@@ -513,6 +521,7 @@ impl Config {
                 .map_or_else(Budget::default_memory, |m| m.saturating_sub(6 << 30)),
             pack_threads: 1,
             direct: None,
+            nice: 0,
         })
         .map(|mut c: Config| {
             // applegpu-nt -j 1 + air-pack, one run per core: half the CPU of metal-tt's own threads.

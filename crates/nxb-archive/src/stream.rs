@@ -5,18 +5,21 @@
 //! (`plan::plan`), hashed by their libraries' bytes and cut by content ([`cut`]) as in [`crate::build`], so the batch
 //! keys in the store stay content keys. At the end the pieces are merged in key order.
 //!
-//! Width: while the shader step runs, a few workers ([`StreamInputs::workers`]) leave it the cores; when it ends
-//! ([`Stream::finish`]) the stream widens to [`StreamInputs::workers_after`] (one run per slot, within memory), so the
-//! groups still waiting are not compiled three at a time (the reference title, wave 9: a 232 s tail after the shader step).
+//! Width: every compiler run takes a permit from a [`Headroom`] built from [`StreamInputs::limits`]. A few runs
+//! always go, more start while the machine's CPU and memory stay below the limits (90 % each by default), up to the
+//! ceiling. While the shader step keeps the cores busy the stream stays narrow; cores it leaves idle, and all of them
+//! once it ends, fill with compiler runs, one more per settle interval (the reference title, wave 9: a 232 s tail
+//! after the shader step at a fixed three).
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender, channel};
-use std::sync::{Condvar, Mutex, PoisonError};
+use std::sync::{Mutex, PoisonError};
 use std::time::Instant;
 
 use nxb_model::{ContentKey, sha256};
+use nxb_sched::{Headroom, Limits};
 use nxb_store::Store;
 use nxb_tool::ProcessRegistry;
 
@@ -44,51 +47,17 @@ pub struct StreamInputs {
     pub zero: bool,
     /// Pairs per group (about, a group's identity hash cuts it, at most 4x).
     pub group_target: usize,
-    /// Worker threads (concurrent `metal-tt`) while the shader step runs.
-    pub workers: usize,
-    /// Worker threads after [`Stream::finish`] (the shader step ended; at least `workers`).
-    pub workers_after: usize,
+    /// Concurrent compiler runs: floor, ceiling and the load limits in between.
+    pub limits: Limits,
 }
 
-/// Opens once: the shader step ended, the extra workers may start.
-#[derive(Default)]
-struct Gate {
-    open: Mutex<bool>,
-    cv: Condvar,
-}
-
-impl Gate {
-    fn open(&self) {
-        *self.open.lock().unwrap_or_else(PoisonError::into_inner) = true;
-        self.cv.notify_all();
-    }
-
-    fn wait(&self) {
-        let mut g = self.open.lock().unwrap_or_else(PoisonError::into_inner);
-        while !*g {
-            g = self.cv.wait(g).unwrap_or_else(PoisonError::into_inner);
-        }
-    }
-}
-
-/// Runs `work` on every item of `rx` with `narrow` threads, `wide` once `gate` opened (the extra threads wait for
-/// it), until the sender is gone and the queue is empty.
-fn drain<T: Send>(
-    rx: Receiver<T>,
-    narrow: usize,
-    wide: usize,
-    gate: &Gate,
-    work: &(dyn Fn(T) + Sync),
-) {
+/// Runs `work` on every item of `rx` with `threads` threads, until the sender is gone and the queue is empty.
+fn drain<T: Send>(rx: Receiver<T>, threads: usize, work: &(dyn Fn(T) + Sync)) {
     let rx = Mutex::new(rx);
-    let narrow = narrow.max(1);
     std::thread::scope(|s| {
-        for i in 0..wide.max(narrow) {
+        for _ in 0..threads.max(1) {
             let rx = &rx;
             s.spawn(move || {
-                if i >= narrow {
-                    gate.wait();
-                }
                 loop {
                     let next = rx.lock().unwrap_or_else(PoisonError::into_inner).recv();
                     let Ok(item) = next else { break };
@@ -105,7 +74,6 @@ pub struct Stream {
     by_key: HashMap<String, Vec<usize>>,
     tx: Mutex<Option<Sender<usize>>>,
     rx: Mutex<Option<Receiver<usize>>>,
-    wide: Gate,
 }
 
 fn pair_hash(v: &str, f: &str) -> [u8; 32] {
@@ -149,7 +117,6 @@ impl Stream {
             by_key,
             tx: Mutex::new(Some(tx)),
             rx: Mutex::new(Some(rx)),
-            wide: Gate::default(),
         }
     }
 
@@ -227,10 +194,8 @@ impl Stream {
         }
     }
 
-    /// The shader step ended: release every group still waiting (shaders not built at all) and widen to
-    /// [`StreamInputs::workers_after`] workers.
+    /// The shader step ended: release every group still waiting (shaders not built at all).
     pub fn finish(&self) {
-        self.wide.open();
         let mut groups = self.groups.lock().unwrap_or_else(PoisonError::into_inner);
         let tx = self
             .tx
@@ -264,11 +229,12 @@ impl Stream {
         let pieces: Mutex<Vec<(ContentKey, PathBuf, BatchReport)>> = Mutex::new(Vec::new());
         let errors: Mutex<Vec<String>> = Mutex::new(Vec::new());
         let groups = &self.groups;
+        let headroom = Headroom::new(inp.limits);
         let work = |g: usize| {
             let pairs = groups.lock().unwrap_or_else(PoisonError::into_inner)[g]
                 .pairs
                 .clone();
-            match group(c, inp, &pairs, &seen, &store, &reg) {
+            match group(c, inp, &pairs, &seen, &store, &reg, &headroom) {
                 Ok(mut p) => pieces
                     .lock()
                     .unwrap_or_else(PoisonError::into_inner)
@@ -279,7 +245,8 @@ impl Stream {
                     .push(e),
             }
         };
-        drain(rx, inp.workers, inp.workers_after, &self.wide, &work);
+        // one thread per possible run: a thread waiting for a permit has its group planned already
+        drain(rx, inp.limits.ceiling, &work);
         if let Some(e) = errors
             .into_inner()
             .unwrap_or_else(PoisonError::into_inner)
@@ -290,7 +257,10 @@ impl Stream {
         let mut pieces = pieces.into_inner().unwrap_or_else(PoisonError::into_inner);
         pieces.sort_by_key(|a| a.0.to_hex());
         let t1 = Instant::now();
-        let mut report = Report::default();
+        let mut report = Report {
+            peak_runs: headroom.peak(),
+            ..Report::default()
+        };
         let keys: Vec<ContentKey> = pieces.iter().map(|p| p.0).collect();
         let paths: Vec<PathBuf> = pieces.iter().map(|p| p.1.clone()).collect();
         report.batches = pieces.into_iter().map(|p| p.2).collect();
@@ -312,6 +282,7 @@ fn group(
     seen: &Mutex<HashSet<PlannedBase>>,
     store: &Store,
     reg: &ProcessRegistry,
+    headroom: &Headroom,
 ) -> Result<Vec<(ContentKey, PathBuf, BatchReport)>, String> {
     let p = plan::plan(&inp.lib_dir, &inp.chain, pairs, inp.zero);
     let bases: Vec<PlannedBase> = {
@@ -333,7 +304,7 @@ fn group(
     let mut out = Vec::new();
     for batch in cut(script.bases(&digests)?, c.target) {
         let key = crate::batch_key(c, &batch);
-        let (piece, rep) = crate::compile(c, &script, &batch, &key, store, reg)?;
+        let (piece, rep) = crate::compile(c, &script, &batch, &key, store, reg, Some(headroom))?;
         out.push((key, piece, rep));
     }
     Ok(out)
@@ -352,8 +323,7 @@ mod tests {
                 .collect(),
             zero: false,
             group_target: 8,
-            workers: 1,
-            workers_after: 1,
+            limits: Limits::new(1, 1, 0),
         }
     }
 
@@ -401,44 +371,30 @@ mod tests {
     }
 
     #[test]
-    fn widens_when_the_shader_step_ends() {
+    fn drains_every_item_on_all_threads() {
         use std::sync::atomic::{AtomicUsize, Ordering};
         use std::time::Duration;
         let (tx, rx) = channel();
-        let gate = Gate::default();
-        let (now, peak_before, peak_after, opened) = (
+        let (now, peak, sum) = (
             AtomicUsize::new(0),
             AtomicUsize::new(0),
             AtomicUsize::new(0),
-            std::sync::atomic::AtomicBool::new(false),
         );
-        let work = |_: usize| {
+        let work = |i: usize| {
             let n = now.fetch_add(1, Ordering::SeqCst) + 1;
-            let peak = if opened.load(Ordering::SeqCst) {
-                &peak_after
-            } else {
-                &peak_before
-            };
             peak.fetch_max(n, Ordering::SeqCst);
+            sum.fetch_add(i, Ordering::SeqCst);
             std::thread::sleep(Duration::from_millis(20));
             now.fetch_sub(1, Ordering::SeqCst);
         };
-        std::thread::scope(|s| {
-            s.spawn(|| drain(rx, 2, 6, &gate, &work));
-            for i in 0..8 {
-                let _ = tx.send(i);
-            }
-            std::thread::sleep(Duration::from_millis(100));
-            opened.store(true, Ordering::SeqCst);
-            for i in 0..24 {
-                let _ = tx.send(i);
-            }
-            gate.open();
-            drop(tx);
-        });
-        assert!(peak_before.load(Ordering::SeqCst) <= 2);
-        assert!(peak_after.load(Ordering::SeqCst) > 2);
-        assert!(peak_after.load(Ordering::SeqCst) <= 6);
+        for i in 0..24 {
+            let _ = tx.send(i);
+        }
+        drop(tx);
+        drain(rx, 4, &work);
+        assert_eq!(sum.load(Ordering::SeqCst), (0..24).sum());
+        assert!(peak.load(Ordering::SeqCst) <= 4);
+        assert!(peak.load(Ordering::SeqCst) > 1);
     }
 
     #[test]
