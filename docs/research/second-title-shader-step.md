@@ -4,8 +4,9 @@
 
 **Question:** Why is the shader step of a second title much slower than that of the reference title?
 
-The second title comes as a NUP package. Its RomFS is 26 GB. Its first build with 0.6.5 (local build of `shader-speed`)
-ran for about 45 minutes and was stopped before the end. The progress showed about 42,000 shaders.
+The second title comes as a NUP package. Its RomFS is 26 GB. Its first build used a local build of commit `321a0ce`,
+before 0.6.5. The progress showed about 42,000 shaders and about 45 minutes for the shader step. These two numbers are
+read from the progress and not measured. The build ended early, during the shader step.
 
 **Method:**
 
@@ -74,6 +75,12 @@ core. Its threads mostly waited for child processes. Over 10 s the child process
 The CPU work of the 14,796 sources adds up to about 48 minutes: 9 for the own front end, 11 for the rejects and 28 for
 the pipeline archive (derived). On 12 cores this is less than 10 minutes of wall time.
 
+### The cache shows a steady rate
+
+The file times in the shader cache show 14,796 sources written in 10 minutes, from 19:22 to 19:31. Each minute has
+between 1,350 and 1,750 sources (measured from the file times). The pipeline archive wrote most of its files from
+19:29. The rate does not show where the CPU time went.
+
 ### The extract reads and writes the same disk
 
 The NUP and the work folder were on the same external USB SSD. The extract read the NUP and wrote `RomFS.img` at the
@@ -86,13 +93,35 @@ CPU and the memory stay below the load limit, and its runs have nice 10. While t
 archive thus stays at 3 runs. This agrees with the 9 waiting threads in the sample. In the standalone run, three cargo
 builds kept the CPU busy. This agrees with the 2.5 cores. Read in the code on 2026-11-06.
 
-Decision E6 in [../decisions.md](../decisions.md) gives `applegpu-nt -j 1` and `air-pack` for each batch. In the code
-every caller sets `direct: None`, so each batch runs through `metal-tt`. Read in the code on 2026-11-06.
+Each batch runs through `metal-tt`. Every caller sets `direct: None`. The direct mode with `applegpu-nt -j N` and
+`air-pack` exists in `nxb-archive`, but no caller uses it. Read in the code on 2026-11-06. Decision E6 in
+[../decisions.md](../decisions.md) describes this.
+
+## After the fixes (0.6.5)
+
+0.6.5 closes the front end gaps of the reject table and fixes the raw container failures. `airc rawcheck` (10 threads,
+with `air-validate`) over the same 14,796 sources gives this result (measured on 2026-11-06):
+
+| result | sources |
+|---|---|
+| library built and passes `air-validate` | 14,780 |
+| `sample-option:gradient2d` on `texture2d_array` | 8 |
+| `call:simd_is_helper_thread` | 6 |
+| `addrspace-value:thread` (a reference to an array as a parameter) | 2 |
+
+All 10,276 libraries that the front end built before stay byte-identical. The pool libraries are not byte-identical to
+Apple's libraries, because Apple's IR wraps arrays and atomics in struct types.
+
+On the reference title Apple makes 35 libraries instead of 1,079 (standalone `nxb shaders build`, measured). The other
+outputs are byte-identical to 0.6.4, except the libraries that Apple made before and 2 libraries with a fixed call
+attribute.
+
+The 16 rejects thus cost about 2 CPU seconds instead of about 11 CPU minutes (derived).
 
 ## Open questions
 
-- Where do the 45 minutes go? The CPU work does not explain them. The answer needs a timeline of a full build with the
-  CPU load of each child process.
+- How long does the full shader step of the second title take with 0.6.5? The CPU work does not explain the 45 minutes
+  in the progress. The answer needs a full build with a timeline and the CPU load of each child process.
 - How long does the archive take on a quiet machine, and how long after the shader step ends?
 - Is the direct mode of E6 faster than `metal-tt` for this title?
 

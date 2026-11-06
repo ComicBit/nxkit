@@ -48,9 +48,10 @@ All crates use only the standard library and forbid `unsafe` code. `nxb shaders`
 
 The 33 inputs that do not compile are parser rejects: threadgroup address-space values, some templates, `<metal_atomic>`.
 
-The own front end does not support these constructs at this time. They go to the Apple front end: texture `write` other than 2D, `read` and `gather`
+The own front end does not support these constructs. They go to the Apple front end: texture `write` other than 2D, `read` and `gather`
 other than 2D, `get_width` other than 2D, half builtins, matrices, `simd_*` other than `simd_shuffle`, `simd_any` and
-`simd_all`, barriers, sample gradients, `array<T, N>` outside an argument buffer.
+`simd_all`, barriers, sample gradients, `array<T, N>` outside an argument buffer, a reference to an array as a
+parameter.
 
 The own front end compiles texture pools. A pool is an argument buffer with an `array<texture2d<float>, N>` or
 `array<sampler, N>` member. The shader indexes the pool through a pointer to its first element. The prelude finds the
@@ -59,6 +60,19 @@ instantiation `dm_pool_mark<P>`. Its relaxed device atomics become `air.atomic.g
 `air.atomic.global.or.u.i32`. The own front end compiles `reinterpret_cast` from pointer to pointer and from integer to
 pointer. Apple's IR wraps arrays and atomics in the struct types `metal::array` and `metal::_atomic`. Thus pool libraries
 pass `air-validate`, but they are not byte-identical to Apple's libraries.
+
+### Second title
+
+The second title has 14,796 MSL sources in a partial shader cache. `airc rawcheck` builds 14,780 of them, and all 14,780
+pass `air-validate` (measured with 0.6.5 on 2026-11-06). 0.6.4 built 10,276. The 16 others go to Apple's `metal`:
+
+| first error | sources |
+|---|---|
+| `sample-option:gradient2d` on `texture2d_array` | 8 |
+| `call:simd_is_helper_thread` | 6 |
+| `addrspace-value:thread` (a reference to an array as a parameter) | 2 |
+
+The study is in [research/second-title-shader-step.md](research/second-title-shader-step.md).
 
 ## Verdicts
 
