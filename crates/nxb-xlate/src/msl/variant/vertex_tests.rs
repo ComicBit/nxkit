@@ -1,7 +1,7 @@
 //! End to end tests of the vertex variants on small vertex programs.
 
-use super::vtest::{F32, U32, V, partner, simple};
-use crate::ir::{IoVariable, StorageKind};
+use super::vtest::{F32, ONE, S32, U32, V, fadd, partner, simple};
+use crate::ir::{Inst, IoVariable, StorageKind};
 use nxb_pyjson::Value;
 
 #[test]
@@ -204,9 +204,55 @@ fn metal_compiles_the_vertex_variants() {
         &simple().translate_with(&[partner(&[(1, "float4", ""), (4, "float4", "flat")])]),
     );
     metal_compile("layer", &layer_program().translate());
+    metal_compile("int", &int_use().translate());
     let mut b = simple();
     let x = b.attr(0, 1, F32);
     b.store_buffer(x);
     b.ret();
     metal_compile("discard", &b.translate());
+}
+
+/// `position.x = attr0.x + 1` as an integer add, so the input is only read as an integer.
+fn int_use() -> V {
+    let mut b = V::new(&[(0, 0)]);
+    let x = b.attr(0, 0, F32);
+    let one = b.k(1);
+    let add = b.op(Inst::Add, StorageKind::None, vec![x, one]);
+    let y = b.def(S32, add);
+    b.store(IoVariable::Position, None, 0, y);
+    b.ret();
+    b
+}
+
+#[test]
+fn an_input_that_is_only_cast_to_integers_becomes_uint() {
+    let t = int_use().translate();
+    let lib = &t.libraries[0];
+    assert!(
+        lib.msl.contains("uint4 loc0 [[attribute(0)]];"),
+        "{}",
+        lib.msl
+    );
+    let r = lib.reflection.as_ref().expect("reflection");
+    assert_eq!(r.vertex_inputs[0].msl_type, "uint4");
+}
+
+#[test]
+fn an_input_with_a_float_use_stays_float() {
+    let mut b = int_use();
+    let x = b.attr(0, 1, F32);
+    let one = b.k(ONE);
+    let add = b.op(fadd(), StorageKind::None, vec![x, one]);
+    let y = b.def(F32, add);
+    b.store(IoVariable::Position, None, 1, y);
+    b.ret();
+    let t = b.translate();
+    assert!(t.libraries[0].msl.contains("float4 loc0 [[attribute(0)]];"));
+}
+
+#[test]
+fn an_input_the_job_declares_is_left_alone() {
+    let mut b = int_use();
+    b.s.job.attr.push((0, "float".into()));
+    assert!(b.msl().contains("float4 loc0 [[attribute(0)]];"));
 }

@@ -92,6 +92,8 @@ pub struct Em<'a> {
     pub exit: Option<Vec<String>>,
     /// The stores of integer values to user outputs of a vertex shader: function, location and component.
     pub layer_src: Vec<(usize, i32, i32)>,
+    /// The conversions `get` made while the vertex inputs are probed (see `variant::int_inputs`).
+    pub probe: Option<Vec<super::variant::int_inputs::Use>>,
     /// The type of the last operand `get` converted, before the conversion.
     pub(super) last_src: Option<AggType>,
 }
@@ -128,6 +130,7 @@ impl<'a> Em<'a> {
             helpers: BTreeSet::new(),
             exit: None,
             layer_src: Vec::new(),
+            probe: None,
             last_src: None,
         }
     }
@@ -196,6 +199,9 @@ impl<'a> Em<'a> {
         }
         let v = self.eval(a)?;
         self.last_src = Some(v.ty);
+        if let Some(p) = &mut self.probe {
+            p.push((a, ty, v.ty));
+        }
         Ok(self.as_type(v, ty))
     }
 
