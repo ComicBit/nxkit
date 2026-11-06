@@ -39,6 +39,17 @@ The call is `nxb_xlate::msl::translate(&job, &code, &ctx)`. It returns `Translat
 The output keeps the contract of the engine host: the argument buffer at `[[buffer(0)]]` with `[[id(n)]]` members, the entry `main0` and its extra entries,
 the library suffixes and the fields of `_b.json`. The facts in `_b.json` come from the emitter. Nothing parses MSL text.
 
+## Vertex variants
+
+The emitter produces everything a vertex shader needs from one trace. The code is in `crates/nxb-xlate/src/msl/variant/`.
+
+- The vertex outputs are padded to the inputs of every paired pixel shader. A varying the pixel shader reads and the vertex shader does not write gets a default. The locations are in `vs_pad`.
+- An attribute that the shader only uses as an integer is declared `uint`. The emitter probes this and builds the shader again.
+- The entries `main0_z`, `main0_discard`, `main0_l`, `main0_lz` and `main0_gs` are further entries of the `_b` library. `entries` and `msl_entry_kind` in `_b.json` name them.
+- `_bv` is the library with shadow inputs for integer attributes. The shadows sit at attribute indices 16 to 30. The field `vin` in `_b.json` lists them.
+- `_bp` is the library that pulls the vertices from a buffer with `dm_fetch`. The field `pull` in `_b.json` names the entries and the buffer slot 16.
+- `raster` has `pos_attr`, `pos_w`, `uv_from_attr`, `uv_affine` and `screen`. They come from the stores of the main function. A shader with a branch, a loop or a call has no raster facts.
+
 ## Identity and the cache
 
 The step stores each translation in the store. The key has the translator identity, the job, the code, the chain version V, the source, the paired shader,
