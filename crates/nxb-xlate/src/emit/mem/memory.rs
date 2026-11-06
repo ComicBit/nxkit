@@ -297,6 +297,25 @@ pub(super) fn red(ctx: &mut EmitterContext<'_, '_>) -> Result<(), String> {
     Ok(())
 }
 
+/// A float atomic add (RED.F32.FTZ.RN and ATOM's float form) as a compare-and-swap loop on the word. Returns the value
+/// before the add.
+fn emit_atomic_add_f32(
+    ctx: &mut EmitterContext<'_, '_>,
+    kind: StorageKind,
+    e0: Opd,
+    e1: Opd,
+    value: Opd,
+) -> Opd {
+    let retry = ctx.ir.label();
+    ctx.mark_label(retry);
+    let expected = ctx.load_o2(kind, e0, e1);
+    let sum = ctx.fp_add(expected, value);
+    let found = ctx.atomic_compare_and_swap_o4(kind, e0, e1, expected, sum);
+    let changed = ctx.i_compare_not_equal(found, expected);
+    ctx.branch_if_true(retry, changed);
+    found
+}
+
 pub(crate) fn emit_atomic_op(
     ctx: &mut EmitterContext<'_, '_>,
     kind: StorageKind,
@@ -316,6 +335,9 @@ pub(crate) fn emit_atomic_op(
     };
     match op {
         AtomOp::Add if is32 => res = ctx.atomic_add_o3(kind, e0, e1, value),
+        AtomOp::Add if ty == AtomSize::F32FtzRn => {
+            res = emit_atomic_add_f32(ctx, kind, e0, e1, value);
+        }
         AtomOp::Min if ty == AtomSize::S32 => res = ctx.atomic_min_s32_o3(kind, e0, e1, value),
         AtomOp::Min if ty == AtomSize::U32 => res = ctx.atomic_min_u32_o3(kind, e0, e1, value),
         AtomOp::Max if ty == AtomSize::S32 => res = ctx.atomic_max_s32_o3(kind, e0, e1, value),
