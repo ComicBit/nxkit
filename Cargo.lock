@@ -133,6 +133,7 @@ dependencies = [
  "nxb-obs",
  "nxb-pack",
  "nxb-pyjson",
+ "nxb-sched",
  "nxb-stages",
  "nxb-store",
  "nxb-tool",

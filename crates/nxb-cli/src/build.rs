@@ -1,5 +1,5 @@
 //! `shaderbuild build <pkg> <out> --profile D --chain V --game ID --inputs DIGEST --store D --work D
-//! [--jobs N] [--batch N] [--batch-first N] [--scratch D] [--ios D] [--own-front off|VERDICTS [--own-allow V,..]] [key...]`
+//! [--jobs N (default: the P-core equivalents)] [--batch N] [--batch-first N] [--scratch D] [--ios D] [--own-front off|VERDICTS [--own-allow V,..]] [key...]`
 
 use nxb_stages::build::{BuildConfig, build};
 use std::io::Write;
@@ -20,7 +20,7 @@ pub(crate) fn main(args: &[String], out: &mut dyn Write, err: &mut dyn Write) ->
     if pos.len() < 2 {
         let _ = writeln!(
             err,
-            "usage: nxb shaders build <pkg> <out> --profile D --chain V --game ID --inputs DIGEST --store D --work D [--jobs N] [--batch N] [--batch-first N] [--scratch D] [--ios D] [--own-front off|VERDICTS [--own-allow V,..]] [key...]"
+            "usage: nxb shaders build <pkg> <out> --profile D --chain V --game ID --inputs DIGEST --store D --work D [--jobs N (default: the P-core equivalents)] [--batch N] [--batch-first N] [--scratch D] [--ios D] [--own-front off|VERDICTS [--own-allow V,..]] [key...]"
         );
         return 2;
     }
@@ -37,7 +37,9 @@ pub(crate) fn main(args: &[String], out: &mut dyn Write, err: &mut dyn Write) ->
             || std::env::temp_dir().join(format!("nxb-build-{}", std::process::id())),
             PathBuf::from,
         ),
-        jobs: get("jobs").parse().unwrap_or(12),
+        jobs: get("jobs")
+            .parse()
+            .unwrap_or_else(|_| nxb_sched::Budget::detect(nxb_sched::DEFAULT_E_FACTOR, 0).tokens),
         batch: get("batch").parse().unwrap_or(128),
         batch_first: get("batch-first").parse().unwrap_or(16),
         keys: pos[2..].to_vec(),
