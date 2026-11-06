@@ -6,4 +6,10 @@
 //! vertex pulling (`_bp`), vertex input (`_bv`), fetch (`_bf`) and side (`_bx`) libraries are separate sources that
 //! the same emitter writes with other options. The vertex pad takes `Context::partners`.
 //!
-//! No variant is written yet.
+//! The vertex variants are in `vertex*`, `pull*` and `vin*`.
+
+pub mod vertex_pad;
+#[cfg(test)]
+mod vertex_tests;
+#[cfg(test)]
+mod vtest;
