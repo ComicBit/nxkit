@@ -141,6 +141,10 @@ fn is_table_word(ir: &Ir, o: Opd) -> bool {
     is_c2_word(ir, o) && !is_sampler_word(ir, o)
 }
 
+fn is_same_bank_word(ir: &Ir, o: Opd, word: Opd) -> bool {
+    ir.ty(o) == OperandType::ConstantBuffer && ir.cbuf_slot(o) == ir.cbuf_slot(word)
+}
+
 fn is_c2_word(ir: &Ir, o: Opd) -> bool {
     ir.ty(o) == OperandType::ConstantBuffer && ir.cbuf_slot(o) == NVN_TEXTURE_BUFFER_INDEX
 }
@@ -213,7 +217,9 @@ fn try_table_handle(
 ) -> R<Table> {
     let handle = s(ir, node, 0)?;
     let inst = ir.op(node).inst;
-    if asg_phi(ir, handle).is_none() || is_bindless_handle_allowed(ir, handle) {
+    if (asg_phi(ir, handle).is_none() && op_of(ir, handle, Inst::BitwiseOr).is_none())
+        || is_bindless_handle_allowed(ir, handle)
+    {
         return Ok(Table::None);
     }
     let mut found: Vec<(Opd, Option<Opd>)> = vec![];
@@ -232,8 +238,9 @@ fn try_table_handle(
                     } else {
                         (texture, sampler)
                     };
-                    if is_table_word(ir, t)
-                        && (is_c2_word(ir, sm)
+                    if ir.ty(t) == OperandType::ConstantBuffer
+                        && !is_sampler_word(ir, t)
+                        && (is_same_bank_word(ir, sm, t)
                             || (ir.ty(sm) == OperandType::Constant
                                 && (ir.value(sm) & 0xfffff) == 0))
                     {
@@ -245,6 +252,19 @@ fn try_table_handle(
             return Ok(Table::None);
         }
     }
+    // A word alone that an ORed candidate also takes is that handle on its way (R = word, R |= other word), not a handle
+    // of its own
+    let all = found.clone();
+    found.retain(|cand| {
+        cand.1.is_some()
+            || !all.iter().any(|(ot, os)| {
+                os.is_some_and(|os| {
+                    ir.value(*ot) == ir.value(cand.0)
+                        || (ir.value(os) == ir.value(cand.0)
+                            && ir.ty(os) == OperandType::ConstantBuffer)
+                })
+            })
+    });
     if found.len() > 1 {
         if tex::is_image_store(inst) {
             return Ok(Table::None);
@@ -256,9 +276,9 @@ fn try_table_handle(
         let is_image = tex::is_image(inst);
         let mut keep = vec![];
         for c in &found {
-            let types =
-                env.rm
-                    .get_texture_types(NVN_TEXTURE_BUFFER_INDEX, ir.cbuf_offset(c.0), is_image);
+            let types = env
+                .rm
+                .get_texture_types(ir.cbuf_slot(c.0), ir.cbuf_offset(c.0), is_image);
             if types.iter().all(|t| same_shape(*t, op_ty)) {
                 keep.push(*c);
             }
@@ -346,10 +366,10 @@ fn try_table_handle(
         di += 1;
     }
     env.acc.log(&if found.len() == 1 {
-        "Bindless handle taken from the one c[2] handle among its phi inputs.".to_string()
+        "Bindless handle taken from the one constant buffer handle among its phi inputs.".to_string()
     } else {
         format!(
-            "Bindless handle chosen at run time among {} c[2] handles of its phi inputs.",
+            "Bindless handle chosen at run time among {} constant buffer handles of its phi inputs.",
             found.len()
         )
     });
