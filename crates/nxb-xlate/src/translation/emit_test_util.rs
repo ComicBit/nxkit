@@ -41,6 +41,11 @@ pub fn ampere_ps_text(ops: &[(u64, u64)]) -> Result<String, String> {
     ampere_text("ps", ops)
 }
 
+/// The same for a vertex shader (a zero header in front of the code).
+pub fn ampere_vs_text(ops: &[(u64, u64)]) -> Result<String, String> {
+    ampere_text("vs", ops)
+}
+
 fn ampere_text(stage: &str, ops: &[(u64, u64)]) -> Result<String, String> {
     let jobs = parse_jobs(&format!(
         r#"[{{"key": "t", "stage": "{stage}", "local": [1, 1, 1], "arch": "sm86"}}]"#

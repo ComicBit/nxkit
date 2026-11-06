@@ -54,6 +54,7 @@ pub enum AEmit {
     ABrev,
     ASgxt,
     ABmsk,
+    AGuardCull,
     APixelCovered,
     AUMov,
     AUp2ur,
@@ -249,6 +250,15 @@ fn build() -> Tables {
     x(t, 0x203, InstName::P2r, AEmit::AP2r, 0, false, true);
     x(t, 0x81c, InstName::Psetp, AEmit::APlop3, 0, false, false);
     x(t, 0x89c, InstName::Psetp, AEmit::APlop3, 0, true, false);
+    x(
+        t,
+        0x80d,
+        InstName::Isetp,
+        AEmit::AGuardCull,
+        0,
+        false,
+        false,
+    );
     x(t, 0x806, InstName::Vote, AEmit::AVote, 0, false, true);
     x(t, 0x886, InstName::Vote, AEmit::AVote, 0, false, true);
     x(t, 0x389, InstName::Shfl, AEmit::AShfl, 0, false, true);
@@ -383,6 +393,24 @@ fn build() -> Tables {
         t,
         0xf6c,
         InstName::Txd,
+        AEmit::ATex,
+        props::TEX,
+        false,
+        true,
+    );
+    x(
+        t,
+        0xf69,
+        InstName::Tmml,
+        AEmit::ATex,
+        props::TEX,
+        false,
+        true,
+    );
+    x(
+        t,
+        0x36a,
+        InstName::Tmml,
         AEmit::ATex,
         props::TEX,
         false,

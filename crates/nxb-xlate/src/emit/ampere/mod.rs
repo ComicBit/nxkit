@@ -78,6 +78,7 @@ pub fn dispatch(ctx: &mut EmitterContext<'_, '_>, e: AEmit) -> Result<(), String
         ABrev => bits::brev(ctx),
         ASgxt => bits::sgxt(ctx),
         ABmsk => bits::bmsk(ctx),
+        AGuardCull => mov::guard_cull(ctx),
         APixelCovered => mov::pixel_covered(ctx),
         AIpa => mem::ipa(ctx),
         AAld => mem::ald(ctx),

@@ -246,7 +246,7 @@ impl<'a> Accessor<'a> {
     }
 
     pub fn query_texture_array_length_from_buffer(&self, slot: i32) -> i32 {
-        if slot == 2 { C2_HANDLE_WORDS } else { 32 }
+        if slot == 2 { C2_HANDLE_WORDS } else { 8192 }
     }
 
     pub fn query_texture_array_length_from_pool(&self) -> i32 {

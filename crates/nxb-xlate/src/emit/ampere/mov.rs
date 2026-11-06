@@ -284,6 +284,26 @@ pub(super) fn up2ur(ctx: &mut Ctx) -> R {
     Ok(())
 }
 
+/// `AGuardCull` (0x80d): the guard band test that ends Kirby Air Riders' vertex shaders. The result is always false,
+/// so the host never drops a vertex early and clipping does the rest. Any other form stops the shader.
+pub(super) fn guard_cull(ctx: &mut Ctx) -> R {
+    let x = x(ctx);
+    let imm = x.imm32();
+    let (pd, pd2, ps, cmp) = (
+        x.bits(81, 84),
+        x.bits(84, 87),
+        x.bits(87, 90),
+        x.bits(76, 79),
+    );
+    let plain = pd2 == PT && ps == PT && ctx.tc.definitions.stage == Stage::Vertex;
+    if !plain || !(imm == 0xc432_1111 && pd == PT && cmp == 0 || imm == 0x8000_0000 && cmp == 6) {
+        return Err(fail(ctx, "a 0x80d not of the guard band cull"));
+    }
+    let f = c(ctx, 0);
+    set_pred(ctx, pd, f, false);
+    Ok(())
+}
+
 pub(super) fn plop3(ctx: &mut Ctx) -> R {
     let x = x(ctx);
     let u = is_uniform(ctx);
