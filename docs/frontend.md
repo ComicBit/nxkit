@@ -49,8 +49,8 @@ All crates use only the standard library and forbid `unsafe` code. `nxb shaders`
 The 33 inputs that do not compile are parser rejects: threadgroup address-space values, some templates, `<metal_atomic>`.
 
 The own front end does not support these constructs at this time. They go to the Apple front end: texture `write` other than 2D, `read` and `gather`
-other than 2D, `get_width` other than 2D, half builtins, matrices, `simd_*`, barriers, sample gradients, `array<T, N>`
-outside an argument buffer.
+other than 2D, `get_width` other than 2D, half builtins, matrices, `simd_*` other than `simd_shuffle`, `simd_any` and
+`simd_all`, barriers, sample gradients, `array<T, N>` outside an argument buffer.
 
 The own front end compiles texture pools. A pool is an argument buffer with an `array<texture2d<float>, N>` or
 `array<sampler, N>` member. The shader indexes the pool through a pointer to its first element. The prelude finds the

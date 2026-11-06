@@ -106,6 +106,10 @@ pub fn builtin(g: &mut FnGen<'_>, name: &str, args: Vec<V>, ret: &Type) -> R<V> 
             let sg = if s.is_some_and(is_signed) { "s" } else { "u" };
             simple(&format!("air.{name}.{sg}.{sfx}"))
         }
+        "mulhi" if !fl => {
+            let sg = if s.is_some_and(is_signed) { "s" } else { "u" };
+            simple(&format!("air.mul_hi.{sg}.{sfx}"))
+        }
         "unpack_unorm4x8_to_float" => simple("air.unpack.unorm4x8.v4f32"),
         "unpack_snorm4x8_to_float" => simple("air.unpack.snorm4x8.v4f32"),
         "unpack_unorm2x16_to_float" => simple("air.unpack.unorm2x16.v2f32"),
@@ -128,6 +132,43 @@ pub fn builtin(g: &mut FnGen<'_>, name: &str, args: Vec<V>, ret: &Type) -> R<V> 
                 &a,
                 &rt,
                 Attrs::ReadNone,
+                false,
+            );
+            Ok(V { r, ty: ret.clone() })
+        }
+        "simd_shuffle" => {
+            let sg = match s {
+                Some(Scalar::Int) => "s.",
+                Some(Scalar::Uint) => "u.",
+                Some(Scalar::Float) => "",
+                _ => return Err(unsupported()),
+            };
+            let mut a = ops(g, &args);
+            // Apple's front end freezes the shuffled value, not the lane
+            let fr = g.tmp();
+            g.emit(format!("{fr} = freeze {} {}", a[0].0, a[0].1));
+            a[0].1 = fr;
+            let r = call(
+                g,
+                &format!("air.simd_shuffle.{sg}{sfx}"),
+                &a,
+                &rt,
+                Attrs::Convergent,
+                fl,
+            );
+            Ok(V { r, ty: ret.clone() })
+        }
+        "simd_any" | "simd_all" => {
+            if args[0].ty != Type::BOOL {
+                return Err(unsupported());
+            }
+            let a = ops(g, &args);
+            let r = call(
+                g,
+                &format!("air.{name}"),
+                &a,
+                "i1",
+                Attrs::Convergent,
                 false,
             );
             Ok(V { r, ty: ret.clone() })
@@ -465,7 +506,7 @@ fn texture_op(g: &mut FnGen<'_>, tex: &Expr, tx: Tex, op: &TexOp, ret: &Type) ->
             sampler,
             coord,
         } => {
-            if kind != TexKind::T2d {
+            if !matches!(kind, TexKind::T2d | TexKind::T2dArray) {
                 return Err(Error::unsupported(format!("lod:{}", kind.name())));
             }
             g.sampler_copy = true;

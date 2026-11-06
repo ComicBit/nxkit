@@ -63,4 +63,19 @@ attributes #0 = { nounwind }
         let bad = SMALL.replace("fadd fast float %0, 1.000000e+00", "frobnicate float %0");
         assert!(to_bitcode(&bad).is_err());
     }
+
+    #[test]
+    fn writes_freeze() {
+        let fr = SMALL.replace(
+            "  %add = fadd fast float %0, 1.000000e+00",
+            "  %fr = freeze float %0\n  %add = fadd fast float %fr, 1.000000e+00",
+        );
+        let m = parse::parse(&fr).expect("subset");
+        assert!(matches!(
+            m.functions[0].blocks[0].1[3].op,
+            ast::Op::Freeze(ast::Ty::Float, _)
+        ));
+        let (a, b) = (to_bitcode(SMALL), to_bitcode(&fr));
+        assert!(b.is_ok_and(|b| a.is_ok_and(|a| a != b)));
+    }
 }

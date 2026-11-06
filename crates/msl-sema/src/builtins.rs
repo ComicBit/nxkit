@@ -20,6 +20,8 @@ enum Shape {
     Insert,
     /// One uint argument (`unpack_*`).
     Uint,
+    /// `simd_shuffle(x, ushort lane)`: x takes the result type, the lane becomes a ushort.
+    Lane,
 }
 
 /// Builtins with their binding shape. The names are the ones the parser reports.
@@ -64,6 +66,10 @@ const TABLE: &[(&str, Shape)] = &[
     ("clz", Shape::Same),
     ("ctz", Shape::Same),
     ("reverse_bits", Shape::Same),
+    ("mulhi", Shape::Same),
+    ("simd_shuffle", Shape::Lane),
+    ("simd_any", Shape::Keep),
+    ("simd_all", Shape::Keep),
     ("isnan", Shape::Keep),
     ("isinf", Shape::Keep),
     ("isfinite", Shape::Keep),
@@ -100,6 +106,14 @@ pub fn bind(name: &str, args: Vec<Expr>, ret: &Type) -> Result<(&'static str, Ve
             .into_iter()
             .map(|a| conv(a, &uint))
             .collect::<Result<Vec<_>, _>>()?,
+        Shape::Lane => {
+            let mut it = args.into_iter();
+            let (x, lane) = match (it.next(), it.next()) {
+                (Some(x), Some(lane)) => (x, lane),
+                _ => return Err(Error::invalid("simd_shuffle arity")),
+            };
+            vec![conv(x, ret)?, conv(lane, &Type::Scalar(Scalar::Ushort))?]
+        }
         Shape::Select => {
             let mut it = args.into_iter();
             let (a, b, c) = match (it.next(), it.next(), it.next()) {

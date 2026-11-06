@@ -116,7 +116,7 @@ const TEX_ACCEPTED: [&str; 9] = [
     "depthcube",
     "depthcube_array",
 ];
-const FIELD_ATTRS: [&str; 15] = [
+const FIELD_ATTRS: [&str; 16] = [
     "id",
     "user",
     "attribute",
@@ -132,8 +132,9 @@ const FIELD_ATTRS: [&str; 15] = [
     "center_perspective",
     "sample_mask",
     "clip_distance",
+    "front_facing",
 ];
-const PARAM_ATTRS: [&str; 14] = [
+const PARAM_ATTRS: [&str; 15] = [
     "stage_in",
     "buffer",
     "position",
@@ -148,6 +149,7 @@ const PARAM_ATTRS: [&str; 14] = [
     "thread_position_in_threadgroup",
     "point_coord",
     "sample_id",
+    "thread_index_in_simdgroup",
 ];
 const ASSIGN_OPS: [&str; 11] = [
     "=", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>=",
@@ -2497,6 +2499,32 @@ impl<'a> Parser<'a> {
                 Some(t) => Ok(t.clone()),
                 None => crash(PyExc::IndexError),
             },
+            "mulhi" => {
+                if a.len() != 2 || !a[0].is_int()? || a[0] != a[1] {
+                    return reject("mulhi-form");
+                }
+                Ok(a[0].clone())
+            }
+            "simd_shuffle" => {
+                // `simd_shuffle(T data, ushort lane)`: 32-bit data, an integer scalar lane
+                let data_ok = a.first().and_then(|x| x.num_base()).is_some_and(|b| {
+                    b.is(Scalar::Float) || b.is(Scalar::Int) || b.is(Scalar::Uint)
+                });
+                let lane_ok = match a.get(1) {
+                    Some(x @ Ty::Scalar(_)) => x.is_int()?,
+                    _ => false,
+                };
+                if a.len() != 2 || !data_ok || !lane_ok {
+                    return reject("simd_shuffle-form");
+                }
+                Ok(a[0].clone())
+            }
+            "simd_any" | "simd_all" => {
+                if a.len() != 1 || a[0] != BOOL {
+                    return reject("simd-vote-form");
+                }
+                Ok(BOOL)
+            }
             "extract_bits" => {
                 if a.len() != 3 || !a[0].is_int()? {
                     return reject("extract_bits-form");

@@ -939,6 +939,10 @@ fn function_code(
                     }
                     56
                 }
+                Op::Freeze(t, v) => {
+                    pvt(t, v, &mut ops, types)?;
+                    58
+                }
                 Op::Cmp(isf, fl, pred, t, a, b2) => {
                     pvt(t, a, &mut ops, types)?;
                     pv(t, b2, &mut ops)?;
@@ -1168,7 +1172,7 @@ fn operands(op: &Op) -> Vec<(Ty, Val)> {
             v.push((t.clone(), a.clone()));
             v.push((t.clone(), b.clone()));
         }
-        Op::FNeg(_, t, a) => v.push((t.clone(), a.clone())),
+        Op::FNeg(_, t, a) | Op::Freeze(t, a) => v.push((t.clone(), a.clone())),
         Op::Select(_, c, a, b) => {
             v.push(a.clone());
             v.push(b.clone());
@@ -1248,7 +1252,7 @@ fn result_type(op: &Op, types: &mut Types, gtys: &HashMap<String, Ty>) -> R<Opti
             Some(Ty::Ptr(Box::new(cur), sp))
         }
         Op::Cast(_, _, to) => Some(to.clone()),
-        Op::Bin(_, _, t, _, _) | Op::FNeg(_, t, _) => Some(t.clone()),
+        Op::Bin(_, _, t, _, _) | Op::FNeg(_, t, _) | Op::Freeze(t, _) => Some(t.clone()),
         Op::Cmp(_, _, _, t, _, _) => Some(match t {
             Ty::Vector(n, _) => Ty::Vector(*n, Box::new(Ty::Int(1))),
             _ => Ty::Int(1),
