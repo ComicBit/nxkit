@@ -40,11 +40,7 @@ impl Em<'_> {
             }
             Inst::SwizzleAdd => self.swizzle_add(o).map(Some),
             Inst::Barrier => {
-                let skip = !self.props.host.supports_shader_barrier_divergence
-                    && (self.block_type() != Some(BlockType::Main)
-                        || self.may_return
-                        || self.func != 0);
-                if !skip {
+                if !self.barrier_diverges() {
                     self.line("threadgroup_barrier(mem_flags::mem_threadgroup);");
                 }
                 Ok(None)
@@ -53,19 +49,25 @@ impl Em<'_> {
                 self.line("simdgroup_barrier(mem_flags::mem_threadgroup);");
                 Ok(None)
             }
-            Inst::GroupMemoryBarrier => {
-                self.line(
-                    "atomic_thread_fence(mem_flags::mem_device | mem_flags::mem_threadgroup | mem_flags::mem_texture, memory_order_seq_cst, thread_scope_threadgroup);",
-                );
+            Inst::GroupMemoryBarrier | Inst::MemoryBarrier => {
+                // MSL 2.3 has no standalone fence, so a compute shader gets a barrier and other stages get nothing.
+                if self.shader == Shader::Compute && !self.barrier_diverges() {
+                    let flags = if inst == Inst::MemoryBarrier {
+                        "mem_flags::mem_device | mem_flags::mem_threadgroup | mem_flags::mem_texture"
+                    } else {
+                        "mem_flags::mem_threadgroup"
+                    };
+                    self.line(&format!("threadgroup_barrier({flags});"));
+                }
                 Ok(None)
             }
-            _ => {
-                self.line(
-                    "atomic_thread_fence(mem_flags::mem_device | mem_flags::mem_threadgroup | mem_flags::mem_texture, memory_order_seq_cst, thread_scope_device);",
-                );
-                Ok(None)
-            }
+            _ => Err(format!("unported: instruction {:x}", o.inst.0)),
         }
+    }
+
+    fn barrier_diverges(&self) -> bool {
+        !self.props.host.supports_shader_barrier_divergence
+            && (self.block_type() != Some(BlockType::Main) || self.may_return || self.func != 0)
     }
 
     pub(super) fn block_type(&self) -> Option<BlockType> {
