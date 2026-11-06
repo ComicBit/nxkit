@@ -56,7 +56,7 @@ fn array_len(m: &str) -> Option<u32> {
 }
 
 /// The body of the main function with `exit` at every return and at its end, if it ends without one.
-fn emit_with(em: &mut Em<'_>, exit: Vec<String>) -> R<String> {
+pub(super) fn emit_with(em: &mut Em<'_>, exit: Vec<String>) -> R<String> {
     em.exit = Some(exit.clone());
     let body = em.body(0);
     em.exit = None;

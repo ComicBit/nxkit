@@ -27,6 +27,7 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ### Added
 
+- Transform feedback in the MSL back end. A vertex job with `tf` gets the entry `main0_tf` in `_b`, and a geometry job gets it in `_bgv`. The `.json` has `entry_tf` and `tf_strides`. `Job.tf` holds the buffer layout of the job.
 - `nxb build --platform mac` (the development build) and `nxb build --program N` for N more than 0. They no longer give exit code 4.
   `--platform mac` ends with the command that runs the game on the Mac. The pipeline prebuild, which starts the host, is not run.
   The other programs of a multi-program profile are built for `mac` and `mac-app`. The first program is in `programs.tsv` (`mac`) or in the app (`mac-app`).

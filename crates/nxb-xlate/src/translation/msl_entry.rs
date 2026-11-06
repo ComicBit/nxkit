@@ -27,6 +27,8 @@ pub struct Structured {
     pub notes: Vec<String>,
     /// The texture slots read by a 1D texel fetch that became a wrapped 2D read.
     pub fetch1d: BTreeSet<i32>,
+    /// The vertex shader that draws the vertices of a geometry job.
+    pub geometry_reader: bool,
 }
 
 /// Run the front end of one job to the structured program.
@@ -54,6 +56,7 @@ pub fn structure_job(job: &Job, code: &[u8]) -> Result<Structured, String> {
         program: r.program,
         notes: r.notes,
         fetch1d: r.fetch1d,
+        geometry_reader: false,
     })
 }
 
@@ -73,5 +76,6 @@ pub fn structure_geometry_reader_job(job: &Job, code: &[u8]) -> Result<Structure
         program: Program::default(),
         notes: acc.notes.clone(),
         fetch1d: BTreeSet::new(),
+        geometry_reader: true,
     })
 }

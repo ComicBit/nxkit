@@ -58,6 +58,7 @@ impl V {
                 program: Program::default(),
                 notes: vec![],
                 fetch1d: Default::default(),
+                geometry_reader: false,
             },
             main,
         };

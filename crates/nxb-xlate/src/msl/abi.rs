@@ -177,6 +177,10 @@ pub const BORDER_MEMBER: &str = "dm_border";
 pub const LOGIC_BUFFER: u32 = 29;
 /// The function constant index of the logic op.
 pub const LOGIC_FC: u32 = 200;
+/// The vertex buffer index of transform feedback buffer 0. Buffers 1 to 3 follow it.
+pub const TF_SLOT: u32 = 8;
+/// The buffer index of the transform feedback capture state (`dm_tf_capture`).
+pub const TF_STATE_SLOT: u32 = 14;
 /// The buffer index of the threadgroup spill.
 pub const TG_SLOT: u32 = 30;
 /// Bytes of threadgroup memory Metal gives.

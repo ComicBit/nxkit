@@ -23,13 +23,101 @@ pub struct Job {
     pub geometry_topology: Option<i32>,
     /// A task or mesh shader, written as a compute job with its SPH taken off.
     pub mesh_stage: Option<MeshStage>,
-    /// The vertex or geometry shader captures transform feedback (the job has a `tf` layout).
-    pub tf: bool,
+    /// The transform feedback layout of a vertex or geometry shader. Other stages ignore it.
+    pub tf: Option<TransformFeedback>,
     pub early_fragment_tests: bool,
     pub reduced: bool,
     /// `debug` is on unless the job says `false`.
     pub debug: bool,
     pub softfloat64: bool,
+}
+
+/// One transform feedback buffer: the user outputs a vertex shader stores to it, interleaved.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TfBuffer {
+    /// The bytes of one captured vertex. It is four times the components of `outputs`.
+    pub stride: u32,
+    /// The captured user outputs in buffer order: (output location from 0, components captured from `x` on).
+    pub outputs: Vec<(u32, u32)>,
+}
+
+/// The transform feedback layout of a job (`tf` of the job object, `tf_layout` of the shader step).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TransformFeedback {
+    /// The four feedback buffers. `None` is a buffer that the shader does not capture to.
+    pub buffers: [Option<TfBuffer>; 4],
+}
+
+impl TransformFeedback {
+    /// The bytes per vertex of each buffer, 0 for a buffer without capture.
+    pub fn strides(&self) -> [u32; 4] {
+        self.buffers
+            .each_ref()
+            .map(|b| b.as_ref().map_or(0, |b| b.stride))
+    }
+}
+
+/// The most user output locations of a vertex shader.
+const TF_LOCATIONS: i64 = 32;
+
+fn tf_buffer(b: usize, v: &Value) -> Result<Option<TfBuffer>, String> {
+    let bad = |what: &str| format!("transform feedback buffer {b}: {what}");
+    match v {
+        Value::Null => return Ok(None),
+        Value::List(l) if l.is_empty() => return Ok(None),
+        Value::Object(_) => {}
+        _ => return Err(bad("not an object")),
+    }
+    let stride = v
+        .get("stride")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| bad("no stride"))?;
+    let list = v
+        .get("outputs")
+        .and_then(Value::as_list)
+        .ok_or_else(|| bad("no outputs"))?;
+    let mut outputs = Vec::new();
+    for o in list {
+        let pair = o.as_list().filter(|p| p.len() == 2);
+        let at = |i: usize| pair.and_then(|p| p[i].as_i64());
+        let (Some(loc), Some(n)) = (at(0), at(1)) else {
+            return Err(bad("an output is not a pair of location and components"));
+        };
+        if !(0..TF_LOCATIONS).contains(&loc) {
+            return Err(bad(&format!(
+                "output location {loc} is past the user outputs"
+            )));
+        }
+        if !(1..=4).contains(&n) {
+            return Err(bad(&format!("{n} components in one output")));
+        }
+        outputs.push((loc as u32, n as u32));
+    }
+    let words: i64 = outputs.iter().map(|o| i64::from(o.1)).sum();
+    if outputs.is_empty() || stride != 4 * words {
+        return Err(bad(&format!(
+            "stride {stride} is not four times the {words} captured components"
+        )));
+    }
+    Ok(Some(TfBuffer {
+        stride: stride as u32,
+        outputs,
+    }))
+}
+
+/// The `tf` member of a job: a list of up to four buffers, each `null`, `[]` or `{"stride", "outputs"}`.
+/// A job without a buffer has no layout.
+fn transform_feedback(v: Option<&Value>) -> Result<Option<TransformFeedback>, String> {
+    let l = match v {
+        None | Some(Value::Null) => return Ok(None),
+        Some(Value::List(l)) if l.len() <= 4 => l,
+        Some(_) => return Err("tf is not a list of at most four buffers".into()),
+    };
+    let mut tf = TransformFeedback::default();
+    for (b, e) in l.iter().enumerate() {
+        tf.buffers[b] = tf_buffer(b, e)?;
+    }
+    Ok(tf.buffers.iter().any(Option::is_some).then_some(tf))
 }
 
 /// The facts of a task or mesh shader (`mesh_stage` of the job, `dmsh_meshstage.info`).
@@ -160,10 +248,7 @@ impl Job {
                 .and_then(Value::as_i64)
                 .map(|x| x as i32),
             mesh_stage: v.get("mesh_stage").and_then(mesh_stage),
-            tf: !matches!(v.get("tf"), None | Some(Value::Null))
-                && v.get("tf")
-                    .and_then(Value::as_list)
-                    .is_none_or(|l| !l.is_empty()),
+            tf: transform_feedback(v.get("tf")).map_err(|e| format!("job {key}: {e}"))?,
             early_fragment_tests: truthy(v.get("early_fragment_tests")),
             reduced: truthy(v.get("reduced")),
             debug: !matches!(v.get("debug"), Some(Value::Bool(false))),
@@ -191,3 +276,7 @@ pub fn parse_jobs(text: &str) -> Result<Vec<Job>, String> {
         .map(Job::from_value)
         .collect()
 }
+
+#[cfg(test)]
+#[path = "job_tf_tests.rs"]
+mod tf_tests;
