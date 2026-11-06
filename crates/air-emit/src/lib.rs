@@ -108,7 +108,13 @@ pub enum Attrs {
 
 impl Attrs {
     pub(crate) fn group(self) -> u32 {
-        3 + self as u32
+        // #11 is the group of user function call sites (`convergent nobuiltin`).
+        let n = 3 + self as u32;
+        if n >= USER_CALL_GROUP {
+            n + 1
+        } else {
+            n
+        }
     }
 
     fn text(self) -> &'static str {
@@ -128,6 +134,9 @@ impl Attrs {
         }
     }
 }
+
+/// Attribute group of call sites of user functions.
+const USER_CALL_GROUP: u32 = 11;
 
 const FN_ATTRS: &str = "\"approx-func-fp-math\"=\"true\" \"frame-pointer\"=\"all\" \"invariance-late-contract\" \"invariance-late-reassoc\" \"invariance-late-unsafe-fp-math\" \"min-legal-vector-width\"=\"0\" \"no-builtins\" \"no-infs-fp-math\"=\"true\" \"no-nans-fp-math\"=\"true\" \"no-signed-zeros-fp-math\"=\"true\" \"no-trapping-math\"=\"true\" \"stack-protector-buffer-size\"=\"8\"";
 
@@ -798,7 +807,7 @@ pub fn emit(m: &Module, t: &Target, source_name: &str) -> Result<String, Error> 
     }
     let _ = writeln!(
         out,
-        "attributes #11 = {{ convergent nobuiltin \"no-builtins\" }}"
+        "attributes #{USER_CALL_GROUP} = {{ convergent nobuiltin \"no-builtins\" }}"
     );
     for g in &groups {
         let _ = writeln!(out, "attributes #{} = {{ {} }}", g.group(), g.text());
