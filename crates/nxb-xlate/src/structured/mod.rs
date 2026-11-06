@@ -6,6 +6,8 @@ pub mod goto;
 pub mod optimizer;
 pub mod program;
 #[cfg(test)]
+mod test_util;
+#[cfg(test)]
 mod tests;
 pub mod text;
 pub mod types;

@@ -1,29 +1,18 @@
-//! Test helpers for the back end: probe dumps of the last attempt of a key.
+//! Test helpers for the structured program: probe dumps of the last attempt of a key.
 
 use crate::structured::StructResources;
 use std::path::Path;
 
 /// The text of the last `== attempt` section of a phase dump (the attempt that produced the final output).
-pub fn last_attempt(dir: &Path, key: &str, phase: &str) -> Option<String> {
+pub(super) fn last_attempt(dir: &Path, key: &str, phase: &str) -> Option<String> {
     let t = std::fs::read_to_string(dir.join(format!("{key}.{phase}.txt"))).ok()?;
     let part = t.split("== attempt\n").filter(|p| !p.is_empty()).last()?;
     Some(format!("== attempt\n{part}"))
 }
 
-/// All attempt sections of a phase dump, in order.
-pub fn attempts(dir: &Path, key: &str, phase: &str) -> Vec<String> {
-    let Ok(t) = std::fs::read_to_string(dir.join(format!("{key}.{phase}.txt"))) else {
-        return vec![];
-    };
-    t.split("== attempt\n")
-        .filter(|p| !p.is_empty())
-        .map(|p| format!("== attempt\n{p}"))
-        .collect()
-}
-
 /// A resource manager answering from the dumped final slot to binding map.
-pub struct ReplayResources {
-    pub map: Vec<(i32, i32, i32)>,
+pub(super) struct ReplayResources {
+    pub(super) map: Vec<(i32, i32, i32)>,
 }
 
 impl StructResources for ReplayResources {
@@ -40,7 +29,7 @@ impl StructResources for ReplayResources {
 
 /// Reorders the use sets of the parsed locals as the probe's `suses` dump lists them (the C# `HashSet` enumeration order
 /// depends on the history of the optimisations, which a text dump cannot carry).
-pub fn apply_use_order(
+pub(super) fn apply_use_order(
     ir: &mut crate::ir::Ir,
     funcs: &[crate::ir::text::FuncDump],
     suses: &str,

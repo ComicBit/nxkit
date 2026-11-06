@@ -1,29 +1,11 @@
-//! A compute shader with a `CAL`: no C# reference output exists for it (no corpus shader calls a function), so this checks
-//! the shape of the result: the callee is translated with its input and output registers as arguments and called.
+//! A compute shader with a `CAL`: no reference output exists for it (no corpus shader calls a function), so this checks
+//! the shape of the structured program: the callee is translated with its input and output registers as arguments and called.
 
-use super::core::Translator;
-use crate::driver::run_job;
+use super::msl_entry::structure_job;
 use crate::job::parse_jobs;
 
 fn words(prog: &[u64]) -> Vec<u8> {
     prog.iter().flat_map(|w| w.to_le_bytes()).collect()
-}
-
-fn spv_ops(spv: &[u8]) -> Vec<(u32, u32)> {
-    let w: Vec<u32> = spv
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .map(|c| u32::from_le_bytes(*c))
-        .collect();
-    let mut out = vec![];
-    let mut i = 5;
-    while i < w.len() {
-        let n = w[i] >> 16;
-        out.push((w[i] & 0xffff, n));
-        i += n.max(1) as usize;
-    }
-    out
 }
 
 const PRED7: u64 = 0x7 << 16;
@@ -57,14 +39,10 @@ fn called_function_is_translated_with_arguments() {
         RET,
         0,
     ]);
-    let o = run_job(&Translator, &jobs[0], &code).expect("translate");
-    let ops = spv_ops(&o.spv);
-    let count = |op: u32| ops.iter().filter(|(o, _)| *o == op).count();
-    // OpFunction 54, OpFunctionCall 57
-    // OpFunction 54 (fun0 is the entry point, fun1 the callee), OpFunctionCall 57: result type, id, function, two
-    // arguments (the input register R1 and the output register R2)
-    assert_eq!(count(54), 2);
-    let calls: Vec<_> = ops.iter().filter(|(o, _)| *o == 57).collect();
-    assert_eq!(calls.len(), 1);
-    assert_eq!(calls[0].1, 6);
+    let s = structure_job(&jobs[0], &code).expect("structure");
+    // fun0 is the entry point, fun1 the callee with the input register R1 and the output register R2 as arguments
+    assert_eq!(s.info.functions.len(), 2);
+    assert_eq!(s.info.functions[0].in_arguments.len(), 0);
+    assert_eq!(s.info.functions[1].in_arguments.len(), 1);
+    assert_eq!(s.info.functions[1].out_arguments.len(), 1);
 }

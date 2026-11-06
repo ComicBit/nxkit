@@ -1,6 +1,6 @@
 [package]
 name = "nxb-xlate"
-description = "Rust port of the shader translator driver (job file, answer queries, retries, res.json) and its translation core seam."
+description = "Shader translator from Maxwell and Ampere machine code to MSL: driver (job file, answer queries, retries), its front end and the MSL back end."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -15,7 +15,6 @@ in_v = true
 nxb-model.workspace = true
 nxb-pyjson.workspace = true
 nxb-maxwell.workspace = true
-nxb-spvgen.workspace = true
 
 [lints]
 workspace = true

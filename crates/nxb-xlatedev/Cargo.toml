@@ -1,6 +1,6 @@
 [package]
 name = "nxb-xlatedev"
-description = "Dev tools for the translator port: corpus capture from local game data and the oracle differ (dev only, never shipped)."
+description = "Dev tools for the translator port: corpus capture from local game data (dev only, never shipped)."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
