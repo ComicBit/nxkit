@@ -24,7 +24,7 @@ pub enum Source {
 pub struct Inputs {
     /// The kind.
     pub source: Source,
-    /// The application title ID (the base game's).
+    /// The title ID of the game (the base game's). With `--program N`: the program's, the application's + N.
     pub app: u64,
     /// The base game's package, the NUP file or the dump folder.
     pub base: PathBuf,
@@ -32,8 +32,8 @@ pub struct Inputs {
     pub updates: Vec<(u32, PathBuf)>,
     /// DLC packages: (title ID, version, path).
     pub dlc: Vec<(u64, u32, PathBuf)>,
-    /// The application to read from the packages (`nx_extract --app`): set for merged packages, cartridge images and a
-    /// game picked with `--title-id`.
+    /// The application to read from the packages (`nx_extract --app`): set for merged packages, cartridge images, a
+    /// game picked with `--title-id` and a program of a multi-program application.
     pub app_flag: Option<u64>,
     /// Whether the NUP or the dump holds the base game's own files (version 0).
     pub has_base: bool,
@@ -441,13 +441,16 @@ pub fn discover(a: &Args) -> Result<Inputs, String> {
     let want = a.title_id.as_deref().map(parse_title).transpose()?;
     let keys = a.keys.as_deref();
     if let Some(n) = &a.nup {
+        one_program(a, "A NUP")?;
         return nup_checked(n).and_then(|n| scan_nup(&n, want));
     }
     if let Some(d) = &a.dump {
+        one_program(a, "A dump folder")?;
         return scan_dump(d, want);
     }
     let p = &a.nsp_dir;
     if p.is_file() {
+        one_program(a, "A NUP")?;
         return nup_checked(p).and_then(|n| scan_nup(&n, want));
     }
     if !p.is_dir() {
@@ -459,7 +462,10 @@ pub fn discover(a: &Args) -> Result<Inputs, String> {
             .filter(|n| nxb_extract::nup::is_nup(n))
             .collect();
         match nups.as_slice() {
-            [one] => return scan_nup(one, want),
+            [one] => {
+                one_program(a, "A NUP")?;
+                return scan_nup(one, want);
+            }
             [] => {}
             many => {
                 return Err(format!(
@@ -473,10 +479,25 @@ pub fn discover(a: &Args) -> Result<Inputs, String> {
             }
         }
         if nxb_extract::dump::is_dump(p) {
+            one_program(a, "A dump folder")?;
             return scan_dump(p, want);
         }
     }
     scan_packages(p, keys, want, &a.aoc)
+}
+
+/// `--program N` picks a program from the packages of a multi-program application. A NUP and a dump hold one
+/// program's files.
+fn one_program(a: &Args, what: &str) -> Result<(), String> {
+    if a.program.is_some_and(|n| n != 0) {
+        return Err(crate::exit::fail(
+            2,
+            format!(
+                "--program / PROGRAM_INDEX picks a program from a multi-program application's NSPs. {what} is read as one program's files"
+            ),
+        ));
+    }
+    Ok(())
 }
 
 fn nup_checked(p: &Path) -> Result<PathBuf, String> {
@@ -490,6 +511,27 @@ fn nup_checked(p: &Path) -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_program_needs_packages() {
+        let mut a = Args {
+            nup: Some("g.nup".into()),
+            program: Some(1),
+            ..Args::default()
+        };
+        let e = discover(&a).unwrap_err();
+        assert!(
+            e.starts_with("--program / PROGRAM_INDEX picks a program"),
+            "{e}"
+        );
+        assert!(e.contains("A NUP is read as one program's files"), "{e}");
+        a.nup = None;
+        a.dump = Some("d".into());
+        assert!(discover(&a).unwrap_err().contains("A dump folder is read"));
+        // program 0 is the application's own: the input is read as it is
+        a.program = Some(0);
+        assert!(!discover(&a).unwrap_err().contains("PROGRAM_INDEX"));
+    }
 
     #[test]
     fn tags_in_file_names() {

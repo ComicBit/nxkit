@@ -75,6 +75,7 @@ fn reference_extract_and_split_match_python() {
         base_outputs: true,
         split: Some((game, outputs)),
         app: None,
+        program: None,
         discard_images: false,
         allow_damaged: false,
         manifest: false,

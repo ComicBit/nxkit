@@ -98,6 +98,7 @@ fn request(keys: &std::path::Path, base: &std::path::Path, out: &std::path::Path
         base_outputs: true,
         split: None,
         app: None,
+        program: None,
         discard_images: false,
         allow_damaged: false,
         manifest: false,

@@ -11,6 +11,10 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ### Added
 
+- `nxb build --platform mac` (the development build) and `nxb build --program N` for N more than 0. They no longer give exit code 4.
+  `--platform mac` ends with the command that runs the game on the Mac. The pipeline prebuild, which starts the host, is not run.
+  The other programs of a multi-program profile are built for `mac` and `mac-app`. The first program is in `programs.tsv` (`mac`) or in the app (`mac-app`).
+- `nxb extract --program <title ID>` picks the Program NCA of one program of a multi-program application.
 - The finder `ue_region` in `nxb rewrite`. A main module with `SwitchVirtualAddressSpaceSize` no longer gives exit code 4.
   The output is byte-identical to `dm/tools/ue_region.py` on 13 synthetic main modules (`crates/nxb-rewrite/tests/region.rs`).
 

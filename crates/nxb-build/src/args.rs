@@ -185,10 +185,12 @@ fn gpu_list(g: &str) -> bool {
         })
 }
 
-/// The script's checks of option combinations (exit 2), and the cases that cannot work yet (exit 4).
+/// The script's checks of option combinations (exit 2).
 fn validate(a: &Args) -> Result<(), (i32, String)> {
     let bad = |m: &str| Err((2, m.to_string()));
-    let mac = a.platform == "mac-app";
+    let mac = a.platform != "ios";
+    let mac_pack = a.platform == "mac-app";
+    let platform = &a.platform;
     if let Some(r) = &a.romfs
         && r != "bundle"
         && r != "separate"
@@ -196,12 +198,6 @@ fn validate(a: &Args) -> Result<(), (i32, String)> {
         return Err((
             2,
             format!("argument --romfs: invalid choice: '{r}' (choose from bundle, separate)"),
-        ));
-    }
-    if a.program.is_some_and(|n| n != 0) {
-        return Err((
-            4,
-            "--program: a game of several programs is not implemented in nxb build yet".into(),
         ));
     }
     if let Some(g) = a.gpu.as_deref().map(str::trim).filter(|g| !g.is_empty())
@@ -213,15 +209,15 @@ fn validate(a: &Args) -> Result<(), (i32, String)> {
     }
     if a.seen_shaders && !mac {
         return bad(
-            "--seen-shaders builds a partial library of Mac shaders: it needs --platform mac-app",
+            "--seen-shaders builds a partial library of Mac shaders: it needs --platform mac or mac-app",
         );
     }
-    if a.mac_sign != "-" && !mac {
+    if a.mac_sign != "-" && !mac_pack {
         return bad("--mac-sign signs the Mac app: it needs --platform mac-app");
     }
     if a.shell_framework.is_some() && (mac || a.prepare_xcode || a.framework) {
         return bad(
-            "--shell-framework builds only the game framework for the shell: it cannot be combined with --platform mac-app, --prepare-xcode or --framework",
+            "--shell-framework builds only the game framework for the shell: it cannot be combined with --platform mac or mac-app, --prepare-xcode or --framework",
         );
     }
     if a.shell_framework.is_some() && a.romfs.as_deref() == Some("bundle") {
@@ -230,18 +226,18 @@ fn validate(a: &Args) -> Result<(), (i32, String)> {
         );
     }
     if a.prepare_xcode && mac {
-        return bad(
-            "--prepare-xcode makes an iPhone project: it cannot be combined with --platform mac-app",
-        );
+        return bad(&format!(
+            "--prepare-xcode makes an iPhone project: it cannot be combined with --platform {platform}"
+        ));
     }
     if a.xcode_workspace.is_some() && !a.prepare_xcode {
         return bad("--xcode-workspace requires --prepare-xcode");
     }
     let separate = a.romfs.as_deref() == Some("separate") || a.shell_framework.is_some();
     if separate && mac {
-        return bad(
-            "--romfs separate keeps the game files off the iPhone app: it cannot be combined with --platform mac-app",
-        );
+        return bad(&format!(
+            "--romfs separate keeps the game files off the iPhone app: it cannot be combined with --platform {platform}"
+        ));
     }
     let keep = a.keep_extracted.unwrap_or(true) || a.shell_framework.is_some();
     if a.prepare_xcode && !keep {
@@ -343,12 +339,6 @@ pub fn parse(argv: &[String]) -> Result<Args, (i32, String)> {
             ),
         ));
     }
-    if a.platform == "mac" {
-        return Err((
-            4,
-            "--platform mac (the development build) is not implemented in nxb build yet: --platform mac-app".into(),
-        ));
-    }
     validate(&a)?;
     if a.partial && a.manifest.is_none() {
         return Err((2, "--partial needs --shader-manifest <file>".into()));
@@ -395,7 +385,7 @@ mod tests {
             && a.progress == "json"));
         assert!(parse(&v(&["dir", "--platform", "mac-app", "--romfs", "bundle"])).is_ok());
         let code = |a: &[&str]| parse(&v(a)).err().map(|e| e.0);
-        // cannot work yet: 4, combinations the script refuses: 2
+        // combinations the script refuses: 2
         let a = parse(&v(&[
             "dir",
             "--provisional",
@@ -404,8 +394,12 @@ mod tests {
         ]))
         .unwrap();
         assert!(a.provisional && a.survey_only && a.no_heap_check);
-        assert_eq!(code(&["dir", "--program", "2"]), Some(4));
-        assert!(parse(&v(&["dir", "--program", "0"])).is_ok());
+        assert_eq!(
+            parse(&v(&["dir", "--program", "2"])).map(|a| a.program),
+            Ok(Some(2))
+        );
+        assert_eq!(code(&["dir", "--program", "x"]), Some(2));
+        assert_eq!(code(&["dir", "--program", "-1"]), Some(2));
         assert_eq!(
             code(&["dir", "--platform", "mac-app", "--romfs", "separate"]),
             Some(2)
@@ -449,9 +443,18 @@ mod tests {
                 .map(|e| e.0),
             Some(2)
         );
+        assert!(parse(&v(&["dir", "--platform", "mac", "--seen-shaders"])).is_ok());
         assert_eq!(
-            parse(&v(&["dir", "--platform", "mac"])).err().map(|e| e.0),
-            Some(4)
+            code(&["dir", "--platform", "mac", "--mac-sign", "ID"]),
+            Some(2)
+        );
+        assert_eq!(
+            code(&["dir", "--platform", "mac", "--prepare-xcode"]),
+            Some(2)
+        );
+        assert_eq!(
+            code(&["dir", "--platform", "mac", "--romfs", "separate"]),
+            Some(2)
         );
         assert_eq!(
             parse(&v(&["dir", "--platform", "tv"])).err().map(|e| e.0),

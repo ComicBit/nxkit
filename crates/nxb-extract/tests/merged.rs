@@ -30,6 +30,7 @@ fn request(keys: &std::path::Path, base: &std::path::Path, out: &std::path::Path
         base_outputs: true,
         split: None,
         app: None,
+        program: None,
         discard_images: false,
         allow_damaged: false,
         manifest: false,
@@ -162,6 +163,51 @@ fn a_card_with_two_games_takes_the_one_named_by_app_else_the_lowest() {
     ) {
         same_outputs(&dir.join("expect-a"), &dir.join("c"));
         assert!(text.contains("title 0100000000002000"), "{text}");
+    }
+    cleanup(&dir);
+}
+
+#[test]
+fn a_program_of_a_multi_program_application_is_picked_by_its_title_id() {
+    let dir = tmp("programs");
+    let keys = write_keys(&dir);
+    // one package, two programs (title IDs APP and APP + 1) as the programs of one application
+    let (p0, p1) = (
+        title(0x80, APP, 0, 1, true),
+        title(0x80, APP + 1, 0, 2, true),
+    );
+    let mut all = p0.files.clone();
+    all.extend(p1.files.clone());
+    std::fs::write(dir.join("m.nsp"), pfs0(&all)).unwrap();
+    std::fs::write(dir.join("a.nsp"), pfs0(&p0.files)).unwrap();
+    std::fs::write(dir.join("b.nsp"), pfs0(&p1.files)).unwrap();
+
+    let mut r = request(&keys, &dir.join("m.nsp"), &dir.join("lowest"));
+    extract(&r).unwrap();
+    extract(&request(&keys, &dir.join("a.nsp"), &dir.join("expect-a"))).unwrap();
+    same_outputs(&dir.join("expect-a"), &dir.join("lowest"));
+
+    r.program = Some(APP + 1);
+    r.out_base = dir.join("second");
+    extract(&r).unwrap();
+    extract(&request(&keys, &dir.join("b.nsp"), &dir.join("expect-b"))).unwrap();
+    same_outputs(&dir.join("expect-b"), &dir.join("second"));
+
+    r.program = Some(APP + 2);
+    r.out_base = dir.join("none");
+    let e = extract(&r).err().unwrap().to_string();
+    assert!(
+        e.contains("no Program NCA 0100000000002002 in the base NSP"),
+        "{e}"
+    );
+    if let Some(text) = oracle_extract(
+        &keys,
+        &dir.join("m.nsp"),
+        &dir.join("c"),
+        &["--program=0100000000002001"],
+    ) {
+        same_outputs(&dir.join("expect-b"), &dir.join("c"));
+        assert!(text.contains("title 0100000000002001"), "{text}");
     }
     cleanup(&dir);
 }
