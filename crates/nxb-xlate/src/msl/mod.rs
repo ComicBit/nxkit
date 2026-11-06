@@ -41,6 +41,8 @@ mod tests;
 pub mod types;
 pub mod usage;
 pub mod variant;
+#[cfg(test)]
+mod verify_tests;
 pub mod walk;
 pub mod wide;
 #[cfg(test)]
