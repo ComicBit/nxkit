@@ -158,6 +158,25 @@ pub fn helper_name(f: &Func, types: &Types) -> Option<String> {
     Some(format!("_ZL{}{}{params}", f.name.len(), f.name))
 }
 
+/// clang's name of an engine template instantiation whose spelling this mangler knows:
+/// `uint dm_pool_mark<P>(constant P*, uint)`.
+pub fn template_name(f: &Func, types: &Types) -> Option<String> {
+    if !f.template || &*f.name != "dm_pool_mark" {
+        return None;
+    }
+    let Some(Type::Ptr(Space::Constant, p)) = f.params.first().map(|p| &p.ty) else {
+        return None;
+    };
+    let Type::Struct(id) = **p else {
+        return None;
+    };
+    let n = &types.structs[id].name;
+    Some(format!(
+        "_ZL12dm_pool_markI{}{n}EjPU11MTLconstantKT_j",
+        n.len()
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::seq_id;

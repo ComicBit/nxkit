@@ -893,6 +893,7 @@ fn function_code(
                         "sext" => 2,
                         "fptrunc" => 7,
                         "fpext" => 8,
+                        "inttoptr" => 10,
                         "bitcast" => 11,
                         "addrspacecast" => 12,
                         o => return Err(format!("cast {o}")),
