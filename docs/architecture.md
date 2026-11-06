@@ -21,7 +21,7 @@ flowchart TD
   L3["L3 connection code: nxb-stages, nxb-cli, nxb-extract, nxb-pack, nxb-archive, nxb-build"]
   L2["L2 runtime, not in V: nxb-obs, nxb-tool, nxb-store, nxb-sched, nxb-io, nxb-nro, nxb-profile"]
   L1["L1 domain, no I/O: nxb-pyjson, nxb-shader, nxb-air, nxb-xlate, nxb-crypto, nxb-codec, nxb-a64, nxb-plist, nxb-hos, nxb-romfs, nxb-rewrite, nxb-split, nxb-bundle, nxb-zip, nxb-pso"]
-  L0["L0 foundation: nxb-model, nxb-error, nxb-maxwell, nxb-spvgen (in V), nxb-sys (the only unsafe code)"]
+  L0["L0 foundation: nxb-model, nxb-error, nxb-maxwell, nxb-sys (the only unsafe code)"]
   LF["F front end, standard library only: msl-lex, msl-parse, msl-sema, air-emit, air-bc, air-front, airc, mslcheck"]
   L3 --> L2 --> L0
   L3 --> L1 --> L0
@@ -52,7 +52,7 @@ The rules:
 | nxb-split | nxb-codec, nxb-romfs | decompression, the walk through the image |
 | nxb-bundle | nxb-plist | `Info.plist` |
 | nxb-zip | nxb-codec | deflate |
-| nxb-xlate | nxb-pyjson, nxb-maxwell, nxb-spvgen | the JSON of `res.json`, the machine code decoders, the SPIR-V generator |
+| nxb-xlate | nxb-pyjson, nxb-maxwell | the job file and the JSON of the reflection, the machine code decoders |
 | nxb-nro | nxb-split | the reader of the large archive |
 | nxb-pso | nxb-pyjson | tables and stamps |
 | nxb-cli, nxb-build | nxb-extract, nxb-pack, nxb-archive | the L3 stage crates (W19) |
@@ -70,7 +70,6 @@ The rules:
 | nxb-error | L0 | yes | impl | error classes, reason strings, `BuildError`, `EnvError` with errno classes |
 | nxb-sys | L0 | no | impl | process groups, memory size, core counts, locks, clonefile, zlib, AES, SHA instructions |
 | nxb-maxwell | L0 | yes | impl | decoders for Maxwell and Ampere (sm_86) machine code of the game GPU |
-| nxb-spvgen | L0 | yes | impl | the SPIR-V generator (generated builder and enum tables) |
 | nxb-pyjson | L1 | yes | impl | a JSON writer that gives the same bytes as Python `json.dumps`. Measured: byte-identical on 16,269 JSON files of the reference title. |
 | nxb-shader | L1 | yes | impl | NVN decode, the job writer, the chain version, guards, keys, `OutputFile`, the side library cut |
 | nxb-air | L1 | yes | skel | the in-process front end (planned, W18) |
@@ -92,7 +91,7 @@ The rules:
 | nxb-pack | L3 | no | impl | the Mac app stage, the ad-hoc signer, the IPA writer |
 | nxb-archive | L3 | no | impl | the pipeline archive: plan, batches, merge |
 | nxb-build | L3 | no | impl | the orchestrator `nxb build`, the rewrite step, the host stages and the iOS stages |
-| nxb-testkit, nxb-xlatedev, xtask | dev | no | impl | seeded generators, the parity differ, the corpus tools of the Rust translator (`xlate-corpus`, `xlate-diff`), the layer and size checks |
+| nxb-testkit, nxb-xlatedev, xtask | dev | no | impl | seeded generators, the parity differ, the corpus tool of the Rust translator (`xlate-corpus`), the layer and size checks |
 | msl-lex, msl-parse, msl-sema, air-emit, air-bc, air-front, airc, mslcheck | F | no | impl | the own front end. Refer to [frontend.md](frontend.md). |
 
 ## Data flow of the stages

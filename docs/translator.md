@@ -45,6 +45,11 @@ The step stores each translation in the store. The key has the translator identi
 the answer-table flag and the varyings of the partners. The identity is the chain version V, which covers the sources of `nxb-xlate` (refer to [shader-step.md](shader-step.md)).
 `NXB_TEST_XLATE_SALT` changes it. A failure is not stored.
 
+## 64 bit floats
+
+Metal has no `double`. The retry loop of `nxb_xlate::driver::retry` translates a job again with `softfloat64` set when the structured program uses 64 bit floats.
+The passes `opt/double_to_float.rs` and `xform/softfloat.rs` then lower them to 32 bit. The back end never sees a 64 bit float after the retry.
+
 ## Output
 
 The MSL is not byte-identical to the output of the former C# translator and `spirv-cross`. GPU tests validate it.
