@@ -6,6 +6,10 @@ pub mod context;
 pub mod core;
 pub mod definitions;
 pub mod emit_shader;
+#[cfg(test)]
+pub mod emit_test_util;
+#[cfg(test)]
+mod emit_tests;
 pub mod header;
 pub mod host;
 pub mod pipeline;

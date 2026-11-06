@@ -12,8 +12,9 @@ use crate::maxwell::names::Emit;
 type Ctx<'a, 'b> = EmitterContext<'a, 'b>;
 type R = Result<(), String>;
 
-fn emit_fcmp(ctx: &mut Ctx, cmp: FComp, a: Opd, b: Opd, c: Opd, rd: i32) -> R {
+fn emit_fcmp(ctx: &mut Ctx, cmp: FComp, a: Opd, b: Opd, c: Opd, rd: i32, ftz: bool) -> R {
     let z = ctx.ir.const_f(0.0);
+    let c = if ftz { flush_denormal(ctx, c) } else { c };
     let cmp_res = get_fp_comparison(ctx, cmp, c, z, FP32)?;
     let res = ctx.conditional_select(cmp_res, a, b);
     let d = get_dest(ctx, rd);
@@ -34,12 +35,18 @@ struct FsetArgs {
     bool_float: bool,
     write_cc: bool,
     is64: bool,
+    ftz: bool,
 }
 
 fn emit_fset(ctx: &mut Ctx, a: Opd, b: Opd, p: FsetArgs) -> R {
     let fp = if p.is64 { FP64 } else { FP32 };
     let a = ctx.fp_abs_neg_t(a, p.abs_a, p.neg_a, fp);
     let b = ctx.fp_abs_neg_t(b, p.abs_b, p.neg_b, fp);
+    let (a, b) = if p.ftz {
+        (flush_denormal(ctx, a), flush_denormal(ctx, b))
+    } else {
+        (a, b)
+    };
     let mut res = get_fp_comparison(ctx, p.cmp, a, b, fp)?;
     let pred = get_predicate(ctx, p.src_pred, p.src_pred_inv);
     res = get_pred_logical_op(ctx, p.logic, res, pred);
@@ -69,12 +76,18 @@ struct FsetpArgs {
     neg_a: bool,
     neg_b: bool,
     is64: bool,
+    ftz: bool,
 }
 
 fn emit_fsetp(ctx: &mut Ctx, a: Opd, b: Opd, p: FsetpArgs) -> R {
     let fp = if p.is64 { FP64 } else { FP32 };
     let a = ctx.fp_abs_neg_t(a, p.abs_a, p.neg_a, fp);
     let b = ctx.fp_abs_neg_t(b, p.abs_b, p.neg_b, fp);
+    let (a, b) = if p.ftz {
+        (flush_denormal(ctx, a), flush_denormal(ctx, b))
+    } else {
+        (a, b)
+    };
     let p0 = get_fp_comparison(ctx, p.cmp, a, b, fp)?;
     let p1 = ctx.bitwise_not(p0);
     let pred = get_predicate(ctx, p.src_pred, p.src_pred_inv);
@@ -182,7 +195,7 @@ fn emit_fmnmx(
 pub(super) fn try_emit(ctx: &mut Ctx, emit: Emit) -> Option<R> {
     let raw = ctx.curr_op.raw;
     macro_rules! fset {
-        ($ty:ident, $is64:expr, $b:expr) => {{
+        ($ty:ident, $is64:expr, $b:expr, $ftz:expr) => {{
             let op = $ty(raw);
             let a = get_src_reg(ctx, op.src_a(), $is64);
             let b = $b(ctx, &op);
@@ -203,12 +216,13 @@ pub(super) fn try_emit(ctx: &mut Ctx, emit: Emit) -> Option<R> {
                     bool_float: op.b_val(),
                     write_cc: op.write_cc(),
                     is64: $is64,
+                    ftz: ($ftz)(&op),
                 },
             )
         }};
     }
     macro_rules! fsetp {
-        ($ty:ident, $is64:expr, $wcc:expr, $b:expr) => {{
+        ($ty:ident, $is64:expr, $wcc:expr, $b:expr, $ftz:expr) => {{
             let op = $ty(raw);
             let a = get_src_reg(ctx, op.src_a(), $is64);
             let b = $b(ctx, &op);
@@ -229,6 +243,7 @@ pub(super) fn try_emit(ctx: &mut Ctx, emit: Emit) -> Option<R> {
                     neg_a: op.neg_a(),
                     neg_b: op.neg_b(),
                     is64: $is64,
+                    ftz: ($ftz)(&op),
                 },
             )
         }};
@@ -239,7 +254,7 @@ pub(super) fn try_emit(ctx: &mut Ctx, emit: Emit) -> Option<R> {
             let a = get_src_reg(ctx, op.src_a(), false);
             let b = $b(ctx, &op);
             let c = $c(ctx, &op);
-            emit_fcmp(ctx, op.f_comp(), a, b, c, op.dest())
+            emit_fcmp(ctx, op.f_comp(), a, b, c, op.dest(), op.ftz())
         }};
     }
     macro_rules! fmnmx {
@@ -265,56 +280,86 @@ pub(super) fn try_emit(ctx: &mut Ctx, emit: Emit) -> Option<R> {
         }};
     }
     let r: R = match emit {
-        Emit::DsetR => fset!(InstDsetR, true, |c: &mut Ctx, o: &InstDsetR| get_src_reg(
-            c,
-            o.src_b(),
-            true
-        )),
-        Emit::DsetI => fset!(InstDsetI, true, |c: &mut Ctx, o: &InstDsetI| get_src_imm(
-            c,
-            imm20_to_float(o.imm20()),
-            true
-        )),
-        Emit::DsetC => fset!(InstDsetC, true, |c: &mut Ctx, o: &InstDsetC| get_src_cbuf(
-            c,
-            o.cbuf_slot(),
-            o.cbuf_offset(),
-            true
-        )),
-        Emit::FsetR => fset!(InstFsetR, false, |c: &mut Ctx, o: &InstFsetR| get_src_reg(
-            c,
-            o.src_b(),
-            false
-        )),
-        Emit::FsetC => fset!(InstFsetC, false, |c: &mut Ctx, o: &InstFsetC| get_src_cbuf(
-            c,
-            o.cbuf_slot(),
-            o.cbuf_offset(),
-            false
-        )),
-        Emit::FsetI => fset!(InstFsetI, false, |c: &mut Ctx, o: &InstFsetI| get_src_imm(
-            c,
-            imm20_to_float(o.imm20()),
-            false
-        )),
-        Emit::DsetpR => fsetp!(InstDsetpR, true, false, |c: &mut Ctx, o: &InstDsetpR| {
-            get_src_reg(c, o.src_b(), true)
-        }),
-        Emit::DsetpI => fsetp!(InstDsetpI, true, false, |c: &mut Ctx, o: &InstDsetpI| {
-            get_src_imm(c, imm20_to_float(o.imm20()), true)
-        }),
-        Emit::DsetpC => fsetp!(InstDsetpC, true, false, |c: &mut Ctx, o: &InstDsetpC| {
-            get_src_cbuf(c, o.cbuf_slot(), o.cbuf_offset(), true)
-        }),
-        Emit::FsetpR => fsetp!(InstFsetpR, false, 0, |c: &mut Ctx, o: &InstFsetpR| {
-            get_src_reg(c, o.src_b(), false)
-        }),
-        Emit::FsetpI => fsetp!(InstFsetpI, false, 0, |c: &mut Ctx, o: &InstFsetpI| {
-            get_src_imm(c, imm20_to_float(o.imm20()), false)
-        }),
-        Emit::FsetpC => fsetp!(InstFsetpC, false, 0, |c: &mut Ctx, o: &InstFsetpC| {
-            get_src_cbuf(c, o.cbuf_slot(), o.cbuf_offset(), false)
-        }),
+        Emit::DsetR => fset!(
+            InstDsetR,
+            true,
+            |c: &mut Ctx, o: &InstDsetR| get_src_reg(c, o.src_b(), true),
+            |_: &InstDsetR| false
+        ),
+        Emit::DsetI => fset!(
+            InstDsetI,
+            true,
+            |c: &mut Ctx, o: &InstDsetI| get_src_imm(c, imm20_to_float(o.imm20()), true),
+            |_: &InstDsetI| false
+        ),
+        Emit::DsetC => fset!(
+            InstDsetC,
+            true,
+            |c: &mut Ctx, o: &InstDsetC| get_src_cbuf(c, o.cbuf_slot(), o.cbuf_offset(), true),
+            |_: &InstDsetC| false
+        ),
+        Emit::FsetR => fset!(
+            InstFsetR,
+            false,
+            |c: &mut Ctx, o: &InstFsetR| get_src_reg(c, o.src_b(), false),
+            |o: &InstFsetR| o.ftz()
+        ),
+        Emit::FsetC => fset!(
+            InstFsetC,
+            false,
+            |c: &mut Ctx, o: &InstFsetC| get_src_cbuf(c, o.cbuf_slot(), o.cbuf_offset(), false),
+            |o: &InstFsetC| o.ftz()
+        ),
+        Emit::FsetI => fset!(
+            InstFsetI,
+            false,
+            |c: &mut Ctx, o: &InstFsetI| get_src_imm(c, imm20_to_float(o.imm20()), false),
+            |o: &InstFsetI| o.ftz()
+        ),
+        Emit::DsetpR => fsetp!(
+            InstDsetpR,
+            true,
+            false,
+            |c: &mut Ctx, o: &InstDsetpR| { get_src_reg(c, o.src_b(), true) },
+            |_: &InstDsetpR| false
+        ),
+        Emit::DsetpI => fsetp!(
+            InstDsetpI,
+            true,
+            false,
+            |c: &mut Ctx, o: &InstDsetpI| { get_src_imm(c, imm20_to_float(o.imm20()), true) },
+            |_: &InstDsetpI| false
+        ),
+        Emit::DsetpC => fsetp!(
+            InstDsetpC,
+            true,
+            false,
+            |c: &mut Ctx, o: &InstDsetpC| { get_src_cbuf(c, o.cbuf_slot(), o.cbuf_offset(), true) },
+            |_: &InstDsetpC| false
+        ),
+        Emit::FsetpR => fsetp!(
+            InstFsetpR,
+            false,
+            0,
+            |c: &mut Ctx, o: &InstFsetpR| { get_src_reg(c, o.src_b(), false) },
+            |o: &InstFsetpR| o.ftz()
+        ),
+        Emit::FsetpI => fsetp!(
+            InstFsetpI,
+            false,
+            0,
+            |c: &mut Ctx, o: &InstFsetpI| { get_src_imm(c, imm20_to_float(o.imm20()), false) },
+            |o: &InstFsetpI| o.ftz()
+        ),
+        Emit::FsetpC => fsetp!(
+            InstFsetpC,
+            false,
+            0,
+            |c: &mut Ctx, o: &InstFsetpC| {
+                get_src_cbuf(c, o.cbuf_slot(), o.cbuf_offset(), false)
+            },
+            |o: &InstFsetpC| o.ftz()
+        ),
         Emit::FcmpR => fcmp!(
             InstFcmpR,
             |c: &mut Ctx, o: &InstFcmpR| get_src_reg(c, o.src_b(), false),
