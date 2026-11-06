@@ -302,7 +302,11 @@ fn build_with(s: &Structured, ctx: &Context<'_>, opt: &Options, ints: &[u32]) ->
     if let Some(vx) = &vx {
         r.entries = variant::vertex::fields(vx);
     }
-    r.raster = facts::raster(shader, &plan, usage.discard, &r.bindings);
+    r.raster = if shader == Shader::Vertex {
+        super::facts_vs::raster(&s.info, props, &plan, &res)
+    } else {
+        facts::raster(shader, &plan, usage.discard, &r.bindings)
+    };
     let mut libraries = vec![Library {
         suffix: "_b".into(),
         msl,

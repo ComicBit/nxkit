@@ -14,6 +14,8 @@ pub mod vertex;
 pub mod vertex_pad;
 #[cfg(test)]
 mod vertex_tests;
+#[cfg(test)]
+mod vfacts_tests;
 pub mod vin;
 #[cfg(test)]
 mod vin_tests;
