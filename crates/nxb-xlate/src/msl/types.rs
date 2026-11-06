@@ -105,7 +105,10 @@ mod tests {
     fn literals_are_valid_msl() {
         assert_eq!(float_literal(1.0f32.to_bits()), "1.0f");
         assert_eq!(float_literal((-0.5f32).to_bits()), "(-0.5f)");
-        assert_eq!(float_literal(f32::NAN.to_bits()), "as_type<float>(0x7fc00000u)");
+        assert_eq!(
+            float_literal(f32::NAN.to_bits()),
+            "as_type<float>(0x7fc00000u)"
+        );
         assert_eq!(literal(AggType::S32, i32::MIN), "(-2147483647 - 1)");
         assert_eq!(literal(AggType::U32, -1), "4294967295u");
         assert_eq!(literal(AggType::BOOL, -1), "true");
@@ -114,14 +117,20 @@ mod tests {
     #[test]
     fn casts_follow_the_boolean_convention() {
         assert_eq!(cast("x", AggType::S32, AggType::U32), "as_type<uint>(x)");
-        assert_eq!(cast("x", AggType::FP32, AggType::BOOL), "(as_type<int>(x) != 0)");
+        assert_eq!(
+            cast("x", AggType::FP32, AggType::BOOL),
+            "(as_type<int>(x) != 0)"
+        );
         assert_eq!(cast("b", AggType::BOOL, AggType::S32), "(b ? -1 : 0)");
         assert_eq!(cast("x", AggType::U32, AggType::U32), "x");
     }
 
     #[test]
     fn vector_types() {
-        assert_eq!(msl_type(AggType(AggType::VECTOR4.0 | AggType::S32.0)).unwrap(), "int4");
+        assert_eq!(
+            msl_type(AggType(AggType::VECTOR4.0 | AggType::S32.0)).unwrap(),
+            "int4"
+        );
         assert!(msl_type(AggType::FP64).is_err());
     }
 }

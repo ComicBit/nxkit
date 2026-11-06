@@ -6,13 +6,30 @@
 //! [`refl::Reflection`] writes it. Refer to `docs/translator.md`.
 
 pub mod abi;
+pub mod args;
+pub mod buffers;
+pub mod control;
+pub mod emit;
+pub mod entry;
+pub mod facts;
 pub mod handles;
+pub mod inst_alu;
+pub mod inst_img;
+pub mod inst_mem;
+pub mod inst_misc;
+pub mod inst_query;
+pub mod inst_tex;
+pub mod io;
+pub mod prelude;
 pub mod refl;
 pub mod types;
 pub mod usage;
+pub mod variant;
 pub mod walk;
 
 use crate::job::Job;
+use crate::translation::msl_entry::structure_job;
+pub use emit::Options;
 pub use refl::Reflection;
 
 /// What the stage step knows about one shader besides its job and code.
@@ -102,11 +119,29 @@ impl Failure {
     }
 }
 
+/// The code hash of the vertex shader that counts the visible vertices of an occlusion query.
+const VISIBILITY_COUNTER: &str = "f5f4d23149565acd852f6b7091f64cc8cb3aa019ccb33ba3f88ced62c6d1ff7b";
+
+fn failure(e: String) -> Failure {
+    if e.starts_with("unported:") {
+        Failure::new("not ported", e)
+    } else {
+        Failure::new("translation failed", e)
+    }
+}
+
 /// Translate one shader from its job and machine code to its libraries.
 pub fn translate(job: &Job, code: &[u8], ctx: &Context<'_>) -> Result<Translated, Failure> {
-    let _ = (code, ctx);
-    Err(Failure::new(
-        "not ported",
-        format!("unported: MSL back end ({})", job.stage),
-    ))
+    if !matches!(job.stage.as_str(), "vs" | "ps" | "cs") {
+        return Err(Failure::new(
+            "not ported",
+            format!("unported: {} stage", job.stage),
+        ));
+    }
+    let structured = structure_job(job, code).map_err(failure)?;
+    let opt = Options {
+        visibility_counter: job.stage == "vs"
+            && nxb_model::sha256(code).to_hex() == VISIBILITY_COUNTER,
+    };
+    entry::build(&structured, ctx, &opt).map_err(failure)
 }
