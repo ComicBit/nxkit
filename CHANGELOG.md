@@ -7,6 +7,7 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 ### Added
 
 - The split reads zip members compressed with bzip2 or lzma. The decoders are `nxb-split::bzip2` (new) and `nxb-split::unity::lzma`.
+- The split reads BND3 archives whose entry names are Shift JIS with double-byte characters. The decoder is `nxb-split::sjis` (new). Its table is made by `tools/gen_sjis_table.py`.
 
 ## 0.5.1
 

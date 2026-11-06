@@ -118,7 +118,7 @@ limits it. The own front end is not byte-identical in the validated mode.
   Three more titles were not checked again with the current script.
 - Each change of the engine changes the hashes that the rules pin. Make the rules again (`nxb rewrite-rules`) and compare the oracle cases. If the engine differs from the pin,
   `nxb rewrite` stops with exit code 4, and `nxb build` stops at the rewrite step with exit code 1. The message gives the two hashes.
-- Not supported in the extract and the split (exit code 4 with a named message): Oodle formats, LZ5, CRA, sparse NCAs, BND3 names in double-byte Shift JIS.
+- Not supported in the extract and the split (exit code 4 with a named message): Oodle formats, LZ5, CRA, sparse NCAs.
   The checksums of LZ4 frames are not checked. A base game with its update in one run gives an error in the reference split and in this split.
 - XCI, merged packages, dump folders, NSZ block mode and DLC were checked with synthetic files only. One real NSZ file was checked. `nxb build` does not split the shader content of DLC.
 - `nxb build` was run with a registered profile on one title (Mac app). A game without a profile gets a provisional profile. The heap check, the region check and the shader captures start the game, and they are not ported.
