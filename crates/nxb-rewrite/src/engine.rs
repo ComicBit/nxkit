@@ -1,5 +1,5 @@
 //! The engine finders of `patch_nso.py` that run on any module without a build ID, wired into the rewrite
-//! (`ue_cvar`, `fps_target`, `ue_malloc`, `snowdrop_pools`.`ue_region` is not ported).
+//! (`ue_cvar`, `fps_target`, `ue_malloc`, `snowdrop_pools`, `ue_region`).
 
 use crate::error::RewriteError;
 use crate::rewrite::{Options, Step};
@@ -10,11 +10,11 @@ pub(crate) struct Finds {
     pub(crate) cvars: Vec<(String, i64)>,
     pub(crate) fps: Option<(i64, i64)>,
     pub(crate) malloc: Option<crate::finders2::UeMalloc>,
+    pub(crate) region: Option<crate::region::UeRegion>,
 }
 
-/// The finders that run on any module without a build ID (`ue_cvar`, `fps_target`, `ue_malloc`, `snowdrop_pools`):
-/// their cuts go on the cut list and into the image, in the order of the script. The engine region finder
-/// (`ue_region.py`) is not ported: a main that has its option string is unsupported.
+/// The finders that run on any module without a build ID (`ue_cvar`, `fps_target`, `ue_malloc`, `snowdrop_pools`,
+/// `ue_region`): their cuts go on the cut list and into the image, in the order of the script.
 pub(crate) fn engine_finders(
     rw: &mut Rw,
     opts: &Options,
@@ -28,6 +28,7 @@ pub(crate) fn engine_finders(
         cvars: Vec::new(),
         fps: None,
         malloc: None,
+        region: None,
     };
     let main = name == "main";
     if main {
@@ -118,10 +119,18 @@ pub(crate) fn engine_finders(
                 "[RED] {name}: {r}: its 12 GB reservation stays and fails on an iPhone"
             ));
         }
-        if crate::finders2::has_region_option(&rw.img, ro_off, data_off) {
-            return Err(Step::Err(RewriteError::Unsupported(
-                "this main names Unreal's engine address region option (SwitchVirtualAddressSpaceSize) and the finder for it (ue_region.py) is not ported".into(),
-            )));
+        match crate::region::ue_region_find(&rw.img, text_end, ro_off, data_off).map_err(fail_)? {
+            Ok(r) => {
+                log.push(format!("{name}: {}", r.why));
+                f.region = Some(r);
+            }
+            Err(why) => {
+                if let Some(r) = why.strip_prefix("[RED] ") {
+                    log.push(format!(
+                        "[RED] {name}: {r}: the engine asks for its whole default region"
+                    ));
+                }
+            }
         }
     }
     Ok(f)

@@ -1,0 +1,2 @@
+main: Unreal's engine region: reserved at 0x218 in nninitStartup's 0x200, its size stored from x8 at 0x210, x1 set from it at 0x214
+main {'obs': 1} cuts 0 obs 1 patch 44 PATCH_OFF 0x10000 slot_refs 1 gates 1

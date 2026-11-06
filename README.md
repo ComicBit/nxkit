@@ -58,7 +58,7 @@ more titles.
 | iOS stages (`nxb ios`) | generators and workspace writer on real and synthetic inputs, one title for the IPA | the generators are byte-identical. 75 of 75 IPA entries are equal in name, method, sizes, CRC and attributes. Two entries are equal in part only: the executable (only `__LINKEDIT` differs) and the font file |
 | Overlap in `nxb build` | one title, extract, split and shaders reused | the event streams are the same, except the times. 58,211 of 58,211 paths exist in both outputs. All files are byte-identical, except two rebuilt Mach-O files and their lines in `CodeResources` |
 | Shader step, current engine (0.5.1) | a full run (C# translator, own front end off) against a Python build of the same engine. Sample: 41,883 libraries | 0 of 41,883 libraries differ. The `_b.json` files are equal. 5 shaders are stubs that the Python run itself left |
-| Rewrite (`nxb rewrite`), current engine (0.5.1) | 111 modules: 9 real, 4 synthetic and 98 NRO modules | `.patched.bin`, the six tables and `build_src.sha256` are byte-identical in 111 of 111. The finder `ue_region` is not ported |
+| Rewrite (`nxb rewrite`), current engine (0.5.1) | 111 modules: 9 real, 4 synthetic and 98 NRO modules | `.patched.bin`, the six tables and `build_src.sha256` are byte-identical in 111 of 111. |
 | Rewrite (`nxb rewrite`), earlier script | 25 real modules, with ZBIC, NRO and frame step stubs | all tables, `.patched.bin` and the fixups are byte-identical. 98 of 98 NRO modules also. The script changed after this comparison |
 | Profile files, survey and `nxb profile` (0.5.1) | 1,115 tables of 145 profiles, 11 extractions, 6 surveys | read and write of the tables: 1,115 of 1,115. Guess: 11 of 11. Survey and provisional profile: 6 of 6. Registered profile check: 10 of 10 |
 | Split, ZBIC segments (0.5.1) | the four modules of one Switch 2 package, and a synthetic file | each segment hash is correct |
@@ -113,7 +113,7 @@ limits it. The own front end is not byte-identical in the validated mode.
 - The own-identical allow list is not in this repository. Without it, only the raw path runs. A new Metal toolchain version has no verdicts, and it turns the own tiers off.
 - The pipeline archive uses Apple tools. "Equal" means that the loader finds each base library.
 - The app stage puts about 58,000 loose library files in the app. The reference script packs one image file. The host reads the two forms. `DMSH_IOS_PULL=0` is not ported.
-- The rewrite step is checked against the current script on 111 modules. Not ported: the finder `ue_region` (a main module with `SwitchVirtualAddressSpaceSize` stops with exit code 4).
+- The rewrite step is checked against the current script on 111 modules.
   The finders for Unreal and Snowdrop have no real positive sample. The layouts of three more titles and some frame step stubs are checked with synthetic files only.
   Three more titles were not checked again with the current script.
 - Each change of the engine changes the hashes that the rules pin. Make the rules again (`nxb rewrite-rules`) and compare the oracle cases. If the engine differs from the pin,
