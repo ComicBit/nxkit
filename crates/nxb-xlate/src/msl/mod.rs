@@ -23,6 +23,8 @@ pub mod facts;
 pub mod first_store;
 #[cfg(test)]
 mod gaps_tests;
+#[cfg(test)]
+mod gmem_tests;
 pub mod handles;
 pub mod hmma;
 pub mod inst_alu;

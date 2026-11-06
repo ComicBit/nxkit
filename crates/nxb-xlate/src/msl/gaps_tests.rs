@@ -282,6 +282,7 @@ fn gaps_metal_compiles_the_samples() {
             "ps_pool_sep",
             super::pool_tests::pool_sample(64, 7, 0x2a, true, false),
         ),
+        ("cs_gmem", super::gmem_tests::raw_sample()),
         ("ps_ia", super::ioidx_tests::indexed_pixel(None, 2)),
         ("ps_ia_const", super::ioidx_tests::indexed_pixel(Some(2), 1)),
         ("vs_ia_oa", super::ioidx_tests::indexed_vertex(None, 3)),
