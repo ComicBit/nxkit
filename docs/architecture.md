@@ -44,7 +44,7 @@ The rules:
 | from | to | cause |
 |---|---|---|
 | nxb-model | nxb-sys | ARMv8 SHA-256 instructions. The digests do not change, thus V does not change (W17). |
-| nxb-air | nxb-shader | the MSL lexer, parser and syntax tree |
+| nxb-air | nxb-shader | declared for the in-process front end (W18, skeleton) |
 | nxb-shader | nxb-pyjson | the JSON files of the shader step |
 | nxb-hos | nxb-romfs, nxb-crypto, nxb-codec | the NCA data section is a RomFS, AES, NCZ blocks |
 | nxb-romfs | nxb-crypto | the `romfs.id` digests |
@@ -72,9 +72,9 @@ The rules:
 | nxb-maxwell | L0 | yes | impl | decoders for Maxwell and Ampere (sm_86) machine code of the game GPU |
 | nxb-spvgen | L0 | yes | impl | the SPIR-V generator (generated builder and enum tables) |
 | nxb-pyjson | L1 | yes | impl | a JSON writer that gives the same bytes as Python `json.dumps`. Measured: byte-identical on 16,269 JSON files of the reference title. |
-| nxb-shader | L1 | yes | impl | MSL lexer, parser, passes, NVN decode, reflection, variants, guards, keys, `OutputFile` |
+| nxb-shader | L1 | yes | impl | NVN decode, the job writer, the chain version, guards, keys, `OutputFile`, the side library cut |
 | nxb-air | L1 | yes | skel | the in-process front end (planned, W18) |
-| nxb-xlate | L1 | yes | impl | the Rust translator: decode, control flow, SSA, passes, structured IR, SPIR-V and `ShaderInterface`. Refer to [translator.md](translator.md) |
+| nxb-xlate | L1 | yes | impl | the Rust translator: decode, control flow, SSA, passes, structured IR and MSL with a typed `Reflection` (`nxb_xlate::msl::translate`). Refer to [translator.md](translator.md) |
 | nxb-a64 | L1 | no | impl | an AArch64 decoder and the encoders for the rewrite step. It follows Capstone 5 for the fields that the rewriter uses |
 | nxb-rewrite | L1 | no | impl | the code rewrite: NSO and NRO load, ZBIC decoder, rules as data, the five tables |
 | nxb-crypto, nxb-codec, nxb-plist, nxb-hos, nxb-romfs, nxb-bundle, nxb-zip, nxb-pso | L1 | no | skel | pure domain logic. Some of it is in the stage crates at this time. |
@@ -82,11 +82,11 @@ The rules:
 | nxb-obs | L2 | no | impl | NDJSON events, sinks and the code table (`code` and `severity`) |
 | nxb-nro | L2 | no | impl | the NRO collection (`nxb nro`) |
 | nxb-profile | L2 | no | impl | the profile of a game as typed data, with a TOML reader and writer. No stage uses it yet |
-| nxb-tool | L2 | no | impl | `Tool` trait, `Invocation`, environment allow list, watchdog, circuit breaker, `Translator` trait (Rust translator, host and process bridge), `FrontEnd` trait |
+| nxb-tool | L2 | no | impl | `Tool` trait, `Invocation`, environment allow list, watchdog, circuit breaker, `FrontEnd` trait |
 | nxb-store | L2 | no | impl | content-addressed blobs, keyed entries with manifests, quarantine, cache export and import |
 | nxb-sched | L2 | no | impl | work-stealing executor with token and memory budgets, single-flight |
 | nxb-io | L2 | no | impl | parallel reader, ordered writer, tree clone, digest index |
-| nxb-stages | L3 | no | impl | one module for each stage, the shader step |
+| nxb-stages | L3 | no | impl | one module for each stage, the shader step. It calls `nxb-xlate` in the process |
 | nxb-cli | L3 | no | impl | the program `nxb` with all commands |
 | nxb-extract | L3 | no | impl | extract and fused split for NSP, XCI, NSZ, NUP and dump folders. The commands are `nxb extract` and `nxb split` |
 | nxb-pack | L3 | no | impl | the Mac app stage, the ad-hoc signer, the IPA writer |

@@ -10,7 +10,7 @@
 //! | `extract` | `nxb_extract::cli::main` |
 //! | `split` | `nxb_extract::split_cli::main` |
 //! | `rewrite`, `nro`, `rewrite-rules` | `nxb_build::rewrite` |
-//! | `shaders recompile|guards|own-verdicts|build` | this crate (the shader-step command line) |
+//! | `shaders guards|own-verdicts|build` | this crate (the shader-step command line) |
 //! | `app` | `nxb_pack::cli::macapp::main` |
 //! | `ipa` | `nxb_pack::cli::ipa::main` |
 //! | `sign` | `nxb_pack::cli::sign::main` |
@@ -29,7 +29,6 @@ use std::io::Write;
 mod build;
 mod cache;
 pub mod help;
-mod recompile;
 mod regressions;
 mod selfcheck;
 
@@ -120,7 +119,6 @@ pub fn run(bin: Binary, args: &[String], out: &mut dyn Write, err: &mut dyn Writ
         }
         "regressions" => return regressions::main(rest, out, err),
         "self-check" => return selfcheck::main(rest, out, err),
-        "recompile" if bin == Binary::Shaderbuild => return recompile::main(rest, out, err),
         "guards" if bin == Binary::Shaderbuild => return guards(rest, out, err),
         "own-verdicts" if bin == Binary::Shaderbuild => return own_verdicts(rest, out, err),
         "build" if bin == Binary::Shaderbuild => return build::main(rest, out, err),
@@ -257,7 +255,7 @@ mod tests {
             assert_eq!(c, 0, "{cmd} --help");
             assert!(o.starts_with("usage: nxb"), "{cmd}: {o}");
         }
-        for sub in ["recompile", "guards", "own-verdicts", "build"] {
+        for sub in ["guards", "own-verdicts", "build"] {
             let (c, o, _) = call(Binary::Nxb, &["shaders", sub]);
             assert!(c == 2 && o.is_empty() || c == 1, "{sub}");
             let (c, o, _) = call(Binary::Shaderbuild, &[sub, "--help"]);
@@ -270,7 +268,6 @@ mod tests {
         for args in [
             vec!["guards"],
             vec!["own-verdicts"],
-            vec!["recompile"],
             vec!["prune"],
             vec!["regressions", "/nonexistent-dir"],
             vec!["frobnicate"],

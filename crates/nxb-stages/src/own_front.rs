@@ -1,4 +1,4 @@
-//! The optional own front end for `build` and `recompile` (off unless `--own-front <verdicts>` is given).
+//! The optional own front end for `build` (off unless `--own-front <verdicts>` is given).
 //!
 //! A shader whose MSL has an allowed verdict goes through `nxb_tool::airfront` (in-process front, `air-opt`, `metallib`).
 //! every other shader, every reject and every own failure goes to Apple's `metal -c` + `metallib`. The cache keys carry

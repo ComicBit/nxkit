@@ -2,7 +2,7 @@
 //!
 //! One line per tool: `ok <name> <path> <version>` or `missing <name> (required|optional)`. Exit code 0 when every
 //! required tool is found, 1 when one is missing. Apple tools are found with `xcrun -sdk <sdk> -f`, the others on
-//! `PATH`. With `NXB_ENGINE` set, the translator and `spirv-cross` of the engine's `dm/gfx/tools` are checked too.
+//! `PATH`.
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -12,7 +12,6 @@ use std::time::{Duration, Instant};
 enum Find {
     Xcrun(&'static str),
     Path,
-    File(PathBuf),
 }
 
 struct Tool {
@@ -41,7 +40,6 @@ fn locate(f: &Find, name: &str) -> Option<PathBuf> {
             (o.status.success() && p.is_file()).then_some(p)
         }
         Find::Path => which(name),
-        Find::File(p) => p.is_file().then(|| p.clone()),
     }
 }
 
@@ -88,7 +86,7 @@ fn tools() -> Vec<Tool> {
         required,
         version,
     };
-    let mut v = vec![
+    vec![
         t(
             "metal",
             Find::Xcrun("macosx"),
@@ -113,24 +111,7 @@ fn tools() -> Vec<Tool> {
         t("codesign", Find::Path, false, None),
         t("make", Find::Path, false, Some(&["--version"][..])),
         t("xcodebuild", Find::Path, false, Some(&["-version"][..])),
-        t("spirv-cross", Find::Path, false, Some(&["--revision"][..])),
-    ];
-    if let Some(e) = std::env::var_os("NXB_ENGINE") {
-        let tools = PathBuf::from(e).join("dm/gfx/tools");
-        v.push(t(
-            "dmsh_xlate",
-            Find::File(tools.join("dmsh_xlate_bin/dmsh_xlate")),
-            false,
-            None,
-        ));
-        v.push(t(
-            "spirv-cross (engine)",
-            Find::File(tools.join("spirv_cross_bin/spirv-cross")),
-            false,
-            Some(&["--revision"][..]),
-        ));
-    }
-    v
+    ]
 }
 
 /// Run the command.

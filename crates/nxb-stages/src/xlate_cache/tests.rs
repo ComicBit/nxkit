@@ -1,0 +1,228 @@
+use super::*;
+use nxb_xlate::msl::{Library, Reflection};
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::AtomicU32;
+
+static DIR_N: AtomicU32 = AtomicU32::new(0);
+
+/// A fresh folder under the build target.
+fn dir() -> PathBuf {
+    let d: PathBuf = [
+        env!("CARGO_MANIFEST_DIR"),
+        "..",
+        "..",
+        "target",
+        "nxb-stages-test",
+    ]
+    .iter()
+    .collect::<PathBuf>()
+    .join(format!(
+        "xlate-{}-{}",
+        std::process::id(),
+        DIR_N.fetch_add(1, Ordering::Relaxed)
+    ));
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(&d).unwrap();
+    d
+}
+
+fn store() -> Store {
+    Store::open(&dir()).unwrap()
+}
+
+fn job(code: &[u8]) -> Job {
+    Job {
+        code: code.to_vec(),
+        c1: Vec::new(),
+        json: Value::obj([
+            ("key", Value::str("0123456789abcdef")),
+            ("stage", Value::str("ps")),
+            ("code", Value::str("0123456789abcdef.bin")),
+        ]),
+        notes: Vec::new(),
+    }
+}
+
+fn ctx<'a>(partners: &'a [StageInputs]) -> Context<'a> {
+    Context {
+        chain: "v1",
+        source: "pkg#3".into(),
+        pc_paired: "",
+        partners,
+        no_facts: false,
+    }
+}
+
+fn varying(location: u32) -> StageInputs {
+    StageInputs {
+        varyings: vec![Varying {
+            location,
+            msl_type: "float4".into(),
+            interpolation: String::new(),
+        }],
+    }
+}
+
+fn translated(j: &XJob) -> Translated {
+    let refl = Reflection {
+        key: format!("{}_b", j.key),
+        stage: j.stage.clone(),
+        ..Reflection::default()
+    };
+    Translated {
+        key: j.key.clone(),
+        stage: j.stage.clone(),
+        libraries: vec![
+            Library {
+                suffix: "_b".into(),
+                msl: "// main0\n".into(),
+                reflection: Some(refl),
+            },
+            Library {
+                suffix: "_bf".into(),
+                msl: "// fetch\n".into(),
+                reflection: None,
+            },
+        ],
+        inputs: varying(1),
+        side: Some(Side {
+            alpha: vec!["main0_a".into()],
+            logic: vec!["main0_l".into()],
+        }),
+    }
+}
+
+fn counting(runs: &Arc<AtomicU32>) -> Box<Run> {
+    let runs = runs.clone();
+    Box::new(move |j, _, _| {
+        runs.fetch_add(1, Ordering::Relaxed);
+        Ok(translated(j))
+    })
+}
+
+#[test]
+fn a_translation_is_kept_and_read_back() {
+    let runs = Arc::new(AtomicU32::new(0));
+    let x = Xlate::with(store(), "t1".into(), counting(&runs));
+    let first = x.translate(&job(b"code"), &ctx(&[])).unwrap();
+    let again = x.translate(&job(b"code"), &ctx(&[])).unwrap();
+    assert_eq!(first, again);
+    assert_eq!(runs.load(Ordering::Relaxed), 1);
+    assert_eq!(x.hits.load(Ordering::Relaxed), 1);
+    assert_eq!(x.misses.load(Ordering::Relaxed), 1);
+    assert_eq!(first.libs.len(), 2);
+    assert_eq!(first.libs[1].json, None);
+    assert_eq!(first.inputs, varying(1));
+    assert_eq!(first.side.as_ref().unwrap().alpha, ["main0_a"]);
+    assert_eq!(
+        first.libs[0].json.as_ref().unwrap().get("key"),
+        Some(&Value::str("0123456789abcdef_b"))
+    );
+}
+
+#[test]
+fn every_input_of_the_key_translates_again() {
+    let runs = Arc::new(AtomicU32::new(0));
+    let x = Xlate::with(store(), "t1".into(), counting(&runs));
+    let p1 = [varying(1)];
+    let p2 = [varying(2)];
+    x.translate(&job(b"code"), &ctx(&[])).unwrap();
+    x.translate(&job(b"other"), &ctx(&[])).unwrap();
+    x.translate(&job(b"code"), &ctx(&p1)).unwrap();
+    x.translate(&job(b"code"), &ctx(&p2)).unwrap();
+    let mut c = ctx(&[]);
+    c.chain = "v2";
+    x.translate(&job(b"code"), &c).unwrap();
+    let mut c = ctx(&[]);
+    c.no_facts = true;
+    x.translate(&job(b"code"), &c).unwrap();
+    assert_eq!(runs.load(Ordering::Relaxed), 6);
+    assert_eq!(x.hits.load(Ordering::Relaxed), 0);
+}
+
+#[test]
+fn another_translator_identity_does_not_reuse_a_translation() {
+    let d = dir();
+    let runs = Arc::new(AtomicU32::new(0));
+    let a = Xlate::with(Store::open(&d).unwrap(), "t1".into(), counting(&runs));
+    a.translate(&job(b"code"), &ctx(&[])).unwrap();
+    let b = Xlate::with(Store::open(&d).unwrap(), "t2".into(), counting(&runs));
+    b.translate(&job(b"code"), &ctx(&[])).unwrap();
+    assert_eq!(runs.load(Ordering::Relaxed), 2);
+}
+
+#[test]
+fn the_identity_follows_the_chain() {
+    assert_eq!(translator_id("v1"), translator_id("v1"));
+    assert_ne!(translator_id("v1"), translator_id("v2"));
+}
+
+#[test]
+fn a_refusal_keeps_its_reason_and_is_not_kept() {
+    let runs = Arc::new(AtomicU32::new(0));
+    let r = runs.clone();
+    let x = Xlate::with(
+        store(),
+        "t1".into(),
+        Box::new(move |j, _, _| {
+            r.fetch_add(1, Ordering::Relaxed);
+            Err(Failure::new("not ported", format!("unported: {}", j.stage)))
+        }),
+    );
+    for _ in 0..2 {
+        let f = x.translate(&job(b"code"), &ctx(&[])).unwrap_err();
+        assert_eq!(f.reason, "not ported");
+        assert_eq!(f.detail, "unported: ps");
+    }
+    assert_eq!(runs.load(Ordering::Relaxed), 2);
+    assert_eq!(x.refused(), [("not ported".to_string(), 2)]);
+}
+
+#[test]
+fn a_panic_is_a_failed_translation() {
+    let x = Xlate::with(
+        store(),
+        "t1".into(),
+        Box::new(|_, _, _| panic!("translator bug")),
+    );
+    let f = x.translate(&job(b"code"), &ctx(&[])).unwrap_err();
+    assert_eq!(f.reason, "translation failed");
+    assert_eq!(f.detail, "panic in the Rust translator");
+    assert_eq!(x.refused(), [("panic".to_string(), 1)]);
+}
+
+#[test]
+fn a_job_the_translator_cannot_read_is_a_failed_translation() {
+    let runs = Arc::new(AtomicU32::new(0));
+    let x = Xlate::with(store(), "t1".into(), counting(&runs));
+    let mut j = job(b"code");
+    j.json = Value::obj([("stage", Value::str("ps"))]);
+    let f = x.translate(&j, &ctx(&[])).unwrap_err();
+    assert_eq!(f.reason, "translation failed");
+    assert_eq!(runs.load(Ordering::Relaxed), 0);
+    assert_eq!(x.refused(), [("error".to_string(), 1)]);
+}
+
+#[test]
+fn the_partners_reach_the_translator_in_order() {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let s = seen.clone();
+    let x = Xlate::with(
+        store(),
+        "t1".into(),
+        Box::new(move |j, _, c| {
+            *s.lock().unwrap() = c.partners.to_vec();
+            Ok(translated(j))
+        }),
+    );
+    let p = [varying(1), varying(4)];
+    x.translate(&job(b"code"), &ctx(&p)).unwrap();
+    assert_eq!(*seen.lock().unwrap(), p);
+}
+
+#[test]
+fn a_damaged_entry_is_translated_again() {
+    assert!(Translation::from_text("{\"stage\": 1}").is_none());
+    assert!(Translation::from_text("not json").is_none());
+}

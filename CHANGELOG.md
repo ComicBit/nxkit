@@ -2,6 +2,28 @@
 
 All notable changes are in this file. The format follows Keep a Changelog. Versions follow Semantic Versioning.
 
+## Unreleased
+
+### Changed (read this first)
+
+- One Rust translator writes MSL directly (D20). The shader step calls `nxb_xlate::msl::translate` in the process for each key.
+  Each library of the translation becomes `<key><suffix>.metal`, a `.metallib`, and a `.json` when it has a reflection.
+  The translator fills the reflection. Nothing parses MSL text.
+- The translation store key uses the translator identity (the chain version V, which covers the sources of `nxb-xlate`).
+  Entries of the C# translator and `spirv-cross` are not used.
+- A vertex shader waits for its pixel shaders and gets their varyings from the translator (`StageInputs`).
+  It no longer reads `_b.metal` files.
+- The `shaders done` event has the fields `xlate_hits` and `xlate_refused`. The fields `xlate_starts`, `xlate_restarts` and `xlate_fallbacks` are gone.
+- The output is not byte-identical to the output of the reference build scripts. GPU tests validate it.
+
+### Removed
+
+- The C# translator bridges: the `Translator` trait, the translator host, the process bridge and the Rust bridge in `nxb-tool`.
+- The tools `spirv-cross` and `dotnet`. `nxb self-check` does not look for them.
+- The options `--xlate`, `--xlate-host`, `--xlate-rust`, `--dotnet-root` and `--spirv-cross`, and the variables `NXB_XLATE_RUST` and `NXB_XLATE_HOST`.
+- The command `nxb shaders recompile`. It depended on the MSL text passes.
+- The MSL text passes of `nxb-shader` (`msl`, `reflect`, `variants` and the side unit builder). The job writer, the chain version, the guards and the side library cut stay.
+
 ## 0.5.1
 
 ### Changed (read this first)

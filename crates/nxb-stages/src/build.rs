@@ -1,7 +1,7 @@
 //! `shaderbuild build`: the whole Mac shader step from the split's package records, streaming on the executor:
-//! translation batches → per-shader finish (spirv-cross, passes, entry points, reflection) → libraries and variants
-//! through the store → outputs, then `_b_build.json`, `inputs.tsv` and the guard tables. Paired vertex shaders run in a
-//! second phase because `vs_pad` reads their pixel shaders' final sources (as `dmsh_build.py`).
+//! translation batches (`nxb_xlate::msl::translate`, in process) → per-shader finish (libraries, side libraries and
+//! variants through the store, reflection) → outputs, then `_b_build.json`, `inputs.tsv` and the guard tables. A paired
+//! vertex shader is translated when its pixel shaders are done, because `vs_pad` reads their inputs.
 
 use crate::build_finish::Shared;
 use crate::inputs::ShaderInputs;
@@ -10,9 +10,7 @@ use nxb_pyjson::{Value, dumps};
 use nxb_sched::{Budget, Executor, Report, SingleFlight, Task};
 use nxb_shader::{pch, target::MAC};
 use nxb_store::{Durability, Store};
-use nxb_tool::{
-    EnvPolicy, Io, MetalTools, ProcessRegistry, ProcessTool, Resolver, SdkRoots, ToolId,
-};
+use nxb_tool::{Io, MetalTools, ProcessRegistry, Resolver, SdkRoots};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::PathBuf;
@@ -36,18 +34,11 @@ pub struct BuildConfig {
     pub game: String,
     /// Profile inputs digest.
     pub inputs: String,
-    /// `dmsh_xlate`.
-    pub xlate: PathBuf,
-    /// .NET root for the translator.
-    pub dotnet_root: PathBuf,
-    /// `spirv-cross`.
-    pub spirv_cross: PathBuf,
     /// Store root.
     pub store: PathBuf,
     /// Private work folder (header, guard tables, timeline).
     pub work: PathBuf,
-    /// Folder for the short-lived files (translator in/out, spirv-cross input, temp AIR): best on the internal disk.
-    /// Its `tmp/` and `x/` are removed at the end.
+    /// Folder for the short-lived files (temp AIR): best on the internal disk. Its `tmp/` is removed at the end.
     pub scratch: PathBuf,
     /// Tokens.
     pub jobs: u32,
@@ -63,10 +54,6 @@ pub struct BuildConfig {
     pub on_done: Option<OnDone>,
     /// The key list, once known.
     pub on_start: Option<OnStart>,
-    /// Drive the translator as a persistent host: program and arguments (`xlatehost::resolve`).`None`: a process per batch.
-    pub xlate_host: Option<Vec<String>>,
-    /// Translate in process with the Rust translator, the C# bridge taking each key it refuses (`xlatehost::resolve_rust`).
-    pub xlate_rust: bool,
     /// Also build the iOS libraries (same sources, `ios_metal.py` convention) into `<ios_out>/b-<chain>/`.
     pub ios_out: Option<PathBuf>,
     /// Keys to translate first, in this order (empty: pixel and compute shaders, then paired vertex shaders).
@@ -105,14 +92,10 @@ pub struct BuildReport {
     pub own: Option<(u64, u64)>,
     /// The note on the own front end.
     pub own_note: String,
-    /// Translator processes started (.NET launches).
-    pub xlate_runs: u64,
     /// Translations answered from the store (early cutoff).
     pub xlate_hits: u64,
-    /// Translator host restarts after a crash or hang.
-    pub xlate_restarts: u32,
-    /// Keys sent to the process bridge after a host failure, by reason.
-    pub xlate_fallbacks: Vec<(String, u64)>,
+    /// Keys the translator refused, by reason (`panic` for a caught panic).
+    pub xlate_refused: Vec<(String, u64)>,
 }
 
 pub(crate) fn fatal(what: &str, e: impl std::fmt::Display) -> Fatal {
@@ -124,7 +107,7 @@ pub fn build(mut cfg: BuildConfig) -> Result<BuildReport, Fatal> {
     let t0 = Instant::now();
     let out = cfg.out.join(format!("b-{}", cfg.chain));
     let tmp = cfg.scratch.join("tmp");
-    for d in [&out, &tmp, &cfg.work.join("pch"), &cfg.scratch.join("x")] {
+    for d in [&out, &tmp, &cfg.work.join("pch")] {
         fs::create_dir_all(d).map_err(|e| fatal("create folder", e))?;
     }
     if cfg.keys.is_empty() {
@@ -209,44 +192,12 @@ pub fn build(mut cfg: BuildConfig) -> Result<BuildReport, Fatal> {
         )?),
         None => None,
     };
-    let xenv = EnvPolicy::translator(&home, &tmp, Some(cfg.dotnet_root.as_os_str()), None, None)
-        .and_then(|e| {
-            e.set(
-                "PATH",
-                format!("{}:/usr/bin:/bin", cfg.dotnet_root.display()),
-            )
-        })
-        .map_err(|e| fatal("translator environment", e))?;
-    let xid = ToolId {
-        name: "dmsh_xlate".into(),
-        path: cfg.xlate.clone(),
-        version: String::new(),
-    };
-    let translator = crate::xlatehost::open(
-        xid,
-        &registry,
-        &cfg.scratch,
-        xenv,
-        cfg.xlate_host.as_deref(),
-        cfg.xlate_rust,
-    )
-    .map_err(|e| fatal("translator host work folder", e))?;
-    let sc = ProcessTool::new(
-        ToolId {
-            name: "spirv-cross".into(),
-            path: cfg.spirv_cross.clone(),
-            version: String::new(),
-        },
-        registry.clone(),
-    );
     let mut store = Store::open(&cfg.store).map_err(|e| fatal("store", e))?;
     store.set_durability(Durability::Relaxed);
-    let (translator, sc_id) =
-        crate::xlate_cache::open(translator, &cfg).map_err(|e| fatal("translation cache", e))?;
+    let xlate = crate::xlate_cache::Xlate::open(&cfg.store, &cfg.chain)
+        .map_err(|e| fatal("translation cache", e))?;
     let shared = Arc::new(Shared {
         out: out.clone(),
-        work: cfg.work.clone(),
-        scratch: cfg.scratch.clone(),
         chain: cfg.chain.clone(),
         ident: nxb_model::sha256(&ident).to_hex(),
         compiler_id: cid,
@@ -255,9 +206,8 @@ pub fn build(mut cfg: BuildConfig) -> Result<BuildReport, Fatal> {
         pch: pchp,
         io: Io::Pipes,
         store,
-        sc,
-        translator,
-        sc_id,
+        xlate,
+        inputs_of: Mutex::new(BTreeMap::new()),
         inputs,
         pairs,
         flights: SingleFlight::new(),
@@ -269,7 +219,6 @@ pub fn build(mut cfg: BuildConfig) -> Result<BuildReport, Fatal> {
         used: Mutex::new(BTreeSet::new()),
         spans: Mutex::new(Vec::new()),
         t0,
-        n: Default::default(),
     });
     if let Some(f) = &cfg.on_start {
         (f.0)(&keys);
@@ -278,8 +227,8 @@ pub fn build(mut cfg: BuildConfig) -> Result<BuildReport, Fatal> {
         .iter()
         .cloned()
         .partition(|k| !shared.pairs.contains_key(k));
-    // One streaming run (design-v2 4): a paired vertex shader finishes as soon as it is translated and its pixel
-    // shaders are done (vs_pad reads their final sources), not after a global barrier as in dmsh_build.py.
+    // One streaming run (design-v2 4): a paired vertex shader is translated and finished as soon as its pixel
+    // shaders are done (vs_pad reads their inputs), not after a global barrier as in dmsh_build.py.
     {
         let building: BTreeSet<&String> = keys.iter().collect();
         let mut gates = shared.gates.lock().unwrap_or_else(PoisonError::into_inner);
@@ -304,7 +253,7 @@ pub fn build(mut cfg: BuildConfig) -> Result<BuildReport, Fatal> {
             }
         }
     }
-    // Batches: small ones first so every token gets work at once, then large ones (one .NET start per batch).
+    // Batches: small ones first so every token gets work at once, then large ones.
     let mut tasks = Vec::new();
     let mut order: Vec<&String> = phase_a.iter().chain(&phase_b).collect();
     crate::build_partial::sort(&cfg, &mut order);
@@ -373,9 +322,7 @@ pub fn build(mut cfg: BuildConfig) -> Result<BuildReport, Fatal> {
             .map_err(|e| fatal("guard tables", e))?;
     }
     crate::build_partial::mark(&cfg, &out, &results, total)?;
-    for d in ["tmp", "x"] {
-        let _ = fs::remove_dir_all(cfg.scratch.join(d));
-    }
+    let _ = fs::remove_dir_all(cfg.scratch.join("tmp"));
     let _ = fs::remove_dir(&cfg.scratch);
     let spans = std::mem::take(&mut *shared.spans.lock().unwrap_or_else(PoisonError::into_inner));
     let own_note = shared
@@ -385,13 +332,8 @@ pub fn build(mut cfg: BuildConfig) -> Result<BuildReport, Fatal> {
     Ok(BuildReport {
         own: shared.own.as_ref().map(|o| o.counts()),
         own_note,
-        xlate_runs: shared.translator.inner().runs(),
-        xlate_restarts: shared.translator.inner().restarts(),
-        xlate_fallbacks: shared.translator.inner().fallbacks(),
-        xlate_hits: shared
-            .translator
-            .hits
-            .load(std::sync::atomic::Ordering::Relaxed),
+        xlate_hits: shared.xlate.hits.load(std::sync::atomic::Ordering::Relaxed),
+        xlate_refused: shared.xlate.refused(),
         results,
         phases,
         spans,

@@ -15,7 +15,6 @@ in_v = false
 nxb-model.workspace = true
 nxb-error.workspace = true
 nxb-sys.workspace = true
-nxb-xlate.workspace = true
 # The own front end (layer F, a member of this workspace): optional, see deps.toml.
 air-front = { path = "../air-front", optional = true }
 
