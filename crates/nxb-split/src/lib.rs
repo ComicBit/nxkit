@@ -6,6 +6,7 @@
 //! container, never a silent difference.
 
 pub mod bahs;
+pub mod bzip2;
 pub mod capcom;
 pub mod engines;
 pub mod glslc;
