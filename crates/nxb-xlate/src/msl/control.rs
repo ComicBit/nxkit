@@ -57,6 +57,9 @@ impl Em<'_> {
         while k < list.len() {
             let n = list[k];
             k += 1;
+            if self.shared.skip.contains(&n) {
+                continue;
+            }
             match self.info.ast.kind(n).clone() {
                 Kind::Block(d) => match d.ty {
                     BlockType::If => {

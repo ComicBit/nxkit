@@ -66,6 +66,8 @@ pub struct Shared {
     pub params: Vec<(String, String)>,
     /// The shared memories live in the device buffer of the threadgroup spill (see `spill`).
     pub spill: bool,
+    /// Blocks of the main function the emitter leaves out (see `first_store`).
+    pub skip: BTreeSet<A>,
 }
 
 /// The emitter state.
