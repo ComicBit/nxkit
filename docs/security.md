@@ -11,7 +11,7 @@ Where a gap is open, this document says so.
 | Key file (`prod.keys`) | yes | You supply it. The tools never print key values, and they zero the title keys after use |
 | Command line arguments and environment | yes | They come from the person who runs the tool |
 | Files of a previous build (work folder, store) | partly | The store checks sizes and checksums. A damaged entry moves to quarantine |
-| Apple tools | yes | You install them. nxbuild starts them with an empty environment plus an allow-list |
+| Apple tools | yes | You install them. nxkit starts them with an empty environment plus an allow-list |
 
 The tools do not check the digital signatures of packages. A package with a valid structure but wrong content is accepted.
 Use packages from your own dumps only.

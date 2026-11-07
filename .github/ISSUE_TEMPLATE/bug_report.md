@@ -21,6 +21,6 @@ Paste the error text. Remove keys, paths with personal names and game data.
 
 ## Version and machine
 
-- nxbuild version (`nxb version`):
+- nxkit version (`nxb version`):
 - macOS version and chip:
 - Xcode version:

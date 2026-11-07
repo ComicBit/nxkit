@@ -1,4 +1,4 @@
-//! Test support for the nxbuild workspace: a seeded pseudo-random generator for property-style tests.
+//! Test support for the nxkit workspace: a seeded pseudo-random generator for property-style tests.
 //!
 //! Dev-only: used as a `dev-dependency`, never shipped. Std only, no external property-testing crate.
 //! A failing property test prints its seed so the case can be replayed.
