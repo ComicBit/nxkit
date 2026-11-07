@@ -30,6 +30,10 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
   The 32-bit integer division of the compiler starts with `I2F.U32.RP`. Rounded to nearest, a value above 2^24 came out one ulp off in about half the cases.
 - `MUFU.SIN` and `MUFU.COS` keep the fraction of a large number of turns (upstream `b5948342`). The lowering is sin or cos of (t - rint(t)) * 2pi.
   Before, t * 2pi lost the fraction, and Metal's fast sin and cos gave 0 past 2^20 turns. Upstream saw the SSAO of Donkey Kong Bananza lose its ambient occlusion in the lower right.
+- The rewriter takes a compare as a jump table's bound only when a branch on its flags guards the table load (upstream `e49afb1e`).
+  `b.hi` out of the dispatch gives N + 1 entries and `b.hs` gives N. `b.ls` and `b.lo` into the dispatch count the same way when the instruction before their target is a `b`, `br` or `ret`.
+  A compare with no such branch only sets the flags, and the walk goes on to the check before it. With none the site is refused.
+  Before, `cmp w18,#4; b.hi exit; cmp w18,#1; ldrsw ...` read 2 entries of a table of 5. `cmp #5; b.hs` read 6.
 - `TRANSLATOR_ID` is `msl-2.14`.
 
 ## 0.6.7

@@ -53,6 +53,47 @@ pub(crate) fn cmp_imm(p: &Insn, wide: bool) -> Option<(u8, u64)> {
     Some((n, pimm(p, 1)?))
 }
 
+/// How many entries the compare `ctx[kc]` (`cmp index, #n`) lets the table load `ctx[kl]` read, or `None`
+/// when no branch on its flags guards the load. A compare bounds the index only through the branch that acts
+/// on it: `cmp w18,#4; b.hi exit; cmp w18,#1; ldrsw x18,[x4,x18,lsl #2]` has a nearer compare that bounds
+/// nothing. Between the compare and the load, the first branch on an unsigned condition decides, with the
+/// flags still the compare's (no instruction that sets them and no call in between):
+/// - `b.hi` out gives n + 1 entries, `b.hs` / `b.cs` out gives n. The branch leaves the dispatch.
+/// - `b.ls` in gives n + 1, `b.lo` / `b.cc` in gives n. The branch enters the dispatch, and the instruction
+///   before its target is a `b`, `br` or `ret`, so the failed check does not fall into it.
+///
+/// Any other branch on the flags (`b.eq`, `b.ge`, ...) is no bounds check, and neither is a compare with none.
+pub(crate) fn guarded_count(ctx: &[Insn], kc: usize, kl: usize, n: u64) -> Option<usize> {
+    const SETS_FLAGS: &[&str] = &[
+        "cmp", "cmn", "tst", "ccmp", "ccmn", "fcmp", "fcmpe", "fccmp", "fccmpe", "adds", "subs",
+        "ands", "bics", "adcs", "sbcs", "negs", "ngcs", "msr", "bl", "blr",
+    ];
+    let n = n as usize;
+    let ld = ctx.get(kl)?.addr;
+    for q in kc + 1..kl {
+        let p = &ctx[q];
+        if matches!(p.mn, "b.hi" | "b.hs" | "b.cs" | "b.ls" | "b.lo" | "b.cc") {
+            let t = p.target()?;
+            let inside = p.addr < t && t <= ld;
+            if matches!(p.mn, "b.hi" | "b.hs" | "b.cs") {
+                return (!inside).then_some(n + usize::from(p.mn == "b.hi"));
+            }
+            let before = ctx[q + 1..=kl]
+                .iter()
+                .find(|x| x.addr + 4 == t)
+                .is_some_and(|x| matches!(x.mn, "b" | "br" | "ret"));
+            return (inside && before).then_some(n + usize::from(p.mn == "b.ls"));
+        }
+        if SETS_FLAGS.contains(&p.mn)
+            || p.mn.starts_with("b.")
+            || matches!(p.mn, "b" | "br" | "ret")
+        {
+            return None;
+        }
+    }
+    None
+}
+
 /// `and rA, rB, #imm` with w or x registers: `(A, B, imm)`.
 pub(crate) fn and_imm(p: &Insn) -> Option<(u8, u8, u64)> {
     if p.mn != "and" || !nops(p, 3) {
@@ -277,6 +318,7 @@ impl An<'_> {
         let mut idx: HashSet<u8> = HashSet::from([ix]);
         let mut masked: Option<(u8, u64, usize)> = None;
         let mut cmp: Option<usize> = None;
+        let mut n = 0usize;
         // a copy replaces the index (a check of its old value bounds nothing).`changed`: the index is written
         // after the check that the walk finds
         let (mut copies, mut changed): (HashSet<u8>, bool) = (HashSet::new(), false);
@@ -300,7 +342,7 @@ impl An<'_> {
                 i -= 1;
                 continue;
             }
-            let Some((cn, _)) = cmp_imm(p, far_base) else {
+            let Some((cn, cv)) = cmp_imm(p, far_base) else {
                 // a call counts for the caller-saved registers (Capstone lists only x30 as its write)
                 if writes_reg_any(p, &idx)
                     || (matches!(p.mn, "bl" | "blr") && idx.iter().any(|r| *r <= 18))
@@ -310,9 +352,16 @@ impl An<'_> {
                 i -= 1;
                 continue;
             };
+            // only a compare a branch acts on bounds the index. One that guards nothing only sets the flags,
+            // and the walk goes on to the check before it
             if idx.contains(&cn) {
-                cmp = Some(i as usize);
-                break;
+                if let Some(g) = guarded_count(ctx, i as usize, k0, cv) {
+                    cmp = Some(i as usize);
+                    n = g;
+                    break;
+                }
+                i -= 1;
+                continue;
             }
             if let Some((mreg, mmask, mpos)) = masked {
                 let mut q = i - 1;
@@ -328,8 +377,10 @@ impl An<'_> {
                         && v == mmask
                         && !(q as usize + 1..mpos)
                             .any(|z| written_w(&ctx[z]).contains(&u32::from(mreg)))
+                        && let Some(g) = guarded_count(ctx, i as usize, k0, cv)
                     {
                         cmp = Some(i as usize);
+                        n = g;
                     }
                     break;
                 }
@@ -344,12 +395,15 @@ impl An<'_> {
         }
         if cmp.is_none() && copy_first {
             let all: HashSet<u8> = idx.union(&copies).copied().collect();
+            // cmp; b.hi right before the load
             cmp = self.check_before_copy(insl, lo0, k0, lo0 + k0, &all);
+            if let Some(ci) = cmp {
+                n = pimm(&insl[lo0 + ci], 1).unwrap_or(0) as usize + 1;
+            }
         }
-        let Some(ci) = cmp else {
+        if cmp.is_none() {
             return Ok(None);
-        };
-        let n = pimm(&ctx_or(insl, lo0, ci), 1).unwrap_or(0) as usize + 1;
+        }
         let k = lo0 + k0;
         let rbt = tx(rb);
         let (mut lo, mut page): (Option<u64>, Option<i64>) = (None, None);
@@ -402,8 +456,4 @@ impl An<'_> {
         let tb = page + lo.unwrap_or(0) as i64;
         Ok(Some(self.table_entries(tb, n)?))
     }
-}
-
-fn ctx_or(insl: &[Insn], lo0: usize, ci: usize) -> Insn {
-    insl[lo0 + ci].clone()
 }
