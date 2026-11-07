@@ -11,7 +11,7 @@ use crate::ios::{ipa, ipapack};
 use crate::order::{Stage, Work};
 use nxb_model::ContentKey;
 use std::cell::RefCell;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 /// The stages of an iOS build.
@@ -82,6 +82,18 @@ pub(crate) fn nodes(a: &Args, b: &Build) -> Vec<Node> {
     nodes
 }
 
+/// `uses_jit`: main imports `nn::jit::CreateJitEnvironment` (Super Mario 64 of Super Mario 3D All-Stars).
+fn uses_jit(exefs: &Path) -> Result<bool, String> {
+    let main = exefs.join("main");
+    if !main.is_file() {
+        return Ok(false);
+    }
+    let (img, ..) = crate::host::guess::read_nso(&main)?;
+    Ok(crate::host::nsofacts::dynsyms(&img)?
+        .iter()
+        .any(|s| !s.1 && s.0.starts_with("_ZN2nn3jit20CreateJitEnvironment")))
+}
+
 /// The script's environment for `build_ipa.sh`, from the build's plan.
 fn inputs(a: &Args, b: &Build) -> Result<ipa::Inputs, String> {
     let w = &b.work;
@@ -93,6 +105,12 @@ fn inputs(a: &Args, b: &Build) -> Result<ipa::Inputs, String> {
             "unsupported: a Vulkan or OpenGL game in nxb build --platform ios (run the script)"
                 .into(),
         );
+    }
+    if !ex.join("jit/jit.img").is_file() && uses_jit(&ex.join("ExeFS"))? {
+        return Err(format!(
+            "unsupported: main imports nn::jit, and the iPhone needs an image of the code the game's JIT plugin makes ({}): the JIT capture (two boots with DM_JIT_CAPTURE and jit_capture.py) is not ported to nxb (run the script)",
+            ex.join("jit/jit.img").display()
+        ));
     }
     let control = crate::host::settings::languages_control(&[&ex, &base_ex])
         .unwrap_or_else(|| ex.join("control.nacp"));

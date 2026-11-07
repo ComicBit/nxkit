@@ -117,3 +117,152 @@ pub(super) fn inline_records(d: &[u8], label: &str, out: &mut Vec<Found>) -> R<(
     }
     Ok(())
 }
+
+/// `EShaderFrequency` of a shader code archive entry.
+fn freq(f: u8) -> Option<&'static str> {
+    Some(match f {
+        0 => "vs",
+        1 => "hs",
+        2 => "ds",
+        3 => "ps",
+        4 => "gs",
+        5 => "cs",
+        _ => return None,
+    })
+}
+
+/// A shader of a code archive: (offset from the code start, size, raw size, frequency).
+type ArcShader = (u64, u32, u32, u8);
+
+/// `uepak.archive`: (the shaders, the code start) of a version 2 shader code archive.
+fn archive(b: &[u8], what: &str) -> R<(Vec<ArcShader>, usize)> {
+    let mut o = 0usize;
+    let need = |o: usize, n: usize| -> R<()> {
+        if o.checked_add(n).is_none_or(|e| e > b.len()) {
+            return red(format!(
+                "{what}: {n:#x} bytes at {o:#x} do not fit in its {:#x}",
+                b.len()
+            ));
+        }
+        Ok(())
+    };
+    let u32_ = |o: &mut usize| -> R<usize> {
+        need(*o, 4)?;
+        let v = u32le(b, *o)?;
+        *o += 4;
+        Ok(v)
+    };
+    if u32_(&mut o)? != 2 {
+        return red(format!("{what}: not a version 2 shader code archive"));
+    }
+    for elem in [20usize, 20, 16] {
+        let n = u32_(&mut o)?;
+        let len = n.saturating_mul(elem);
+        need(o, len)?;
+        o += len;
+    }
+    let n = u32_(&mut o)?;
+    need(o, n.saturating_mul(17))?;
+    let mut sh = Vec::with_capacity(n);
+    for _ in 0..n {
+        let off = u64::from_le_bytes(sl(b, o, o + 8).try_into().unwrap_or_default());
+        sh.push((
+            off,
+            u32le(b, o + 8)? as u32,
+            u32le(b, o + 12)? as u32,
+            b[o + 16],
+        ));
+        o += 17;
+    }
+    let np = u32_(&mut o)?;
+    need(o, np.saturating_mul(16))?;
+    o += 16 * np;
+    let ni = u32_(&mut o)?;
+    need(o, ni.saturating_mul(4))?;
+    o += 4 * ni;
+    Ok((sh, o))
+}
+
+/// `ue_shaders`: an Unreal shader code archive with every shader decoded (written by the build's Unreal decode), each
+/// shader an LSLG record of one stage. Labels: `<label>#UE<index>`.
+pub fn ue_shaders(d: &[u8], label: &str) -> R<Vec<Found>> {
+    let (shaders, code) = archive(d, label)?;
+    let mut out = Vec::new();
+    for (i, (off, size, raw, fr)) in shaders.into_iter().enumerate() {
+        if size != raw {
+            return red(format!(
+                "{label}: shader {i} is still compressed (an archive the build has not decoded)"
+            ));
+        }
+        let a = usize::try_from(off)
+            .unwrap_or(usize::MAX)
+            .saturating_add(code);
+        let Some(s) = d.get(a..a.saturating_add(size as usize)) else {
+            return red(format!("{label}: shader {i} runs past the archive"));
+        };
+        let Some((tag, ctl, cd)) = lslg(s) else {
+            return red(format!("{label}: shader {i} is not an LSLG record"));
+        };
+        let st = ue_tag(&tag);
+        if st.is_none() || freq(fr) != st {
+            return red(format!(
+                "{label}: shader {i} has tag {tag} but frequency {fr}"
+            ));
+        }
+        let st = st.unwrap_or("vs");
+        if let Some(why) = check(st, ctl, cd) {
+            return red(format!("{label}: shader {i} ({st}): {why}"));
+        }
+        out.push(Found {
+            place: format!("{label}#UE{i}"),
+            stage: st,
+            ctl: ctl.to_vec(),
+            code: cd.to_vec(),
+        });
+    }
+    Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn arc(shaders: &[(u64, u32, u32, u8)], code: &[u8]) -> Vec<u8> {
+        let mut b = 2u32.to_le_bytes().to_vec();
+        for (n, e) in [(1u32, 20usize), (0, 20), (0, 16)] {
+            b.extend(n.to_le_bytes());
+            b.extend(vec![0u8; n as usize * e]);
+        }
+        b.extend((shaders.len() as u32).to_le_bytes());
+        for (o, s, r, f) in shaders {
+            b.extend(o.to_le_bytes());
+            b.extend(s.to_le_bytes());
+            b.extend(r.to_le_bytes());
+            b.push(*f);
+        }
+        b.extend(0u32.to_le_bytes());
+        b.extend(1u32.to_le_bytes());
+        b.extend(0u32.to_le_bytes());
+        b.extend_from_slice(code);
+        b
+    }
+
+    #[test]
+    fn archives_read_and_refuse() {
+        let a = arc(&[(0, 4, 4, 0), (4, 2, 2, 3)], b"abcdef");
+        let (sh, code) = archive(&a, "x").expect("archive");
+        assert_eq!(sh, vec![(0, 4, 4, 0), (4, 2, 2, 3)]);
+        assert_eq!(&a[code..], b"abcdef");
+        let e = ue_shaders(&a, "/ue_shaders/a").err().map(|e| e.to_string());
+        assert!(e.is_some_and(|e| e.contains("shader 0 is not an LSLG record")));
+        let c = arc(&[(0, 4, 9, 0)], b"abcd");
+        let e = ue_shaders(&c, "/u").err().map(|e| e.to_string());
+        assert!(e.is_some_and(|e| e.contains("still compressed")));
+        assert!(archive(&a[..20], "x").is_err());
+        assert!(archive(&3u32.to_le_bytes(), "x").is_err());
+        assert_eq!(
+            ue_shaders(&arc(&[], b""), "/u").ok().map(|v| v.len()),
+            Some(0)
+        );
+    }
+}

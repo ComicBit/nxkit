@@ -297,7 +297,8 @@ pub fn plan(a: &Args) -> Result<Build, String> {
     }
     nodes.push(Node {
         name: "Mac host".into(),
-        deps: vec![],
+        // a provisional profile changes in the extract stage (refine, the heap check): the host is built for its last state
+        deps: if prov { vec![0] } else { vec![] },
         key: key("host", &[("work", work.display().to_string())]),
         reused: None,
     });

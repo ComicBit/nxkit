@@ -93,5 +93,6 @@ pub fn aoc(req: &Request, id: Option<u64>) -> Result<Summary> {
             t1.elapsed().as_secs_f64(),
         ),
         closing,
+        split_unsupported: None,
     })
 }

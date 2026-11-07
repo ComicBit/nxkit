@@ -23,6 +23,7 @@
 
 mod app_stage;
 mod args;
+mod boot;
 pub mod events;
 mod extract_stage;
 pub mod graph;

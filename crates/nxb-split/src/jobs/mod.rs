@@ -17,14 +17,18 @@ pub mod arh;
 pub mod bdt;
 pub mod cpk;
 pub mod cra;
+pub mod frostbite;
 pub mod kpka;
 pub mod linkdata;
 pub mod nlg;
 pub mod pkz;
 pub mod smash;
+pub mod trinity;
 pub mod ue;
+pub mod uejob;
 mod uepak;
 mod uerec;
+pub use uerec::ue_shaders;
 mod uetoc;
 pub mod zip;
 
@@ -151,21 +155,7 @@ pub fn plan_with(files: &[File], nros: &NroSet) -> R<Plan> {
     let mut p = Plan::default();
     linkdata::plan(files, &mut p)?;
     kpka::plan(files, &mut p)?;
-    // Trinity packs and Frostbite bundles are Oodle: named, never guessed
-    for f in files.iter().filter(|f| f.live) {
-        if f.rel.ends_with(".trpfs") && f.head(8)? == b"ONEPACK\0" {
-            return Err(SplitError::Unsupported(format!(
-                "/{}: Trinity packs (Oodle Mermaid)",
-                f.rel
-            )));
-        }
-        if f.rel.ends_with("Data/layout.toc") && f.head(4)? == [0x00, 0xd1, 0xce, 0x01] {
-            return Err(SplitError::Unsupported(format!(
-                "/{}: a Frostbite game (Oodle Leviathan)",
-                f.rel
-            )));
-        }
-    }
+    trinity::plan(files, &mut p)?;
     ue::plan(files, &mut p)?;
     bdt::plan(files, &mut p)?;
     smash::plan(files, &mut p)?;
@@ -174,5 +164,29 @@ pub fn plan_with(files: &[File], nros: &NroSet) -> R<Plan> {
     cra::plan(files, nros, &mut p)?;
     zip::plan(files, &mut p)?;
     arh::plan(files, &mut p)?;
+    frostbite::plan(files, &mut p)?;
     Ok(p)
+}
+
+/// Bytes owned in memory, for the planners' tests.
+#[cfg(test)]
+pub(crate) struct Owned(pub Vec<u8>);
+
+#[cfg(test)]
+impl Src for Owned {
+    fn bytes(&self) -> Option<&[u8]> {
+        Some(&self.0)
+    }
+    fn len(&self) -> u64 {
+        self.0.len() as u64
+    }
+    fn read_at(&self, off: u64, buf: &mut [u8]) -> R<()> {
+        crate::src::Mem(&self.0).read_at(off, buf)
+    }
+}
+
+/// A test file's source.
+#[cfg(test)]
+pub(crate) fn own(b: Vec<u8>) -> Arc<dyn Src> {
+    Arc::new(Owned(b))
 }

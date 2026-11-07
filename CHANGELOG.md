@@ -10,6 +10,13 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
   The Mac shader stage writes `shader/vk/vk_shaders.{metallib,tsv}` or `shader/gl/gl_shaders.*` in the format of the host's `vk_shaders.py` and `gl_shaders.py`.
   The shader split and the pipeline archive are skipped for these games. The Mac app ships `msl/vk` or `msl/gl`.
   On Hades, 74 of 74 shaders translate and compile.
+- `nxb build` boots the game in the Mac host after the rewrite. The host runs headless with a time limit, and its output goes to `<work>/logs`.
+  The boots are the NRO capture, the heap check and the region check of a provisional profile, the GLSLC capture, the Vulkan and GL captures and the Unreal decode.
+  A step whose output is complete does not boot again.
+- The split decodes Oodle and LZ5 streams with the game's own decoder in the Mac host (`DM_OODLE_SERVE`). `nxb build` starts it when the profile names Oodle packs or legacy Unreal paks.
+- The split reads Trinity packs, Frostbite superbundles, the NROs of the NRO capture, the outputs of the GLSLC capture and the decoded Unreal shader archives.
+- The Unreal decode opens pak indexes encrypted with AES-256. The key comes from main. LZ4 shaders decode in nxb. Oodle shaders decode in one boot of the Mac host (`DM_OODLE_JOB`).
+- `nxb-nro` finds NROs, reads NRR version 1 and `.nrolz` files, and writes `missing.tsv`.
 
 ### Fixed
 
@@ -49,9 +56,13 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
   `nxb build --platform mac` gives the host the same tables in `<work>/run/tables`. `nxb-macapp` takes them with `--guard-tables`.
 - `TRANSLATOR_ID` is `msl-2.14`.
 
-### Not ported
+### Known gaps
 
-- The run-time shader captures of Vulkan and OpenGL games. The iOS app build of these games.
+- The iOS app build of Vulkan and OpenGL games.
+- nxb has no translator for the Vulkan and GL captures. The build writes a `[RED]` line.
+- The JIT capture is not ported. `nxb build --platform ios` stops for a game that imports `nn::jit` and has no `jit/jit.img`.
+- Unreal Engine 5.6 IoStore shader libraries are not read. The Unreal decode stops with an error.
+- No boot and no host decoder was tested with a real game. The tests use synthetic data.
 
 ## 0.6.7
 

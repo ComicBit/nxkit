@@ -17,9 +17,7 @@ use crate::events::Progress;
 use crate::graph::Build;
 use crate::host::survey::{Survey, SurveyInput, survey};
 use crate::host::survey_extract::manifest_of_image;
-use crate::host::survey_profile::{
-    EMPTY_TABLES, has_va, refine_after_rewrite, runs_needed, write_profile,
-};
+use crate::host::survey_profile::{EMPTY_TABLES, has_va, refine_after_rewrite, write_profile};
 use crate::inputs::Source;
 
 fn survey_dir(b: &Build) -> PathBuf {
@@ -203,55 +201,6 @@ pub(crate) fn prepare(a: &Args, b: &Build, p: &Progress) -> Result<bool, String>
         true,
     );
     Ok(false)
-}
-
-/// The steps that start the game on the Mac (heap check, region check, shader captures) are not done here: a game
-/// that needs one stops with exit code 4 (which captures it needs follows from the files of the RomFS image, as
-/// `build_sources` of the reference script reads them), unless `--no-heap-check` says to go on with the guessed layout (the
-/// captures are then left out).
-pub(crate) fn runs_check(a: &Args, b: &Build, p: &Progress) -> Result<(), String> {
-    let exefs = version_dir(b).join("ExeFS");
-    if !exefs.is_dir() {
-        return Ok(());
-    }
-    let text = std::fs::read_to_string(game_tsv(b)).map_err(|e| io(&game_tsv(b), e))?;
-    let s = survey_of(a, b, p, false)?;
-    let img = version_dir(b).join("RomFS.img");
-    let rom = if img.is_file() {
-        Some(crate::host::rom::Rom::open(&img)?)
-    } else {
-        None
-    };
-    let runs = runs_needed(&s, &exefs, a.no_heap_check, Some(&text), "", rom.as_ref())?;
-    let boots: Vec<_> = runs.iter().filter(|r| r.step != "capture").collect();
-    let caps: Vec<_> = runs.iter().filter(|r| r.step == "capture").collect();
-    let list = |v: &[&crate::host::survey_profile::RunNeeded]| {
-        v.iter()
-            .map(|r| format!("{} ({})", r.step, r.why))
-            .collect::<Vec<_>>()
-            .join("; ")
-    };
-    if !boots.is_empty() || (!caps.is_empty() && !a.no_heap_check) {
-        let all: Vec<_> = runs.iter().collect();
-        return Err(crate::exit::fail(
-            4,
-            format!(
-                "unsupported: the provisional profile of {} needs the game to run on the Mac: {}. nxb build does not start the game. Use --no-heap-check to go on with the guessed layout (a shader capture is then left out)",
-                b.title,
-                list(&all)
-            ),
-        ));
-    }
-    if !caps.is_empty() {
-        p.say(&format!(
-            "[RED] not done, the game is not started here: {}: the shaders it would capture are not in the app",
-            list(&caps)
-        ));
-    }
-    if a.no_heap_check {
-        p.say("--no-heap-check: no heap check and no region check, the guessed heap and address layout stays");
-    }
-    Ok(())
 }
 
 /// After the rewrite: the tables a Mac host needs exist, `mem_used` follows the rewritten modules.

@@ -5,6 +5,7 @@
 //! images with LZ4 segments). Every other reader of `scan_blob` is an [`SplitError::Unsupported`] error naming the
 //! container, never a silent difference.
 
+pub mod aes256;
 pub mod bahs;
 pub mod bzip2;
 pub mod capcom;
@@ -19,6 +20,7 @@ pub mod misc;
 pub mod monolith;
 pub mod narc;
 pub mod nso;
+pub mod oodle;
 pub mod packs;
 pub mod raw;
 pub(crate) mod rd;

@@ -114,6 +114,11 @@ impl Toc {
         })
     }
 
+    /// Whether a chunk has the type `t` (`of_type`, Unreal Engine 5 numbering: TOC version 4 and later).
+    pub(super) fn of_type(&self, t: u8) -> bool {
+        self.version >= 4 && self.ids.iter().any(|c| c[11] == t)
+    }
+
     pub(super) fn export_bundles(&self) -> Vec<usize> {
         if self.version < 4 {
             (0..self.ids.len())
@@ -232,12 +237,11 @@ impl Toc {
             };
             match meth.as_str() {
                 "" => out.extend_from_slice(&d[..d.len().min(raw as usize)]),
-                "Oodle" => {
-                    return Err(SplitError::Unsupported(format!(
-                        "{}: chunk {i} is Oodle-compressed",
-                        self.rel
-                    )));
-                }
+                "Oodle" => out.extend(crate::oodle::decode(
+                    &d,
+                    raw as usize,
+                    &format!("{}: chunk {i}", self.rel),
+                )?),
                 "Zlib" => out.extend(crate::rd::zlib_all(&d, &self.rel)?),
                 "LZ4" => out.extend(crate::lz4::block_upto(&d, raw as usize)?),
                 m => return ve(format!("{}: compression method {m} is not read", self.rel)),
