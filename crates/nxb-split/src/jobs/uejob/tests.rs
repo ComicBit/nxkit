@@ -24,13 +24,13 @@ fn arc(shaders: &[(u64, u32, u32, u8)], code: &[u8]) -> Vec<u8> {
 fn lz4_shaders_decode_in_place() {
     // shader 1: one literal-only LZ4 sequence of an LSLG record
     let a = arc(&[(0, 4, 4, 1), (4, 9, 8, 2)], b"abcd\x80LSLG1234");
-    let (sh, _, code) = tables(&a, "x").ok().expect("tables");
+    let (sh, _, code) = tables(&a, "x").expect("tables");
     let raws = lz4_shaders(&a, &sh, code).ok().flatten().expect("LZ4");
-    let d = decoded_archive(&a, &raws).ok().expect("decoded");
+    let d = decoded_archive(&a, &raws).expect("decoded");
     assert_eq!(d, arc(&[(0, 4, 4, 1), (4, 8, 8, 2)], b"abcdLSLG1234"));
     // no LSLG record: the game's decoder is needed
     let o = arc(&[(0, 9, 8, 0)], b"\x80XXXX1234");
-    let (sh, _, code) = tables(&o, "x").ok().expect("tables");
+    let (sh, _, code) = tables(&o, "x").expect("tables");
     assert!(matches!(lz4_shaders(&o, &sh, code), Ok(None)));
     assert!(decoded_archive(&a, &raws[..1]).is_err());
     assert!(tables(&a[..30], "x").is_err());
@@ -64,7 +64,7 @@ fn job_file_and_finish() {
         o.extend_from_slice(d);
         o
     };
-    let r = job.finish(Some(&out(5, b"hello"))).ok().expect("finish");
+    let r = job.finish(Some(&out(5, b"hello"))).expect("finish");
     assert_eq!(r.len(), 1);
     assert_eq!(r[0].1, arc(&[(0, 4, 4, 0), (4, 5, 5, 1)], b"abcdhello"));
     let e = job.finish(Some(&out(0, b""))).err().map(|e| e.to_string());

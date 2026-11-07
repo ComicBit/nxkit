@@ -283,19 +283,15 @@ mod tests {
     fn rewrite_id_follows_the_modules() {
         let d = std::env::temp_dir().join(format!("nxb-rid-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).ok().expect("dir");
+        std::fs::create_dir_all(&d).expect("dir");
         assert_eq!(rewrite_id(&d), "");
-        std::fs::write(d.join("main.patched.bin"), b"abc")
-            .ok()
-            .expect("w");
-        std::fs::write(d.join("nro.tsv"), b"x").ok().expect("w");
+        std::fs::write(d.join("main.patched.bin"), b"abc").expect("w");
+        std::fs::write(d.join("nro.tsv"), b"x").expect("w");
         let a = rewrite_id(&d);
         assert_eq!(a.len(), 12);
-        std::fs::write(d.join("nro.tsv"), b"y").ok().expect("w");
+        std::fs::write(d.join("nro.tsv"), b"y").expect("w");
         assert_eq!(rewrite_id(&d), a);
-        std::fs::write(d.join("main.patched.bin"), b"abd")
-            .ok()
-            .expect("w");
+        std::fs::write(d.join("main.patched.bin"), b"abd").expect("w");
         assert_ne!(rewrite_id(&d), a);
         let _ = std::fs::remove_dir_all(&d);
     }

@@ -2,6 +2,25 @@
 
 All notable changes are in this file. The format follows Keep a Changelog. Versions follow Semantic Versioning.
 
+## Unreleased
+
+### Added
+
+- `nxb build` boots the game in the Mac host after the rewrite. The host runs headless with a time limit, and its output goes to `<work>/logs`.
+  The boots are the NRO capture, the heap check and the region check of a provisional profile, the GLSLC capture, the Vulkan and GL captures and the Unreal decode.
+  A step whose output is complete does not boot again.
+- The split decodes Oodle and LZ5 streams with the game's own decoder in the Mac host (`DM_OODLE_SERVE`). `nxb build` starts it when the profile names Oodle packs or legacy Unreal paks.
+- The split reads Trinity packs, Frostbite superbundles, the NROs of the NRO capture, the outputs of the GLSLC capture and the decoded Unreal shader archives.
+- The Unreal decode opens pak indexes encrypted with AES-256. The key comes from main. LZ4 shaders decode in nxb. Oodle shaders decode in one boot of the Mac host (`DM_OODLE_JOB`).
+- `nxb-nro` finds NROs, reads NRR version 1 and `.nrolz` files, and writes `missing.tsv`.
+
+### Known gaps
+
+- nxb has no translator for the Vulkan and GL captures. The build writes a `[RED]` line.
+- The JIT capture is not ported. `nxb build --platform ios` stops for a game that imports `nn::jit` and has no `jit/jit.img`.
+- Unreal Engine 5.6 IoStore shader libraries are not read. The Unreal decode stops with an error.
+- No boot and no host decoder was tested with a real game. The tests use synthetic data.
+
 ## 0.6.7
 
 ### Fixed

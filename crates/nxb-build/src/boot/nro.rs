@@ -144,9 +144,7 @@ mod tests {
 
     #[test]
     fn missing_rows_parse_in_order() {
-        let w = parse_missing("bb\tb.nrr\naa\ta.nrr\n\n")
-            .ok()
-            .expect("parse");
+        let w = parse_missing("bb\tb.nrr\naa\ta.nrr\n\n").expect("parse");
         assert_eq!(
             w,
             [("bb".into(), "b.nrr".into()), ("aa".into(), "a.nrr".into())]

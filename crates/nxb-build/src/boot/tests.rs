@@ -3,19 +3,15 @@ use super::*;
 fn dir(name: &str) -> PathBuf {
     let d = std::env::temp_dir().join(format!("nxb-boot-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);
-    std::fs::create_dir_all(&d).ok().expect("dir");
+    std::fs::create_dir_all(&d).expect("dir");
     d
 }
 
 fn script(d: &Path, body: &str) -> PathBuf {
     use std::os::unix::fs::PermissionsExt;
     let p = d.join("host.sh");
-    std::fs::write(&p, format!("#!/bin/sh\n{body}\n"))
-        .ok()
-        .expect("write");
-    std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755))
-        .ok()
-        .expect("chmod");
+    std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).expect("write");
+    std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).expect("chmod");
     p
 }
 
@@ -41,7 +37,6 @@ fn boot_exit_code_and_env() {
     let r = boot_mac(&h, Path::new("/mods"), &env(), &d, &log, 10.0, &mut || {
         false
     })
-    .ok()
     .expect("boot");
     assert_eq!(r.rc, Some(3));
     let t = read_log(&log);
@@ -58,9 +53,7 @@ fn boot_timeout_and_done() {
         "echo up; trap 'echo term; exit 0' TERM; while :; do sleep 0.05; done",
     );
     let log = d.join("b.log");
-    let r = boot_mac(&h, &d, &env(), &d, &log, 0.6, &mut || false)
-        .ok()
-        .expect("boot");
+    let r = boot_mac(&h, &d, &env(), &d, &log, 0.6, &mut || false).expect("boot");
     assert_eq!(r.rc, None);
     assert!(r.secs >= 0.6 && r.secs < 5.0, "{}", r.secs);
     let mut n = 0;
@@ -68,7 +61,6 @@ fn boot_timeout_and_done() {
         n += 1;
         n > 2
     })
-    .ok()
     .expect("boot");
     assert_eq!(r.rc, None);
     assert!(r.secs < 5.0);
@@ -80,7 +72,7 @@ fn tail_and_stopped() {
     let d = dir("tail");
     let log = d.join("c.log");
     let text: String = (1..=20).map(|i| format!("l{i}\n")).collect();
-    std::fs::write(&log, text).ok().expect("w");
+    std::fs::write(&log, text).expect("w");
     assert_eq!(tail_lines(&log, 3), "l18\nl19\nl20");
     let s = host_stopped(&log, 1, 12.4);
     assert!(s.starts_with(
@@ -94,13 +86,9 @@ fn tail_and_stopped() {
 fn captured_nros_needs_a_capture_row() {
     let d = dir("nros");
     assert_eq!(captured_nros(&d), None);
-    std::fs::write(d.join("nro.tsv"), "# h\nnro0\tab\t1\tx.nrr\tm.nro\n")
-        .ok()
-        .expect("w");
+    std::fs::write(d.join("nro.tsv"), "# h\nnro0\tab\t1\tx.nrr\tm.nro\n").expect("w");
     assert_eq!(captured_nros(&d), None);
-    std::fs::write(d.join("nro.tsv"), "# h\nnro0\tab\t1\tx.nrr\tcapture\n")
-        .ok()
-        .expect("w");
+    std::fs::write(d.join("nro.tsv"), "# h\nnro0\tab\t1\tx.nrr\tcapture\n").expect("w");
     assert_eq!(captured_nros(&d), Some(d.clone()));
     let _ = std::fs::remove_dir_all(&d);
 }
@@ -108,12 +96,12 @@ fn captured_nros_needs_a_capture_row() {
 #[test]
 fn rmtree_and_swap() {
     let d = dir("swap");
-    rmtree(&d.join("none")).ok().expect("missing ok");
-    std::fs::create_dir_all(d.join("new")).ok().expect("m");
-    std::fs::write(d.join("new/f"), "1").ok().expect("w");
-    std::fs::create_dir_all(d.join("old")).ok().expect("m");
-    std::fs::write(d.join("old/g"), "2").ok().expect("w");
-    swap_in(&d.join("new"), &d.join("old")).ok().expect("swap");
+    rmtree(&d.join("none")).expect("missing ok");
+    std::fs::create_dir_all(d.join("new")).expect("m");
+    std::fs::write(d.join("new/f"), "1").expect("w");
+    std::fs::create_dir_all(d.join("old")).expect("m");
+    std::fs::write(d.join("old/g"), "2").expect("w");
+    swap_in(&d.join("new"), &d.join("old")).expect("swap");
     assert!(d.join("old/f").is_file() && !d.join("old/g").exists() && !d.join("new").exists());
     let _ = std::fs::remove_dir_all(&d);
 }

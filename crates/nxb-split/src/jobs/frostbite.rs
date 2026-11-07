@@ -454,13 +454,16 @@ fn shaders(s: &dyn Src, rel: &str, ents: &[Res], notes: &mut Vec<String>) -> R<J
     })
 }
 
+/// Resources: (cas rel under the root, offset, stored) → (size, name).
+type Resources = BTreeMap<(String, u64, u64), (u64, String)>;
+
 /// `resources` of one root: every res of type `rtype` → (cas rel under the root, offset, stored) → (size, name).
 fn resources(
     files: &[File],
     by_rel: &HashMap<&str, usize>,
     root: &str,
     rtype: u32,
-) -> R<BTreeMap<(String, u64, u64), (u64, String)>> {
+) -> R<Resources> {
     let file = |rel: &str| -> R<&File> {
         by_rel
             .get(format!("{root}{rel}").as_str())

@@ -253,10 +253,10 @@ pub(crate) fn boot_mac(
         }
         std::thread::sleep(Duration::from_millis(250));
     }
-    if rc.is_none() {
-        if let Ok(Some(s)) = child.try_wait() {
-            rc = Some(code_of(s));
-        }
+    if rc.is_none()
+        && let Ok(Some(s)) = child.try_wait()
+    {
+        rc = Some(code_of(s));
     }
     if rc.is_none() {
         let _ = nxb_sys::process::kill_group(pid, nxb_sys::process::Signal::Term);

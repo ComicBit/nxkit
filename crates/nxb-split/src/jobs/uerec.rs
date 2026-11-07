@@ -157,12 +157,12 @@ fn archive(b: &[u8], what: &str) -> R<(Vec<ArcShader>, usize)> {
     }
     for elem in [20usize, 20, 16] {
         let n = u32_(&mut o)?;
-        let len = n.checked_mul(elem).unwrap_or(usize::MAX);
+        let len = n.saturating_mul(elem);
         need(o, len)?;
         o += len;
     }
     let n = u32_(&mut o)?;
-    need(o, n.checked_mul(17).unwrap_or(usize::MAX))?;
+    need(o, n.saturating_mul(17))?;
     let mut sh = Vec::with_capacity(n);
     for _ in 0..n {
         let off = u64::from_le_bytes(sl(b, o, o + 8).try_into().unwrap_or_default());
@@ -175,10 +175,10 @@ fn archive(b: &[u8], what: &str) -> R<(Vec<ArcShader>, usize)> {
         o += 17;
     }
     let np = u32_(&mut o)?;
-    need(o, np.checked_mul(16).unwrap_or(usize::MAX))?;
+    need(o, np.saturating_mul(16))?;
     o += 16 * np;
     let ni = u32_(&mut o)?;
-    need(o, ni.checked_mul(4).unwrap_or(usize::MAX))?;
+    need(o, ni.saturating_mul(4))?;
     o += 4 * ni;
     Ok((sh, o))
 }
@@ -250,7 +250,7 @@ mod tests {
     #[test]
     fn archives_read_and_refuse() {
         let a = arc(&[(0, 4, 4, 0), (4, 2, 2, 3)], b"abcdef");
-        let (sh, code) = archive(&a, "x").ok().expect("archive");
+        let (sh, code) = archive(&a, "x").expect("archive");
         assert_eq!(sh, vec![(0, 4, 4, 0), (4, 2, 2, 3)]);
         assert_eq!(&a[code..], b"abcdef");
         let e = ue_shaders(&a, "/ue_shaders/a").err().map(|e| e.to_string());
