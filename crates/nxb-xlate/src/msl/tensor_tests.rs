@@ -140,7 +140,7 @@ fn chained_hmmas_on_an_ldsm_keep_a_and_the_accumulator() {
     assert_eq!(addr, root(&m, &c[1][11]), "the LDSM's row address\n{m}");
     assert!(m.contains(&format!("{addr} = (as_type<int>(")), "{m}");
     assert!(
-        m.contains("    simdgroup_half8x8 dm_acc[16], dm_am[4];"),
+        m.contains("    simdgroup_float8x8 dm_acc[16]; simdgroup_half8x8 dm_am[4];"),
         "{m}"
     );
 }
