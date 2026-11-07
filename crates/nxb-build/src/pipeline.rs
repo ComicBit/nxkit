@@ -52,6 +52,14 @@ pub fn shader_config(a: &Args, b: &Build) -> Result<BuildConfig, String> {
     })
 }
 
+/// Where this build's shader step writes `c1_full.tsv` and `cb_extent.tsv` (`nxb_stages::guard_tables`). None with
+/// `--shaders`, which names a library folder the step did not build: the tables then come from the profile.
+pub(crate) fn guard_tables(a: &Args, b: &Build) -> Option<PathBuf> {
+    a.shaders
+        .is_none()
+        .then(|| b.work.join("shader/work/tables"))
+}
+
 /// The archive's inputs for one architecture over the library folder the shader step writes.
 fn archive_config(b: &Build, lib: &Path, arch: &str) -> Result<nxb_archive::Config, String> {
     let (out, work) = (b.work.join("pso/mac"), b.work.join("pso/mac-work"));

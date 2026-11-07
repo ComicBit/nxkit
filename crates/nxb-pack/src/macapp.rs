@@ -24,7 +24,8 @@ const MODULE_FILES: [&str; 7] = [
     "nro.tsv",
 ];
 const MSL_FILES: [&str; 3] = ["*.metallib", "*.json", "*.tsv"];
-const TABLES: [&str; 6] = [
+/// The tables the host reads beside `DM_NVN_SHMAP`.
+pub const TABLES: [&str; 6] = [
     "shader_map.tsv",
     "pso_manifest.tsv",
     "c1_full.tsv",
@@ -32,6 +33,8 @@ const TABLES: [&str; 6] = [
     "shader_pairs.tsv",
     "pso_pairs.tsv",
 ];
+/// The tables a full shader build makes from its Mac outputs (`c1_guard.py`, `cb_extent.py`).
+pub const GUARD_TABLES: [&str; 2] = ["c1_full.tsv", "cb_extent.tsv"];
 const PSO_FILES: [&str; 4] = ["*.mtl4a", "prebuilt.tsv", "rest_pairs.tsv", "archive.tsv"];
 
 /// `pack_app.py`'s arguments (the ones this port takes.`--program` and `--aoc` are `Unsupported`).
@@ -51,6 +54,9 @@ pub struct MacAppInputs {
     pub msl_name: Option<String>,
     /// `--tables`.
     pub tables: PathBuf,
+    /// `--guard-tables`: where the shader build wrote `c1_full.tsv` and `cb_extent.tsv`. A table there takes the
+    /// place of the one in `tables`.
+    pub guard_tables: Option<PathBuf>,
     /// `--font`.
     pub font: PathBuf,
     /// `--pso`.
@@ -102,6 +108,8 @@ pub struct Program {
     pub msl: PathBuf,
     /// Tables folder.
     pub tables: PathBuf,
+    /// The shader build's `c1_full.tsv` and `cb_extent.tsv`, before those of `tables`.
+    pub guard_tables: Option<PathBuf>,
     /// Offline pages.
     pub html: PathBuf,
 }
@@ -121,9 +129,25 @@ impl Program {
             romfs: romfs.into(),
             msl: msl.into(),
             tables: tables.into(),
+            guard_tables: None,
             html: html.into(),
         })
     }
+}
+
+/// The tables of a program that exist: each from `guard` when it is a guard table there, else from `tables`.
+pub fn table_files(tables: &Path, guard: Option<&Path>) -> Vec<PathBuf> {
+    TABLES
+        .iter()
+        .map(|n| {
+            guard
+                .filter(|_| GUARD_TABLES.contains(n))
+                .map(|g| g.join(n))
+                .filter(|p| p.is_file())
+                .unwrap_or_else(|| tables.join(n))
+        })
+        .filter(|p| p.is_file())
+        .collect()
 }
 
 fn detritus(name: &str) -> bool {
@@ -322,11 +346,7 @@ fn programs(a: &MacAppInputs, tables: &[PathBuf], e: &mut Vec<StageEntry>) -> Re
                 &m,
             ));
         }
-        for t in TABLES
-            .iter()
-            .map(|x| p.tables.join(x))
-            .filter(|x| x.is_file())
-        {
+        for t in table_files(&p.tables, p.guard_tables.as_deref()) {
             e.push(file(
                 format!("Contents/Resources/dm/p{n}/{}", file_name(&t)),
                 &t,
@@ -439,11 +459,7 @@ pub fn plan(a: &MacAppInputs) -> Result<StagePlan> {
     for m in &mods {
         e.push(file(format!("Contents/Resources/dm/{}", file_name(m)), m));
     }
-    let tables: Vec<PathBuf> = TABLES
-        .iter()
-        .map(|n| a.tables.join(n))
-        .filter(|p| p.is_file())
-        .collect();
+    let tables = table_files(&a.tables, a.guard_tables.as_deref());
     for t in &tables {
         e.push(file(format!("Contents/Resources/dm/{}", file_name(t)), t));
     }
@@ -569,3 +585,7 @@ pub fn plan(a: &MacAppInputs) -> Result<StagePlan> {
     });
     Ok(StagePlan { entries: e })
 }
+
+#[cfg(test)]
+#[path = "macapp_tests.rs"]
+mod tests;

@@ -37,6 +37,9 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 - The rewriter's walk for a jump table's base passes a `mov` of a constant that would put the table in page zero (upstream `9671a581`, issue 1532).
   Horizon never maps page zero, so no path of a working game carries that value to the table load. Any other write still ends the walk.
   Cuphead 1.3.7 `main+0x59dc90` holds the constant 1 in the base register of another loop (`mov w12,#1`). Before, its jump table was not found.
+- The Mac app holds the `c1_full.tsv` and `cb_extent.tsv` of its own shader build, as the IPA does. Before, it held the tables of the game profile.
+  Those tables name the stamp of another build, so the host ignored them. Each c1 then got a buffer of its own and whole uniform bindings were copied.
+  `nxb build --platform mac` gives the host the same tables in `<work>/run/tables`. `nxb-macapp` takes them with `--guard-tables`.
 - `TRANSLATOR_ID` is `msl-2.14`.
 
 ## 0.6.7

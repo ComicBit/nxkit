@@ -1,6 +1,6 @@
 //! `nxb-macapp <out.app> --host <dmhost> --companion-app <nxnative> --patched <dir> --romfs <img> --msl <dir> --tables <dir>
 //! --font <dir> --title-id <id> --name <name> [--version v] [--category c] [--lang l] [--marker m] [--bundle-id id]
-//! [--html <dir>] [--pso <dir>] [--pso-pairs <tsv>] [--env-file f] [--settings <app settings json>] [--icns <AppIcon.icns>]
+//! [--guard-tables <dir>] [--html <dir>] [--pso <dir>] [--pso-pairs <tsv>] [--env-file f] [--settings <app settings json>] [--icns <AppIcon.icns>]
 //! [--fork-patches <fork_patches.txt>] [--commit c] [--msl-name n] [--previous <old.app>] [--threads N]
 //! [--dest-digests <tsv>]`
 //!
@@ -85,6 +85,7 @@ pub fn main(args: &[String]) -> i32 {
         msl,
         msl_name: s("msl-name"),
         tables,
+        guard_tables: p("guard-tables"),
         font,
         pso: p("pso"),
         pso_pairs: p("pso-pairs"),

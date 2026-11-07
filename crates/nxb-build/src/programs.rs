@@ -78,6 +78,7 @@ pub(crate) fn before_app(
             romfs: ex.join("RomFS.img"),
             msl: s.shaders.clone(),
             tables: s.profile.0.clone(),
+            guard_tables: crate::pipeline::guard_tables(a, &s),
             html: ex.join("html"),
         });
     }
