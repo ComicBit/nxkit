@@ -281,6 +281,53 @@ fn red_f32_add_is_a_compare_and_swap_loop() {
     assert!(retry < load && load < add && add < cas && cas < back, "{t}");
 }
 
+// Encodings from the sm_86 corpus, checked with nvdisasm (low word first)
+const R2UR_UR4_R19: (u64, u64) = (0x0000_0000_1304_73c2, 0x000f_e200_000e_0000);
+
+#[test]
+fn a_memory_descriptor_is_not_part_of_the_address() {
+    // LDG.E R6, desc[UR4][R20.64] against desc[URZ][R20.64]
+    let desc = (0x0000_0004_1406_7981, 0x000f_e220_0c1e_1900);
+    let urz = (0x0000_003f_1406_7981, 0x000f_e220_0c1e_1900);
+    let ops = |ldg| {
+        let t = ampere_cs_text(&[R2UR_UR4_R19, ldg]).expect("emit");
+        t.lines()
+            .filter(|l| !l.starts_with("  cm "))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let a = ops(desc);
+    assert_eq!(a, ops(urz));
+    assert!(!a.contains("s=R3:4,"), "{a}");
+}
+
+#[test]
+fn atomg_cas_is_a_compare_and_swap() {
+    // ATOMG.E.CAS.STRONG.GPU PT, R6, [R20], R19, R22
+    let cas = (0x0000_0013_1406_73a9, 0x000f_e200_001e_e116);
+    let t = ampere_cs_text(&[cas]).expect("emit");
+    assert_eq!(count(&t, "5"), 1, "{t}");
+    assert!(t.contains("op 5 11 0 0 d=l"), "{t}");
+    assert!(t.contains("op 35 0 0 0 d=l0, s=R1:19,"), "{t}");
+    assert!(t.contains("s=R1:20,R1:21,l0,R1:22,"), "{t}");
+}
+
+#[test]
+fn atomg_inc_is_a_compare_and_swap_loop() {
+    // ATOMG.E.INC.STRONG.GPU PT, R6, [R20], R19
+    let inc = (0x0000_0013_1406_73a8, 0x000f_e200_019e_e100);
+    let t = ampere_cs_text(&[inc]).expect("emit");
+    let retry = t.find("op 53 0 0 0 d=L").expect(&t);
+    let load = t.find("op 4a 11 0 0 d=l").expect(&t);
+    let cas = t.find("op 5 11 0 0 d=l").expect(&t);
+    let back = t.find("op 19 0 0 0 d=L1,").expect(&t);
+    assert!(retry < load && load < cas && cas < back, "{t}");
+    // DEC of the same form
+    let dec = (inc.0, inc.1 & !(0xf << 23) | 4 << 23);
+    let t = ampere_cs_text(&[dec]).expect("emit");
+    assert!(t.contains("op 5 11 0 0 d=l"), "{t}");
+}
+
 #[test]
 fn f2ip_packs_two_saturated_bytes() {
     // F2IP.U8.TRUNC R0, R1, R2

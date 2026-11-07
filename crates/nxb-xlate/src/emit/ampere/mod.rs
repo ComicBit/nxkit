@@ -91,6 +91,7 @@ pub fn dispatch(ctx: &mut EmitterContext<'_, '_>, e: AEmit) -> Result<(), String
         AStg => mem::stg(ctx),
         ARed => mem::red(ctx),
         AAtomg => mem::atomg(ctx),
+        AAtomgCas => mem::atomg_cas(ctx),
         AMembar => mem::membar(ctx),
         AErrbar => Ok(()),
         ABar => mem::bar(ctx),

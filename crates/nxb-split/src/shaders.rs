@@ -103,7 +103,7 @@ pub(crate) fn nvn2_ctl(ctl: &[u8]) -> bool {
     ctl.len() >= 0x48 && ctl[..4] == CTL_MAGIC && ctl[4..8] == [0xc9, 0, 0, 0]
 }
 
-fn ctl_len(ctl: &[u8]) -> usize {
+pub(crate) fn ctl_len(ctl: &[u8]) -> usize {
     if nvn2_ctl(ctl) {
         return 0x48;
     }
