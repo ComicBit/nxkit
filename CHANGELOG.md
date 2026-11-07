@@ -18,7 +18,13 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 - An `LDSM` sits between two SIMD-group barriers (upstream `16776913`). Without them, an `LDSM` could read rows before other lanes stored them. Upstream saw dotted streaks in the Ocarina of Time movie networks and white blotches through the game's upscaler.
 - `ATOMS.INC` and `ATOMS.DEC` run as a compare and swap loop (upstream `1a410e6e`). Before, they gave 0 and did not touch shared memory.
   `ATOMS.CAS` gives the old value. Only `CAST` and `CAST.SPIN` give 1 or 0.
-- `TRANSLATOR_ID` is `msl-2.10`.
+- Five Ampere ALU instructions compute what the hardware computes (upstream `b97f0dc6`). Upstream found them by differential tests of single instructions.
+  `IADD3` sets its first carry predicate for sum >= 2^32 and its second for sum >= 2 * 2^32. Before, a carry of 2 lost 2^32 in a 64-bit add.
+  `PLOP3` computes both results before it writes the first.
+  `POPC` and `FLO` take bit 63 as a bitwise not only in the register, uniform register and constant forms. In the immediate form it is the immediate's top bit.
+  `LEA.HI.SX32` takes the sign extension of A as the high word.
+  `LEA` with a negated B adds ~B with `.X` and ~B + 1 without it. The + 1 counts in the carry out.
+- `TRANSLATOR_ID` is `msl-2.11`.
 
 ## 0.6.7
 

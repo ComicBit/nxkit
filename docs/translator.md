@@ -102,6 +102,14 @@ A raw global access whose buffer is not known at translation time looks up the b
 Each lookup keeps the entry it chose last in a zeroed local word `gmem_last_N`. The next access first checks that entry.
 When the address is outside it, the lookup tries the hint and then searches all entries. The end of the chosen entry is checked once more after the search.
 
+## Ampere integer and predicate details
+
+`IADD3` sets its first carry predicate when the 64-bit sum is at least 2^32 and its second when it is at least 2 * 2^32. The `IADD3.X` of the high word adds both.
+`PLOP3` computes both truth tables from the sources before it writes a destination. The first destination may be a source.
+`POPC` and `FLO` take bit 63 as a bitwise not only in forms 1, 5 and 6. In the immediate form it is the immediate's top bit.
+`LEA.HI` with `.SX32` (bit 73) takes the sign extension of A as the high word instead of C.
+`LEA` with a negated B (bit 63, forms 1, 5 and 6) adds ~B with `.X` and ~B + 1 without it. The + 1 counts in the carry predicate.
+
 ## Tensor cores
 
 `LDSM` and `HMMA.16816.F16` run on `simdgroup_matrix` code. The tensor pass (`xform/tensor.rs`) turns each `HMMA` into a call of the helper `dmsh_hmma16816_f16`.
@@ -123,7 +131,7 @@ Each function that calls the helper declares `dm_acc[16]` and `dm_am[4]` and pas
 
 The step stores each translation in the store. The key `nxb.xlate.v2` has the translator identity, the job, the code, the chain version V, the source, the paired shader,
 the answer-table flag, the dual-source and fetch-outputs-only flags and the varyings of the partners.
-The translator identity is a hash of the label `nxb-xlate msl`, V, `nxb_xlate::msl::TRANSLATOR_ID` (now `msl-2.10`) and `NXB_TEST_XLATE_SALT`.
+The translator identity is a hash of the label `nxb-xlate msl`, V, `nxb_xlate::msl::TRANSLATOR_ID` (now `msl-2.11`) and `NXB_TEST_XLATE_SALT`.
 V is a hash of the engine files that `dm/gfx/tools/dmsh_chain.py` lists in `FILES`, and the options string `debug=True reduced=True`. No Rust source goes into V.
 A change of the translator translates again only when someone increases `TRANSLATOR_ID` by hand. Without the increase, the store gives the old MSL. A failure is not stored.
 
