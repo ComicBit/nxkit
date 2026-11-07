@@ -47,6 +47,7 @@ pub(crate) fn stage_app(
         msl: b.shaders.clone(),
         msl_name: None,
         tables,
+        guard_tables: crate::pipeline::guard_tables(a, b),
         font: w.join("font"),
         pso: (!b.gpus.is_empty() && !no_archive)
             .then(|| w.join("pso/mac"))

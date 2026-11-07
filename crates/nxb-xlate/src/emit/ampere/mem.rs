@@ -156,13 +156,15 @@ pub(super) fn lepc(ctx: &mut Ctx) -> R {
     Ok(())
 }
 
-/// `AGlobalAddress`: the 64-bit address of a global access.
+/// `AGlobalAddress`: the 64-bit address of a global access. In `desc[URb][Ra.64]` (`desc_bit`: 76 in LDG and STG, 71
+/// in ATOMG and RED) URb is a memory descriptor and not part of the address.
 fn global_address(
     ctx: &mut Ctx,
     x: &AmpOp,
     ra_pair_bit: u32,
     ur_lo: u32,
     extra_offset: i32,
+    desc_bit: u32,
 ) -> (Opd, Opd) {
     let uniform_form = x.bit(91);
     let ra_pair = if uniform_form {
@@ -177,7 +179,7 @@ fn global_address(
     } else {
         c(ctx, 0)
     };
-    if uniform_form {
+    if uniform_form && !x.bit(desc_bit) {
         let ur = x.bits(ur_lo, ur_lo + 6);
         if ur != URZ {
             let u_lo = ctx.ir.register(ur, regtype::UNIFORM);
@@ -233,7 +235,7 @@ pub(super) fn ldg(ctx: &mut Ctx) -> R {
     // address register (LDG.128 R0, [R0.64])
     let mut addrs = Vec::new();
     for index in 0..count {
-        let (lo, hi) = global_address(ctx, &x, 90, 32, index * 4);
+        let (lo, hi) = global_address(ctx, &x, 90, 32, index * 4, 76);
         addrs.push((ctx.copy(lo), ctx.copy(hi)));
     }
     let mut skip = None;
@@ -279,7 +281,7 @@ pub(super) fn stg(ctx: &mut Ctx) -> R {
         } else {
             gpr(ctx, x.rb() + index)
         };
-        let (lo, hi) = global_address(ctx, &x, 90, 64, index * 4);
+        let (lo, hi) = global_address(ctx, &x, 90, 64, index * 4, 76);
         ctx.store_o3(kind, lo, hi, value);
     }
     Ok(())
@@ -287,12 +289,17 @@ pub(super) fn stg(ctx: &mut Ctx) -> R {
 
 pub(super) fn red(ctx: &mut Ctx) -> R {
     let x = x(ctx);
-    let (lo, hi) = global_address(ctx, &x, 90, 64, 0);
+    let (lo, hi) = global_address(ctx, &x, 90, 64, 0, 71);
+    let op = AtomOp(x.bits(87, 90));
     let rb = gpr(ctx, x.rb());
+    if is_inc_dec(&x, op) {
+        global_inc_dec(ctx, op, lo, hi, rb);
+        return Ok(());
+    }
     emit_atomic_op(
         ctx,
         StorageKind::GlobalMemory,
-        AtomOp(x.bits(87, 90)),
+        op,
         AtomSize(x.bits(73, 76)),
         lo,
         hi,
@@ -303,17 +310,86 @@ pub(super) fn red(ctx: &mut Ctx) -> R {
 
 pub(super) fn atomg(ctx: &mut Ctx) -> R {
     let x = x(ctx);
-    let (lo, hi) = global_address(ctx, &x, 70, 64, 0);
-    let rb = gpr(ctx, x.rb());
-    let res = emit_atomic_op(
-        ctx,
-        StorageKind::GlobalMemory,
-        AtomOp(x.bits(87, 91)),
-        AtomSize(x.bits(73, 76)),
-        lo,
-        hi,
-        rb,
-    );
+    let (lo, hi) = global_address(ctx, &x, 70, 64, 0, 71);
+    let op = AtomOp(x.bits(87, 91));
+    let value = if x.rb() >= RZ {
+        c(ctx, 0)
+    } else {
+        gpr(ctx, x.rb())
+    };
+    let res = if is_inc_dec(&x, op) {
+        global_inc_dec(ctx, op, lo, hi, value)
+    } else {
+        emit_atomic_op(
+            ctx,
+            StorageKind::GlobalMemory,
+            op,
+            AtomSize(x.bits(73, 76)),
+            lo,
+            hi,
+            value,
+        )
+    };
+    set(ctx, &x, res, false);
+    Ok(())
+}
+
+/// INC and DEC of 32 bits.
+fn is_inc_dec(x: &AmpOp, op: AtomOp) -> bool {
+    (op == AtomOp::Inc || op == AtomOp::Dec) && matches!(x.bits(73, 75), 0 | 1)
+}
+
+/// `AGlobalIncDec`: INC and DEC on global memory (CUDA's `atomicInc` and `atomicDec`) as a compare-and-swap loop.
+/// INC stores `old >= b ? 0 : old + 1` and DEC stores `old == 0 || old > b ? b : old - 1` (unsigned). The result is the
+/// old value.
+fn global_inc_dec(ctx: &mut Ctx, op: AtomOp, lo: Opd, hi: Opd, value: Opd) -> Opd {
+    inc_dec(ctx, StorageKind::GlobalMemory, op, lo, hi, value)
+}
+
+/// INC and DEC as a compare-and-swap loop on the word at `(a, b)` of `kind`: global memory's address halves, or shared
+/// memory's id and word offset.
+fn inc_dec(ctx: &mut Ctx, kind: StorageKind, op: AtomOp, a: Opd, b: Opd, value: Opd) -> Opd {
+    let retry = ctx.ir.label();
+    ctx.mark_label(retry);
+    let cur = ctx.load_o2(kind, a, b);
+    let next = if op == AtomOp::Inc {
+        let ge = ctx.i_compare_greater_or_equal_unsigned(cur, value);
+        let zero = c(ctx, 0);
+        let one = c(ctx, 1);
+        let inc = ctx.i_add(cur, one);
+        ctx.conditional_select(ge, zero, inc)
+    } else {
+        let zero = c(ctx, 0);
+        let is_zero = ctx.i_compare_equal(cur, zero);
+        let gt = ctx.i_compare_greater_unsigned(cur, value);
+        let wrap = ctx.bitwise_or(is_zero, gt);
+        let m1 = c(ctx, -1);
+        let dec = ctx.i_add(cur, m1);
+        ctx.conditional_select(wrap, value, dec)
+    };
+    let prev = ctx.atomic_compare_and_swap_o4(kind, a, b, cur, next);
+    let same = ctx.i_compare_equal(prev, cur);
+    ctx.branch_if_false(retry, same);
+    cur
+}
+
+/// `AAtomgCas`: `ATOMG.CAS Rd, [Ra + offset], Rb, Rc` (0x3a9), PTX `atom.cas`. Rb is the expected value, Rc (bits
+/// 64..72) the new value and Rd the old value. Only 32 bits.
+pub(super) fn atomg_cas(ctx: &mut Ctx) -> R {
+    let x = x(ctx);
+    if x.bits(73, 76) != 0 {
+        return Err(fail(ctx, &format!("ATOMG.CAS size {}", x.bits(73, 76))));
+    }
+    let (lo, hi) = global_address(ctx, &x, 70, 64, 0, 71);
+    let rb = if x.rb() >= RZ {
+        c(ctx, 0)
+    } else {
+        gpr(ctx, x.rb())
+    };
+    let expected = ctx.copy(rb);
+    let rc = x.bits(64, 72);
+    let value = if rc >= RZ { c(ctx, 0) } else { gpr(ctx, rc) };
+    let res = ctx.atomic_compare_and_swap_o4(StorageKind::GlobalMemory, lo, hi, expected, value);
     set(ctx, &x, res, false);
     Ok(())
 }
@@ -430,10 +506,17 @@ pub(super) fn atoms(ctx: &mut Ctx) -> R {
     } else {
         gpr(ctx, x.rb())
     };
+    let op = AtomOp(x.bits(87, 91));
+    // `emit_atomic_op` has no case for INC and DEC. It gave 0 and did not touch shared memory.
+    if is_inc_dec(&x, op) {
+        let res = inc_dec(ctx, StorageKind::SharedMemory, op, id, offset, value);
+        set(ctx, &x, res, false);
+        return Ok(());
+    }
     let res = emit_atomic_op(
         ctx,
         StorageKind::SharedMemory,
-        AtomOp(x.bits(87, 91)),
+        op,
         AtomSize(x.bits(73, 76)),
         id,
         offset,
@@ -469,6 +552,12 @@ pub(super) fn atoms_cas(ctx: &mut Ctx) -> R {
     let id = c(ctx, ctx.rm.shared_memory_id);
     let old =
         ctx.atomic_compare_and_swap_o4(StorageKind::SharedMemory, id, offset, expected, value);
+    // Bit 87 clear is CAS (`atomicCAS`), Rd the old value. Set is CAST, and CAST.SPIN with bit 88 too, Rd 1 when the
+    // swap happened (Fire Emblem Fortune's Weave's retry loop for a float add).
+    if !x.bit(87) {
+        set(ctx, &x, old, false);
+        return Ok(());
+    }
     let eq = ctx.i_compare_equal(old, expected);
     let one = c(ctx, 1);
     let zero = c(ctx, 0);

@@ -2,6 +2,46 @@
 
 All notable changes are in this file. The format follows Keep a Changelog. Versions follow Semantic Versioning.
 
+## Unreleased
+
+### Fixed
+
+- The translator emits `ATOMG.CAS` of NVN2 shaders as a compare and swap. Before, the instruction was unknown.
+  `ATOMG` and `RED` with `INC` or `DEC` run as a compare and swap loop with the wrap of the hardware.
+  A memory descriptor in the uniform register of `LDG`, `STG`, `ATOMG` and `RED` is no longer added to the address.
+- The Metal compiler takes up to 1,024 nested brackets (`-fbracket-depth=1024`). Before, a deep expression failed with "bracket nesting level exceeded maximum of 256".
+- The split no longer reads the words of an NVN2 control section in a `BAHS` file as a program entry.
+- A raw global access first checks the storage buffer it chose last. A loop over one buffer no longer searches all buffers on each access.
+- HMMA chains of compute shaders keep the accumulator and A in the SIMD-group between calls (upstream `bd9f422d`).
+  A that an `LDSM` read is loaded from shared memory where the `LDSM` read it. Upstream measured the Ocarina of Time movie network at 11.4 ms instead of 14.8 ms.
+- An HMMA call outside every chain no longer overwrites the accumulator that a chain holds in slot 0 (upstream `13b432b4`, issue 1537). Upstream saw dotted rows in Ocarina of Time from it.
+- An `LDSM` sits between two SIMD-group barriers (upstream `16776913`). Without them, an `LDSM` could read rows before other lanes stored them. Upstream saw dotted streaks in the Ocarina of Time movie networks and white blotches through the game's upscaler.
+- `ATOMS.INC` and `ATOMS.DEC` run as a compare and swap loop (upstream `1a410e6e`). Before, they gave 0 and did not touch shared memory.
+  `ATOMS.CAS` gives the old value. Only `CAST` and `CAST.SPIN` give 1 or 0.
+- Five Ampere ALU instructions compute what the hardware computes (upstream `b97f0dc6`). Upstream found them by differential tests of single instructions.
+  `IADD3` sets its first carry predicate for sum >= 2^32 and its second for sum >= 2 * 2^32. Before, a carry of 2 lost 2^32 in a 64-bit add.
+  `PLOP3` computes both results before it writes the first.
+  `POPC` and `FLO` take bit 63 as a bitwise not only in the register, uniform register and constant forms. In the immediate form it is the immediate's top bit.
+  `LEA.HI.SX32` takes the sign extension of A as the high word.
+  `LEA` with a negated B adds ~B with `.X` and ~B + 1 without it. The + 1 counts in the carry out.
+- Half pairs read their operands as the hardware does (upstream `9dc81953`). A constant operand applies its swizzle. Before, `HMUL2 R6, R19.H0_H0, c[0x0][0x168].H0_H0` gave the high lane the other half of the constant.
+  Swizzle value 1 is `.F32`, the 32-bit float in both lanes. `HSETP2` and `HSET2` with `.FTZ` compare a subnormal half as zero.
+- `I2F` from a 32-bit integer to a 32-bit float and `F2F.F16.F32` apply `.RM`, `.RP` and `.RZ` (upstream `645d3029`). Before, both rounded to nearest.
+  The 32-bit integer division of the compiler starts with `I2F.U32.RP`. Rounded to nearest, a value above 2^24 came out one ulp off in about half the cases.
+- `MUFU.SIN` and `MUFU.COS` keep the fraction of a large number of turns (upstream `b5948342`). The lowering is sin or cos of (t - rint(t)) * 2pi.
+  Before, t * 2pi lost the fraction, and Metal's fast sin and cos gave 0 past 2^20 turns. Upstream saw the SSAO of Donkey Kong Bananza lose its ambient occlusion in the lower right.
+- The rewriter takes a compare as a jump table's bound only when a branch on its flags guards the table load (upstream `e49afb1e`).
+  `b.hi` out of the dispatch gives N + 1 entries and `b.hs` gives N. `b.ls` and `b.lo` into the dispatch count the same way when the instruction before their target is a `b`, `br` or `ret`.
+  A compare with no such branch only sets the flags, and the walk goes on to the check before it. With none the site is refused.
+  Before, `cmp w18,#4; b.hi exit; cmp w18,#1; ldrsw ...` read 2 entries of a table of 5. `cmp #5; b.hs` read 6.
+- The rewriter's walk for a jump table's base passes a `mov` of a constant that would put the table in page zero (upstream `9671a581`, issue 1532).
+  Horizon never maps page zero, so no path of a working game carries that value to the table load. Any other write still ends the walk.
+  Cuphead 1.3.7 `main+0x59dc90` holds the constant 1 in the base register of another loop (`mov w12,#1`). Before, its jump table was not found.
+- The Mac app holds the `c1_full.tsv` and `cb_extent.tsv` of its own shader build, as the IPA does. Before, it held the tables of the game profile.
+  Those tables name the stamp of another build, so the host ignored them. Each c1 then got a buffer of its own and whole uniform bindings were copied.
+  `nxb build --platform mac` gives the host the same tables in `<work>/run/tables`. `nxb-macapp` takes them with `--guard-tables`.
+- `TRANSLATOR_ID` is `msl-2.14`.
+
 ## 0.6.7
 
 ### Fixed

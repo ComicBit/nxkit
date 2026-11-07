@@ -34,6 +34,7 @@ fn big_shared() -> B {
         name: "big".into(),
         ty: AggType(AggType::U32.0 | AggType::ARRAY.0),
         array_length: 12288,
+        zero_init: false,
     });
     b
 }
@@ -202,8 +203,8 @@ fn another_use_of_the_test_keeps_the_shader_as_it_is() {
     assert!(r.extra.iter().all(|(k, _)| k != "first_store"));
 }
 
-/// The compute sample with the HMMA helper the tensor pass makes: ten word arguments, one out argument and a scratch
-/// shared memory it stores to.
+/// The compute sample with the HMMA helper the tensor pass makes: seventeen word arguments, one out argument and a
+/// scratch shared memory it stores to.
 fn hmma_sample() -> B {
     let mut b = compute();
     let main = b.s.info.ast.new_block(BlockType::Main, None);
@@ -215,7 +216,7 @@ fn hmma_sample() -> B {
         main_block: main,
         name: "dmsh_hmma16816_f16".into(),
         return_type: AggType::U32,
-        in_arguments: vec![AggType::U32; 10],
+        in_arguments: vec![AggType::U32; 17],
         out_arguments: vec![AggType::U32],
         locals: vec![],
     });
@@ -226,16 +227,42 @@ fn hmma_sample() -> B {
 fn the_hmma_helper_runs_on_simdgroup_matrices() {
     let m = msl(&hmma_sample());
     for want in [
-        "uint fn1(thread uint& a0, thread uint& a1,",
+        "inline __attribute__((always_inline)) uint fn1(thread uint& a0, thread uint& a1,",
+        "thread uint& a17, thread simdgroup_half8x8 (&acc)[16], thread simdgroup_half8x8 (&am)[4]",
         "threadgroup uint* s = &sm0[uint(a1)];",
         "uint g = uint(a0) >> 2, t = uint(a0) & 3;",
-        "simdgroup_multiply_accumulate(mc0, ma00, mb0, mc0);",
-        "simdgroup_load(mb0, h + 256, 16, ulong2(0, 0), true);",
-        "a10 = as_type<uint>(d1);",
+        "const int f = int(uint(a10)), k = (f >> 8) * 2;",
+        "adirect = false;",
+        "simdgroup_multiply_accumulate(c0, am[0], b0, c0);",
+        "simdgroup_load(b0, h + 256, 16, ulong2(0, 0), true);",
+        "a17 = as_type<uint>(d1);",
         "return as_type<uint>(d0);",
     ] {
         assert!(m.contains(want), "missing {want}\n{m}");
     }
+}
+
+/// A call outside every chain has no slot bits. It must not write slot 0, where a chain may hold its accumulator
+/// (upstream issue 1537, dotted rows in Ocarina of Time).
+#[test]
+fn the_hmma_helper_touches_a_slot_only_for_a_chain() {
+    let m = msl(&hmma_sample());
+    let body = &m[m.find("fn1(").expect("helper")..];
+    let body = &body[..body.find("\n}\n").expect("end")];
+    let writes: Vec<&str> = body.lines().filter(|l| l.contains("acc[k")).collect();
+    assert_eq!(writes.len(), 2, "{body}");
+    assert!(
+        writes[0]
+            .trim_start()
+            .starts_with("if (cslot) { c0 = acc[k];"),
+        "{body}"
+    );
+    assert!(
+        writes[1]
+            .trim_start()
+            .starts_with("if (dslot) { acc[k] = c0;"),
+        "{body}"
+    );
 }
 
 fn bind_1d_level() -> B {

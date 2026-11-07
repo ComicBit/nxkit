@@ -203,6 +203,7 @@ pub fn run_to_xform_mode(
                 used_features: &mut used_features,
                 hfm: &mut hfm,
                 definitions: Some(&tc.definitions),
+                idom: &cfg.idom,
             };
             crate::xform::run_pass(&mut ir, &mut cfg.blocks, &mut env, &mut x)?;
         }

@@ -14,6 +14,8 @@ mod frame;
 mod jumps;
 mod jumps2;
 mod jumps3;
+#[cfg(test)]
+mod jumps_tests;
 mod locks;
 mod matchfn;
 #[cfg(test)]

@@ -75,7 +75,8 @@ pub(super) fn popc(ctx: &mut Ctx) -> R {
     let u = is_uniform(ctx);
     let s = one(ctx, &x, u, false, false)?;
     let mut src = get(ctx, &s)?;
-    if x.bit(63) {
+    // Bit 63 is the bitwise not only in forms 1, 5 and 6. In the immediate form it is the immediate's top bit.
+    if x.bit(63) && matches!(x.form(), 1 | 5 | 6) {
         src = ctx.bitwise_not(src);
     }
     let v = ctx.bit_count(src);
@@ -91,7 +92,8 @@ pub(super) fn flo(ctx: &mut Ctx) -> R {
     }
     let s = one(ctx, &x, u, false, false)?;
     let mut src = get(ctx, &s)?;
-    if x.bit(63) {
+    // Bit 63 is the bitwise not only in forms 1, 5 and 6. In the immediate form it is the immediate's top bit.
+    if x.bit(63) && matches!(x.form(), 1 | 5 | 6) {
         src = ctx.bitwise_not(src);
     }
     let mut res = if x.bit(73) {

@@ -242,6 +242,7 @@ pub(super) fn compute() -> B {
         name: "shm".into(),
         ty: AggType(AggType::U32.0 | AggType::ARRAY.0),
         array_length: 8,
+        zero_init: false,
     });
     b.s.props.properties.storage_buffers.push(BufferDef {
         layout: 1,

@@ -78,6 +78,7 @@ pub enum AEmit {
     AStg,
     ARed,
     AAtomg,
+    AAtomgCas,
     ALdLocalShared,
     AStLocalShared,
     AAtomsCas,
@@ -280,6 +281,7 @@ fn build() -> Tables {
     x(t, 0x98e, InstName::Red, AEmit::ARed, 0, false, false);
     x(t, 0x9a8, InstName::Atom, AEmit::AAtomg, 0, false, true);
     x(t, 0x3a8, InstName::Atom, AEmit::AAtomg, 0, false, true);
+    x(t, 0x3a9, InstName::Atom, AEmit::AAtomgCas, 0, false, true);
     x(
         t,
         0x983,

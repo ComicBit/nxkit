@@ -5,7 +5,7 @@ use std::collections::HashSet;
 
 use nxb_a64::{Insn, Reg};
 
-use crate::jumps::{An, add3, and_imm, cmp_imm, mov_ww, wr_named, xnum};
+use crate::jumps::{An, add3, and_imm, cmp_imm, guarded_count, mov_ww, wr_named, xnum};
 use crate::pat::{is_direct_branch, ldrsw_idx, nops, pimm, preg, tx, writes_reg, written_w};
 use crate::rw::R;
 
@@ -260,8 +260,8 @@ impl An<'_> {
                 continue;
             };
             let mut idx: HashSet<u8> = HashSet::from([ix]);
-            let mut cmp: Option<&Insn> = None;
-            for p in ctx[..kld].iter().rev() {
+            let mut n: Option<usize> = None;
+            for (i, p) in ctx[..kld].iter().enumerate().rev() {
                 if let Some((x, y)) = mov_ww(p)
                     && idx.contains(&x)
                 {
@@ -269,12 +269,16 @@ impl An<'_> {
                     idx.insert(y);
                     continue;
                 }
-                // a check of the full xN index bounds the same table
-                if let Some((cn, _)) = cmp_imm(p, true)
+                // a check of the full xN index bounds the same table. As in jump_offsets, only a compare a
+                // branch acts on bounds the index, and the walk goes on past one that guards nothing
+                if let Some((cn, cv)) = cmp_imm(p, true)
                     && idx.contains(&cn)
                 {
-                    cmp = Some(p);
-                    break;
+                    n = guarded_count(ctx, i, kld, cv);
+                    if n.is_some() {
+                        break;
+                    }
+                    continue;
                 }
                 if written_w(p)
                     .iter()
@@ -283,8 +287,7 @@ impl An<'_> {
                     return Ok(None);
                 }
             }
-            let Some(cmp) = cmp else { return Ok(None) };
-            let n = pimm(cmp, 1).unwrap_or(0) as usize + 1;
+            let Some(n) = n else { return Ok(None) };
             let at = wa.imm(1).unwrap_or(0);
             let targets = |tb: i64| -> R<Option<Vec<i64>>> {
                 if tb >= 0 && tb + 4 * n as i64 <= self.img.len() as i64 {

@@ -180,6 +180,8 @@ pub struct MemoryDef {
     pub name: String,
     pub ty: Agg,
     pub array_length: i32,
+    /// The memory starts at zero in each invocation (`MemoryDefinition.ZeroInit`).
+    pub zero_init: bool,
 }
 
 /// `ShaderProperties` (every list in dictionary insertion order).

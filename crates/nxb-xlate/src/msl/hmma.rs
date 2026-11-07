@@ -1,10 +1,20 @@
 //! The Ampere HMMA.16816 helper with an f16 accumulator as `simdgroup_matrix` code, as an emitter choice.
 //!
-//! The tensor pass of the front end makes `dmsh_hmma16816_f16(lane, block, A0..A3, B0, B1, C0, C1, out D1) -> D0` and
-//! gives it a body that computes D lane by lane from the subgroup's 256 word block of a scratch shared memory. The
-//! emitter writes another body over the same block: A row-major (halves 0..255, 16 a row), B transposed (256..383, row n
-//! of 16 halves of k, loaded transposed) and C and D row-major (384..511, 8 a row). On an M4 Pro one HMMA takes 1.08 ns
-//! a SIMD-group, against 5.4 ns for the shuffle emulation.
+//! The tensor pass of the front end makes `dmsh_hmma16816_f16(lane, block, A0..A3, B0, B1, C0, C1, flags, A's LDSM
+//! address, A0..A3's offsets, A's row stride, out D1) -> D0` and gives it a body that computes D lane by lane from the
+//! subgroup's 256 word block of a scratch shared memory. The emitter writes another body over the same block: A
+//! row-major (halves 0..255, 16 a row), B transposed (256..383, row n of 16 halves of k, loaded transposed) and C and D
+//! row-major (384..511, 8 a row). On an M4 Pro one HMMA takes 1.08 ns a SIMD-group, against 5.4 ns for the shuffle
+//! emulation.
+//!
+//! The tensor pass's flags (constants at each call) let a call skip the block where a matrix is already in the
+//! SIMD-group's registers. Each function that calls the helper holds 8 accumulator slots (`dm_acc`, two matrices each)
+//! and A's four matrices (`dm_am`) and passes them by reference, so the inlined helper keeps them in registers. A
+//! chain's accumulator stays in its slot from one call to the next, a call with the previous call's A loads none, C = 0
+//! is a multiply, and A read by an LDSM is loaded from shared memory where the LDSM read it. That last one needs the
+//! one shared memory besides the scratch. With none or several, A goes through the block. C and D are in the call's
+//! own matrices, and a slot is read only for a chain's C and written only for its D. A call outside every chain has no
+//! slot bits and must not touch slot 0 (upstream issue 1537, dotted rows in Ocarina of Time).
 
 use super::emit::{Em, R};
 use super::types::{msl_type, scalar};
@@ -54,13 +64,43 @@ fn word(n: usize, t: AggType) -> String {
     }
 }
 
+/// The parameters the helper takes after its own arguments, and the arguments each call passes for them.
+pub(super) const PARAMS: &str =
+    "thread simdgroup_half8x8 (&acc)[16], thread simdgroup_half8x8 (&am)[4]";
+/// The arguments of a call for `PARAMS`.
+pub(super) const ARGS: &str = "dm_acc, dm_am";
+/// The declaration in each function that calls the helper.
+pub(super) const DECL: &str = "simdgroup_half8x8 dm_acc[16], dm_am[4];";
+
+/// Whether function `i` is the HMMA helper.
+pub(super) fn is_helper(em: &Em<'_>, i: usize) -> bool {
+    i != 0 && em.info.functions.get(i).is_some_and(|f| f.name == HELPER)
+}
+
+/// The shared memory A can be loaded from directly: the one besides the scratch, in threadgroup memory.
+fn direct(em: &Em<'_>, scratch: i32) -> Option<i32> {
+    if em.shared.spill {
+        return None;
+    }
+    let mut other = em
+        .props
+        .properties
+        .shared_memories
+        .iter()
+        .filter(|m| m.id != scratch);
+    match (other.next(), other.next()) {
+        (Some(m), None) => Some(m.id),
+        _ => None,
+    }
+}
+
 /// The body of function `i` when it is the HMMA helper.
 pub(super) fn body(em: &Em<'_>, i: usize) -> R<Option<String>> {
     let f = &em.info.functions[i];
-    if i == 0 || f.name != HELPER {
+    if !is_helper(em, i) {
         return Ok(None);
     }
-    if f.in_arguments.len() != 10 || f.out_arguments.len() != 1 {
+    if f.in_arguments.len() != 17 || f.out_arguments.len() != 1 {
         return Err(format!("unported: {HELPER} with unexpected parameters"));
     }
     let id = scratch(&em.info.ast, f.main_block).ok_or("HMMA helper without scratch memory")?;
@@ -80,6 +120,8 @@ pub(super) fn body(em: &Em<'_>, i: usize) -> R<Option<String>> {
     let (l, blk) = (w(0), w(1));
     let (a0, a1, a2, a3) = (w(2), w(3), w(4), w(5));
     let (b0, b1, c0, c1) = (w(6), w(7), w(8), w(9));
+    let fl = w(10);
+    let direct = direct(em, id);
     let mut t = String::new();
     let mut put = |s: String| {
         t.push_str("    ");
@@ -87,29 +129,69 @@ pub(super) fn body(em: &Em<'_>, i: usize) -> R<Option<String>> {
         t.push('\n');
     };
     put(format!("{space} uint* s = &sm{id}[{blk}];"));
+    put(format!("{space} half* h = ({space} half*)s;"));
+    put(format!("const int f = int({fl}), k = (f >> 8) * 2;"));
+    let adirect = if direct.is_some() {
+        "(f & 16) != 0"
+    } else {
+        "false"
+    };
+    put(format!(
+        "const bool areuse = f & 1, cslot = f & 2, dslot = f & 4, czero = f & 8, adirect = {adirect};"
+    ));
     put(format!("uint g = {l} >> 2, t = {l} & 3;"));
     put(format!(
-        "s[g * 8 + t] = {a0}; s[(g + 8) * 8 + t] = {a1}; s[g * 8 + 4 + t] = {a2}; s[(g + 8) * 8 + 4 + t] = {a3};"
+        "if (!areuse && !adirect) {{ s[g * 8 + t] = {a0}; s[(g + 8) * 8 + t] = {a1}; s[g * 8 + 4 + t] = {a2}; s[(g + 8) * 8 + 4 + t] = {a3}; }}"
     ));
     put(format!(
         "s[128 + g * 8 + t] = {b0}; s[128 + g * 8 + 4 + t] = {b1};"
     ));
     put(format!(
-        "s[192 + g * 4 + t] = {c0}; s[192 + (g + 8) * 4 + t] = {c1};"
+        "if (!cslot && !czero) {{ s[192 + g * 4 + t] = {c0}; s[192 + (g + 8) * 4 + t] = {c1}; }}"
     ));
     put(format!("simdgroup_barrier({flags});"));
-    put(format!("{space} half* h = ({space} half*)s;"));
-    put("simdgroup_half8x8 ma00, ma01, ma10, ma11, mb0, mb1, mc0, mc1;".into());
-    put("simdgroup_load(ma00, h, 16, ulong2(0, 0)); simdgroup_load(ma01, h, 16, ulong2(8, 0)); simdgroup_load(ma10, h, 16, ulong2(0, 8)); simdgroup_load(ma11, h, 16, ulong2(8, 8));".into());
-    put("simdgroup_load(mb0, h + 256, 16, ulong2(0, 0), true); simdgroup_load(mb1, h + 256, 16, ulong2(8, 0), true);".into());
-    put("simdgroup_load(mc0, h + 384, 8, ulong2(0, 0)); simdgroup_load(mc1, h + 384, 8, ulong2(0, 8));".into());
-    put("simdgroup_multiply_accumulate(mc0, ma00, mb0, mc0); simdgroup_multiply_accumulate(mc0, ma01, mb1, mc0);".into());
-    put("simdgroup_multiply_accumulate(mc1, ma10, mb0, mc1); simdgroup_multiply_accumulate(mc1, ma11, mb1, mc1);".into());
-    put("simdgroup_store(mc0, h + 384, 8, ulong2(0, 0)); simdgroup_store(mc1, h + 384, 8, ulong2(0, 8));".into());
+    if let Some(sm) = direct {
+        let (aaddr, astr) = (w(11), w(16));
+        let (o0, o1, o2, o3) = (w(12), w(13), w(14), w(15));
+        put("if (!areuse && adirect) {".into());
+        put(format!(
+            "    threadgroup half* x = (threadgroup half*)&sm{sm}[0] + (int(simd_broadcast({aaddr}, ushort(0))) >> 1);"
+        ));
+        put(format!(
+            "    const ulong st = ulong({astr} >> 1); const bool tr = f & 32;"
+        ));
+        put(format!(
+            "    simdgroup_load(am[0], x + (int({o0}) >> 1), st, ulong2(0, 0), tr); simdgroup_load(am[1], x + (int({o2}) >> 1), st, ulong2(0, 0), tr);"
+        ));
+        put(format!(
+            "    simdgroup_load(am[2], x + (int({o1}) >> 1), st, ulong2(0, 0), tr); simdgroup_load(am[3], x + (int({o3}) >> 1), st, ulong2(0, 0), tr);"
+        ));
+        put("} else if (!areuse) {".into());
+    } else {
+        put("if (!areuse) {".into());
+    }
+    put("    simdgroup_load(am[0], h, 16, ulong2(0, 0)); simdgroup_load(am[1], h, 16, ulong2(8, 0)); simdgroup_load(am[2], h, 16, ulong2(0, 8)); simdgroup_load(am[3], h, 16, ulong2(8, 8));".into());
+    put("}".into());
+    put("simdgroup_half8x8 b0, b1, c0, c1;".into());
+    put("simdgroup_load(b0, h + 256, 16, ulong2(0, 0), true); simdgroup_load(b1, h + 256, 16, ulong2(8, 0), true);".into());
+    put(
+        "if (czero) { simdgroup_multiply(c0, am[0], b0); simdgroup_multiply(c1, am[2], b0); }"
+            .into(),
+    );
+    put("else {".into());
+    put("    if (cslot) { c0 = acc[k]; c1 = acc[k + 1]; }".into());
+    put("    else { simdgroup_load(c0, h + 384, 8, ulong2(0, 0)); simdgroup_load(c1, h + 384, 8, ulong2(0, 8)); }".into());
+    put("    simdgroup_multiply_accumulate(c0, am[0], b0, c0); simdgroup_multiply_accumulate(c1, am[2], b0, c1);".into());
+    put("}".into());
+    put("simdgroup_multiply_accumulate(c0, am[1], b1, c0); simdgroup_multiply_accumulate(c1, am[3], b1, c1);".into());
+    put(format!(
+        "if (dslot) {{ acc[k] = c0; acc[k + 1] = c1; simdgroup_barrier({flags}); a17 = 0; return 0; }}"
+    ));
+    put("simdgroup_store(c0, h + 384, 8, ulong2(0, 0)); simdgroup_store(c1, h + 384, 8, ulong2(0, 8));".into());
     put(format!("simdgroup_barrier({flags});"));
     put("uint d0 = s[192 + g * 4 + t], d1 = s[192 + (g + 8) * 4 + t];".into());
     put(format!("simdgroup_barrier({flags});"));
-    put(format!("a10 = as_type<{d1}>(d1);"));
+    put(format!("a17 = as_type<{d1}>(d1);"));
     put(format!("return as_type<{rt}>(d0);"));
     Ok(Some(t))
 }

@@ -113,6 +113,7 @@ mod tests {
             name: format!("sm{id}"),
             ty: AggType(AggType::U32.0 | AggType::ARRAY.0),
             array_length: n,
+            zero_init: false,
         }
     }
 
