@@ -56,16 +56,16 @@ pub(crate) fn version_line(t: &str) -> Option<(u32, std::ops::Range<usize>)> {
     let mut at = 0;
     for line in t.split_inclusive('\n') {
         let s = line.trim_start_matches([' ', '\t']);
-        if let Some(r) = s.strip_prefix("#version") {
-            if r.starts_with([' ', '\t']) {
-                let digits: String = r
-                    .trim_start_matches([' ', '\t'])
-                    .chars()
-                    .take_while(char::is_ascii_digit)
-                    .collect();
-                if let Ok(v) = digits.parse() {
-                    return Some((v, at..at + line.len()));
-                }
+        if let Some(r) = s.strip_prefix("#version")
+            && r.starts_with([' ', '\t'])
+        {
+            let digits: String = r
+                .trim_start_matches([' ', '\t'])
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .collect();
+            if let Ok(v) = digits.parse() {
+                return Some((v, at..at + line.len()));
             }
         }
         at += line.len();
@@ -190,15 +190,15 @@ pub(crate) fn fixups(t: &str) -> Result<String, String> {
         }
         let (args, end) =
             call_args(&s, e + ws).ok_or("textureOffset without its closing parenthesis")?;
-        if let [smp, p, o] = args.as_slice() {
-            if has_variable(o) {
-                let (smp, p, o) = (smp.trim(), p.trim(), o.trim());
-                out.push_str(&s[at..st]);
-                out.push_str(&format!(
-                    "texture({smp}, ({p}) + vec2({o}) / vec2(textureSize({smp}, 0)))"
-                ));
-                at = end;
-            }
+        if let [smp, p, o] = args.as_slice()
+            && has_variable(o)
+        {
+            let (smp, p, o) = (smp.trim(), p.trim(), o.trim());
+            out.push_str(&s[at..st]);
+            out.push_str(&format!(
+                "texture({smp}, ({p}) + vec2({o}) / vec2(textureSize({smp}, 0)))"
+            ));
+            at = end;
         }
     }
     out.push_str(&s[at..]);
@@ -224,10 +224,10 @@ pub(crate) fn bool_uniforms(t: &str) -> Vec<String> {
         {
             j += 1;
         }
-        if let (Some(&"bool"), Some(n), Some(&";")) = (w.get(j), w.get(j + 1), w.get(j + 2)) {
-            if n.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-                out.push((*n).to_string());
-            }
+        if let (Some(&"bool"), Some(n), Some(&";")) = (w.get(j), w.get(j + 1), w.get(j + 2))
+            && n.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
+            out.push((*n).to_string());
         }
     }
     out

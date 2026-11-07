@@ -2,6 +2,19 @@
 
 All notable changes are in this file. The format follows Keep a Changelog. Versions follow Semantic Versioning.
 
+## Unreleased
+
+### Added
+
+- Vulkan and OpenGL games build. The new crate `nxb-layer` translates their shaders with naga (SPIR-V) and the `glslang` crate (GLSL).
+  The Mac shader stage writes `shader/vk/vk_shaders.{metallib,tsv}` or `shader/gl/gl_shaders.*` in the format of the host's `vk_shaders.py` and `gl_shaders.py`.
+  The shader split and the pipeline archive are skipped for these games. The Mac app ships `msl/vk` or `msl/gl`.
+  On Hades, 74 of 74 shaders translate and compile.
+
+### Not ported
+
+- The run-time shader captures of Vulkan and OpenGL games. The iOS app build of these games.
+
 ## 0.6.7
 
 ### Fixed
