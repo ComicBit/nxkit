@@ -4,6 +4,10 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ## Unreleased
 
+### Fixed
+
+- `nxb build` names a version that the input lacks. Before, the rewrite stage stopped with an NRO collection error about a missing `extract/<version>/RomFS.img`. Now the build stops before the extraction. Where the NSP script derives a profile from the version it has (the `package` or a `shader_versions` entry of the profile is not in the input), the exit code is 4, so a launcher can run the script. `-p` with a version that the input lacks is an error (exit code 1), as in the script.
+
 ## 0.9.1 - 2026-11-07
 
 ### Added
@@ -11,10 +15,6 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 - The title module `nxgame-botw` for The Legend of Zelda: Breath of the Wild (`01007EF00011E000`), behind the `nxtitles` feature `botw`.
 - `nxtitle` splits the host into services (`Service`). `RuntimeHooks::runtime` lets a family or title move one service of its game from nxnative to nxkit. `Resolved::nxkit_services` lists them.
 - `docs/plans/runtime-hooks.md` plans how needs reach the host and how the nxkit runtime replaces nxnative one service at a time.
-
-### Fixed
-
-- `nxb build` names a version that the input lacks. Before, the rewrite stage stopped with an NRO collection error about a missing `extract/<version>/RomFS.img`. Now the build stops before the extraction. Where the NSP script derives a profile from the version it has (the `package` or a `shader_versions` entry of the profile is not in the input), the exit code is 4, so a launcher can run the script. `-p` with a version that the input lacks is an error (exit code 1), as in the script.
 
 ### Changed
 
