@@ -122,9 +122,15 @@ pub(crate) fn heap_check(c: &Ctx<'_>) -> Result<(), String> {
     set_env(&mut env, "DM_ALIAS_SIZE", alias);
     let t0 = std::time::Instant::now();
     let mut seen = None;
-    let ran = boot_mac(&host, &c.patched(), &env, &rd, &log, HEAP_CHECK_SECS, &mut || {
-        heap_done(&read_log(&log), &mut seen, t0.elapsed().as_secs_f64())
-    })?;
+    let ran = boot_mac(
+        &host,
+        &c.patched(),
+        &env,
+        &rd,
+        &log,
+        HEAP_CHECK_SECS,
+        &mut || heap_done(&read_log(&log), &mut seen, t0.elapsed().as_secs_f64()),
+    )?;
     let ltext = read_log(&log);
     rmtree(&rd)?;
     let text = std::fs::read_to_string(&gtsv).map_err(|e| format!("{}: {e}", gtsv.display()))?;
@@ -214,9 +220,9 @@ pub(crate) fn region_check(c: &Ctx<'_>, exefs: &Path) -> Result<(), String> {
                 gtsv.display()
             ));
         }
-        (Some(_), None) => c
-            .p
-            .say("address regions: the stdalloc_cap an earlier check set is no longer needed: removed"),
+        (Some(_), None) => c.p.say(
+            "address regions: the stdalloc_cap an earlier check set is no longer needed: removed",
+        ),
         _ => {}
     }
     for (red, t) in &r.found {
@@ -279,13 +285,17 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).ok().expect("dir");
         assert_eq!(rewrite_id(&d), "");
-        std::fs::write(d.join("main.patched.bin"), b"abc").ok().expect("w");
+        std::fs::write(d.join("main.patched.bin"), b"abc")
+            .ok()
+            .expect("w");
         std::fs::write(d.join("nro.tsv"), b"x").ok().expect("w");
         let a = rewrite_id(&d);
         assert_eq!(a.len(), 12);
         std::fs::write(d.join("nro.tsv"), b"y").ok().expect("w");
         assert_eq!(rewrite_id(&d), a);
-        std::fs::write(d.join("main.patched.bin"), b"abd").ok().expect("w");
+        std::fs::write(d.join("main.patched.bin"), b"abd")
+            .ok()
+            .expect("w");
         assert_ne!(rewrite_id(&d), a);
         let _ = std::fs::remove_dir_all(&d);
     }

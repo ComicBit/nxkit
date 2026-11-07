@@ -206,7 +206,10 @@ fn unknown_compression_is_red() {
 fn a_pack_without_a_listed_file_is_red() {
     let mut fd = descriptor();
     // the first hash of the descriptor no longer names pack "b"'s first file
-    let at = fd.windows(8).position(|w| w == 0x22u64.to_le_bytes()).unwrap();
+    let at = fd
+        .windows(8)
+        .position(|w| w == 0x22u64.to_le_bytes())
+        .unwrap();
     fd[at] = 0x44;
     let e = packs(&Mem(&file_system(0)), &fd, "arc/data.trpfs").unwrap_err();
     assert!(e.to_string().contains("has no file the descriptor lists"));

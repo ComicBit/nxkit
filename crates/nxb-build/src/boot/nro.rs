@@ -86,9 +86,15 @@ pub(crate) fn capture_nro(c: &Ctx<'_>) -> Result<bool, String> {
         want.len()
     ));
     set_env(&mut env, "DM_NRO_CAPTURE", &cap);
-    boot_mac(&host, &c.patched(), &env, &rd, &log, NRO_CAPTURE_SECS, &mut || {
-        !nros_in(&cap).is_empty()
-    })?;
+    boot_mac(
+        &host,
+        &c.patched(),
+        &env,
+        &rd,
+        &log,
+        NRO_CAPTURE_SECS,
+        &mut || !nros_in(&cap).is_empty(),
+    )?;
     let got = nros_in(&cap);
     let stem = got
         .first()
@@ -138,7 +144,9 @@ mod tests {
 
     #[test]
     fn missing_rows_parse_in_order() {
-        let w = parse_missing("bb\tb.nrr\naa\ta.nrr\n\n").ok().expect("parse");
+        let w = parse_missing("bb\tb.nrr\naa\ta.nrr\n\n")
+            .ok()
+            .expect("parse");
         assert_eq!(
             w,
             [("bb".into(), "b.nrr".into()), ("aa".into(), "a.nrr".into())]

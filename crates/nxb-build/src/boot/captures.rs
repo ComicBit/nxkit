@@ -132,7 +132,10 @@ pub(crate) fn check_glslc_coverage(
 /// `capture_glslc` for the packed version `d` (`<work>/extract/<package>`) among the split's versions `dirs`.
 /// Returns the keys a boot submitted when it captured no output and the profile names none (they are checked against
 /// the split with [`check_glslc_coverage`]).
-pub(crate) fn capture_glslc(c: &Ctx<'_>, dirs: &[(String, PathBuf)]) -> Result<Option<BTreeSet<String>>, String> {
+pub(crate) fn capture_glslc(
+    c: &Ctx<'_>,
+    dirs: &[(String, PathBuf)],
+) -> Result<Option<BTreeSet<String>>, String> {
     let map = c.profile.join("shader_map.tsv");
     let want = glslc_wanted(&std::fs::read_to_string(&map).unwrap_or_default());
     let todo: Vec<&str> = dirs
@@ -203,19 +206,27 @@ pub(crate) fn capture_glslc(c: &Ctx<'_>, dirs: &[(String, PathBuf)]) -> Result<O
         d.join("glslc_capture").display()
     ));
     let t0 = Instant::now();
-    let ran = boot_mac(&host, &c.patched(), &env, &rd, &log, GLSLC_SECS, &mut || {
-        let got = glslc_done(&cap);
-        let n = if want.is_empty() {
-            got.len()
-        } else {
-            got.intersection(&want).count()
-        };
-        c.p.set(Update {
-            done: Some(n as u64),
-            ..Update::default()
-        });
-        !want.is_empty() && got.is_superset(&want)
-    })?;
+    let ran = boot_mac(
+        &host,
+        &c.patched(),
+        &env,
+        &rd,
+        &log,
+        GLSLC_SECS,
+        &mut || {
+            let got = glslc_done(&cap);
+            let n = if want.is_empty() {
+                got.len()
+            } else {
+                got.intersection(&want).count()
+            };
+            c.p.set(Update {
+                done: Some(n as u64),
+                ..Update::default()
+            });
+            !want.is_empty() && got.is_superset(&want)
+        },
+    )?;
     let got = glslc_done(&cap);
     let full = !want.is_empty() && got.is_superset(&want);
     if let Some(rc) = ran.rc
@@ -322,7 +333,9 @@ impl Api {
     /// A capture file's name to its key, `None` when it is not a whole file (a temporary name).
     pub(crate) fn key(self, n: &str) -> Option<String> {
         let hex16 = |s: &str| {
-            s.len() == 16 && s.bytes().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+            s.len() == 16
+                && s.bytes()
+                    .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
         };
         match self {
             Api::Vk => (n.len() == 20 && n.ends_with(".spv")).then(|| n[..16].to_string()),
@@ -352,7 +365,8 @@ pub(crate) fn capture_done(d: &Path, api: Api) -> BTreeSet<String> {
 /// shader translator. The run stops once every key of the profile's capture table is there. Without the table, it
 /// stops once none was added for [`CAPTURE_QUIET_SECS`].
 pub(crate) fn capture_shaders(c: &Ctx<'_>, api: Api) -> Result<PathBuf, String> {
-    let want = capture_wanted(&std::fs::read_to_string(c.profile.join(api.table())).unwrap_or_default());
+    let want =
+        capture_wanted(&std::fs::read_to_string(c.profile.join(api.table())).unwrap_or_default());
     let d = c.game_dir();
     let out = d.join(format!("{}_capture", api.id()));
     if !want.is_empty() && capture_done(&out, api).is_superset(&want) {
@@ -387,23 +401,31 @@ pub(crate) fn capture_shaders(c: &Ctx<'_>, api: Api) -> Result<PathBuf, String> 
     ));
     let t0 = Instant::now();
     let (mut last_n, mut last_t) = (0usize, 0.0f64);
-    let ran = boot_mac(&host, &c.patched(), &env, &rd, &log, CAPTURE_SECS, &mut || {
-        let got = capture_done(&cap, api);
-        let n = if want.is_empty() {
-            got.len()
-        } else {
-            got.intersection(&want).count()
-        };
-        c.p.set(Update {
-            done: Some(n as u64),
-            ..Update::default()
-        });
-        let now = t0.elapsed().as_secs_f64();
-        if n != last_n {
-            (last_n, last_t) = (n, now);
-        }
-        quiet_done(&want, &got, n, now - last_t)
-    })?;
+    let ran = boot_mac(
+        &host,
+        &c.patched(),
+        &env,
+        &rd,
+        &log,
+        CAPTURE_SECS,
+        &mut || {
+            let got = capture_done(&cap, api);
+            let n = if want.is_empty() {
+                got.len()
+            } else {
+                got.intersection(&want).count()
+            };
+            c.p.set(Update {
+                done: Some(n as u64),
+                ..Update::default()
+            });
+            let now = t0.elapsed().as_secs_f64();
+            if n != last_n {
+                (last_n, last_t) = (n, now);
+            }
+            quiet_done(&want, &got, n, now - last_t)
+        },
+    )?;
     let got = capture_done(&cap, api);
     let full = !want.is_empty() && got.is_superset(&want);
     if let Some(rc) = ran.rc
@@ -448,7 +470,12 @@ pub(crate) fn capture_shaders(c: &Ctx<'_>, api: Api) -> Result<PathBuf, String> 
 
 /// The capture's end: every listed key is there, or without a table, some are and none was added for
 /// [`CAPTURE_QUIET_SECS`].
-pub(crate) fn quiet_done(want: &BTreeSet<String>, got: &BTreeSet<String>, n: usize, quiet: f64) -> bool {
+pub(crate) fn quiet_done(
+    want: &BTreeSet<String>,
+    got: &BTreeSet<String>,
+    n: usize,
+    quiet: f64,
+) -> bool {
     if want.is_empty() {
         n > 0 && quiet > CAPTURE_QUIET_SECS
     } else {
@@ -502,17 +529,23 @@ mod tests {
 
     #[test]
     fn capture_names_are_keys_only_when_whole() {
-        assert_eq!(Api::Vk.key("0123456789abcdef.spv").as_deref(), Some("0123456789abcdef"));
+        assert_eq!(
+            Api::Vk.key("0123456789abcdef.spv").as_deref(),
+            Some("0123456789abcdef")
+        );
         assert_eq!(Api::Vk.key("0123456789abcdef.spv.tmp"), None);
-        assert_eq!(Api::Gl.key("0123456789abcdef.vert").as_deref(), Some("0123456789abcdef.vert"));
-        assert_eq!(Api::Gl.key("0123456789abcdef.frag").as_deref(), Some("0123456789abcdef.frag"));
+        assert_eq!(
+            Api::Gl.key("0123456789abcdef.vert").as_deref(),
+            Some("0123456789abcdef.vert")
+        );
+        assert_eq!(
+            Api::Gl.key("0123456789abcdef.frag").as_deref(),
+            Some("0123456789abcdef.frag")
+        );
         assert_eq!(Api::Gl.key("0123456789ABCDEF.frag"), None);
         assert_eq!(Api::Gl.key("0123456789abcdef.geom"), None);
         assert_eq!(Api::Gl.key("0123456789abcdef.vert.part"), None);
-        assert_eq!(
-            capture_wanted("# keys\n a \n\nb\n#c\n"),
-            set(&["a", "b"])
-        );
+        assert_eq!(capture_wanted("# keys\n a \n\nb\n#c\n"), set(&["a", "b"]));
     }
 
     #[test]
