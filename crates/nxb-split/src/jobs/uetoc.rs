@@ -114,6 +114,11 @@ impl Toc {
         })
     }
 
+    /// Whether a chunk has the type `t` (`of_type`, Unreal Engine 5 numbering: TOC version 4 and later).
+    pub(super) fn of_type(&self, t: u8) -> bool {
+        self.version >= 4 && self.ids.iter().any(|c| c[11] == t)
+    }
+
     pub(super) fn export_bundles(&self) -> Vec<usize> {
         if self.version < 4 {
             (0..self.ids.len())

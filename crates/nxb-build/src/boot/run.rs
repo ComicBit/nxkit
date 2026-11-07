@@ -130,6 +130,15 @@ pub(crate) fn after_rewrite(a: &Args, b: &Build, p: &Progress) -> Result<(), Str
             super::captures::Api::Gl,
         )?);
     }
+    if let Some(d) = &inputs.capture {
+        // vk_shaders.py and gl_shaders.py turn the capture into the app's Metal library: not ported to nxb
+        p.say(&format!(
+            "[RED] the {} shaders captured in {} are not translated: nxb has no port of vk_shaders.py and gl_shaders.py, the app's {} shader library has to come from the script's build (--shaders)",
+            if pl.vkcap { "Vulkan" } else { "GL" },
+            d.display(),
+            if pl.vkcap { "Vulkan" } else { "GL" }
+        ));
+    }
     if pl.oodle {
         inputs.oodle = Some((c.host()?, c.patched()));
         inputs.split_again = true;
