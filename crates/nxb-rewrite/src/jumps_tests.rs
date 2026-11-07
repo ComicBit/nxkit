@@ -190,3 +190,66 @@ fn adr_relative_tables_take_the_same_rule() {
     assert_eq!(run(&[cmp_w(9, 4), NOP], 5).0, None);
     assert_eq!(run(&[cmp_w(9, 4), bcond(0, 12, 80)], 5).0, None);
 }
+
+/// adrp/add x4; `other` (a block of another loop: a write of w4, then b exit); cmp w18,#4; b.hi; the load.
+/// With `before_add`, `other` sits between the adrp and the add. The `NullPageBase` cases.
+fn null_page_site(other: u32, before_add: bool) -> Option<Vec<i64>> {
+    let (adrp, add) = (
+        encode::adrp(4, 0, TABLE).unwrap(),
+        encode::addi(4, 4, (TABLE & 0xfff) as u32, 0),
+    );
+    let mut words = if before_add {
+        vec![adrp, other, add]
+    } else {
+        vec![adrp, add, other]
+    };
+    words.extend([b(12, 36), cmp_w(18, 4), bhi(20, 36)]);
+    words.extend(LOAD);
+    words.extend([RET; 5]);
+    let mut img = vec![0u8; 0x5000];
+    for i in 0..5 {
+        let at = TABLE as usize + 4 * i;
+        img[at..at + 4].copy_from_slice(&((36 + 4 * i as i64 - TABLE) as i32).to_le_bytes());
+    }
+    let insl = decode_all(&words);
+    let (jumps, tabjumps) = (HashMap::new(), HashMap::new());
+    let an = An {
+        img: &img,
+        jumps: &jumps,
+        tabjumps: &tabjumps,
+    };
+    an.jump_offsets(&insl, 8, false, false, false).unwrap()
+}
+
+#[test]
+fn page_zero_constants_are_passed() {
+    let want: Vec<i64> = (0..5).map(|i| 36 + 4 * i).collect();
+    // mov w4,#1; mov x4,#0; mov w4,wzr; mov w4,#0xfec (the 5 entries end at 0x1000)
+    for w in [
+        0x5280_0024,
+        0xd280_0004,
+        0x2a1f_03e4,
+        0x5280_0000 | 0xfec << 5 | 4,
+    ] {
+        assert_eq!(null_page_site(w, false), Some(want.clone()), "{w:#x}");
+    }
+}
+
+#[test]
+fn other_writes_of_the_base_still_end_the_chain() {
+    // mov w4,#0xff0 (past the page); mov w4,#0x2000; mov w4,w0; mov w4,#-1
+    for w in [
+        0x5280_0000 | 0xff0 << 5 | 4,
+        0x5284_0004,
+        0x2a00_03e4,
+        0x1280_0004,
+    ] {
+        assert_eq!(null_page_site(w, false), None, "{w:#x}");
+    }
+}
+
+#[test]
+fn a_constant_the_add_reads_is_the_base() {
+    // adrp x4; mov w4,#1; add x4,x4,#lo: the add builds the base from the 1
+    assert_eq!(null_page_site(0x5280_0024, true), None);
+}

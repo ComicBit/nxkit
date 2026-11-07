@@ -34,6 +34,9 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
   `b.hi` out of the dispatch gives N + 1 entries and `b.hs` gives N. `b.ls` and `b.lo` into the dispatch count the same way when the instruction before their target is a `b`, `br` or `ret`.
   A compare with no such branch only sets the flags, and the walk goes on to the check before it. With none the site is refused.
   Before, `cmp w18,#4; b.hi exit; cmp w18,#1; ldrsw ...` read 2 entries of a table of 5. `cmp #5; b.hs` read 6.
+- The rewriter's walk for a jump table's base passes a `mov` of a constant that would put the table in page zero (upstream `9671a581`, issue 1532).
+  Horizon never maps page zero, so no path of a working game carries that value to the table load. Any other write still ends the walk.
+  Cuphead 1.3.7 `main+0x59dc90` holds the constant 1 in the base register of another loop (`mov w12,#1`). Before, its jump table was not found.
 - `TRANSLATOR_ID` is `msl-2.14`.
 
 ## 0.6.7
