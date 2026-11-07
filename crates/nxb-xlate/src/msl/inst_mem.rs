@@ -422,6 +422,10 @@ impl Em<'_> {
             let a = self.src(o, i)?;
             args.push(self.eval(a)?.s);
         }
+        if super::hmma::is_helper(self, id as usize) {
+            args.push(super::hmma::ARGS.to_string());
+            self.hmma_caller = true;
+        }
         args.extend(self.shared.params.iter().map(|(_, a)| a.clone()));
         let call = format!("fn{id}({})", args.join(", "));
         if ret == AggType::VOID {

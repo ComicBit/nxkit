@@ -62,7 +62,10 @@ fn two_loads_share_one_zeroed_word() {
     let body = &m[at..];
     let body = &body[..body.find("\n}\n").expect("helper end")];
     let first = body.find(&format!("({word})")).expect("the word is read");
-    let hint = body.find(">> 21u").or_else(|| body.find(">> 21")).expect("the hint");
+    let hint = body
+        .find(">> 21u")
+        .or_else(|| body.find(">> 21"))
+        .expect("the hint");
     assert!(first < hint, "{body}");
     assert!(body.contains(&format!("    {word} = ")), "{body}");
 }

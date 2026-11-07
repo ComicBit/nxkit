@@ -127,7 +127,9 @@ impl Inst {
     pub const VoteAny: Inst = Inst(120);
     pub const MatrixMultiplyAdd: Inst = Inst(121);
     pub const SubgroupBarrier: Inst = Inst(122);
-    pub const Count: Inst = Inst(123);
+    /// Ampere LDSM in a compute shader, one matrix: shared memory id, mode, row address, matrix. The tensor pass lowers it.
+    pub const MatrixLoad: Inst = Inst(123);
+    pub const Count: Inst = Inst(124);
     pub const FP32: u32 = 1 << 16;
     pub const FP64: u32 = 1 << 17;
     pub const MASK: u32 = 0xffff;

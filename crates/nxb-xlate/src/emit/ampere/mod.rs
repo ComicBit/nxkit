@@ -11,7 +11,7 @@ mod mov;
 pub mod operand;
 pub mod ops;
 mod surface;
-mod tensor;
+pub(crate) mod tensor;
 mod tex;
 
 use crate::ir::emitter::EmitterContext;
