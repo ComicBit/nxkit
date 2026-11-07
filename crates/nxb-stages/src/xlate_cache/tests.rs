@@ -61,6 +61,7 @@ fn varying(location: u32) -> StageInputs {
             location,
             msl_type: "float4".into(),
             interpolation: String::new(),
+            read: 0xf,
         }],
     }
 }

@@ -2,6 +2,7 @@
 #![cfg(test)]
 
 use super::mesh::{memory, own_shared};
+use super::mesh_pad_tests::reads;
 use super::{Context, Failure, StageInputs, Translated, translate};
 use crate::job::{MeshStage, POINT_SIZE, parse_jobs};
 use crate::translation::emit_test_util::{AEXIT, APT};
@@ -516,14 +517,18 @@ fn metal_compiles_the_task_and_mesh_functions() {
         task: false,
         ..mesh("ms")
     };
+    let narrow = [reads(&[(1, 0x7), (2, 1), (5, 1), (6, 0xf)])];
     let cases = [
-        ("ts", mesh("ts"), ts_ops()),
-        ("ms", mesh("ms"), ms_ops()),
-        ("msn", no_task, ms_ops()),
-        ("msp", point_mesh(), ms_ops()),
+        ("ts", mesh("ts"), ts_ops(), Vec::new()),
+        ("ms", mesh("ms"), ms_ops(), Vec::new()),
+        ("msn", no_task, ms_ops(), Vec::new()),
+        ("msp", point_mesh(), ms_ops(), Vec::new()),
+        ("msw", mesh("ms"), ms_ops(), narrow.to_vec()),
     ];
-    for (name, m, ops) in cases {
-        let l = &run(&m, &ops).expect("translate").libraries[0];
+    for (name, m, ops, partners) in cases {
+        let l = &run_paired(&m, &ops, |_| {}, &partners)
+            .expect("translate")
+            .libraries[0];
         let src = dir.join(format!("mesh_{name}.metal"));
         let air = dir.join(format!("mesh_{name}.air"));
         std::fs::write(&src, &l.msl).expect("write");

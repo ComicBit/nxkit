@@ -74,6 +74,7 @@ impl Translation {
                     ("location", Value::Int(i64::from(v.location))),
                     ("type", Value::str(&v.msl_type)),
                     ("interp", Value::str(&v.interpolation)),
+                    ("read", Value::Int(i64::from(v.read))),
                 ])
             })
             .collect();
@@ -120,6 +121,7 @@ impl Translation {
                     location: u32::try_from(x.get("location")?.as_i64()?).ok()?,
                     msl_type: x.get("type")?.as_str()?.to_string(),
                     interpolation: x.get("interp")?.as_str()?.to_string(),
+                    read: u8::try_from(x.get("read")?.as_i64()?).ok()?,
                 })
             })
             .collect::<Option<Vec<_>>>()?;
@@ -212,7 +214,12 @@ impl Xlate {
             .partners
             .iter()
             .flat_map(|p| &p.varyings)
-            .map(|v| format!("{} {} {}\n", v.location, v.msl_type, v.interpolation))
+            .map(|v| {
+                format!(
+                    "{} {} {} {}\n",
+                    v.location, v.msl_type, v.interpolation, v.read
+                )
+            })
             .collect();
         ContentKey::builder("nxb.xlate.v2")
             .field_str("translator", &self.id)

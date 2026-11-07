@@ -75,6 +75,7 @@ mod tests {
                     location: *l,
                     msl_type: (*t).into(),
                     interpolation: (*i).into(),
+                    read: 0xf,
                 })
                 .collect(),
         }

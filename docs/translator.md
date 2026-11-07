@@ -190,6 +190,8 @@ The stage memory ends with the primitive bytes. The count is at +3. The index by
 The guest writes the index bytes of each lane in each primitive block, and a count of 0 makes every lane write. A mesh of 126 primitives has four blocks, so lanes 126 and 127 stay inside the array.
 
 A mesh shader has pixel shader partners, as a vertex shader has. The split pairs a mesh key with the pixel key of its variation. A pixel shader may read a location that the mesh shader does not write. Metal then refuses the pipeline. The mesh function declares such a location as an output `dm_pad<N>` with the value (0, 0, 0, 1). The hardware reads the same default.
+A mesh output is as wide as its pixel shaders read. Metal counts the declared outputs against a mesh limit of 32 KB, so a `float4` for every attribute can be too much. An output has the components that the shader writes, and a w that a pixel shader reads and the shader does not write. That w holds 1.
+A Metal fragment input wider than the output it links to reads 0 in the missing components. This is the hardware default for x, y and z. A `StageInputs` varying carries `read`, the components that its pixel shader reads. The bits come from the interpolation map of the pixel shader. A map that names no component counts as all four. Without partners every output is a `float4`.
 The pipeline archive leaves the pairs of a mesh shader out. The host builds mesh pipelines at the draw.
 
 ## Open points
