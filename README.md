@@ -1,8 +1,11 @@
-# nxbuild
+# nxkit
 
-nxbuild is build tooling written in Rust. It changes Switch game packages into Apple builds. It extracts game data, rewrites and
-compiles shaders, makes pipeline archives, and packs and signs the app. Use it only with games that you own.
-No game data, keys or shaders are in this repository.
+nxkit is a Rust monorepo of modules for running Switch games on Apple devices. Each module is a crate with a declared layer, and
+dependencies point down only. Use it only with games that you own. No game data, keys or shaders are in this repository.
+
+- The build tool `nxb` changes Switch game packages into Apple builds. It extracts game data, rewrites and compiles shaders,
+  makes pipeline archives, and packs and signs the app.
+- The title layer in `titles/` holds engine families and title modules. Refer to [docs/titles.md](docs/titles.md).
 
 The tools replace a set of reference build scripts (written in Python). The reference scripts are the oracle.
 A Rust stage is correct when its output files are byte-identical to the output of the reference scripts.
@@ -80,7 +83,7 @@ more titles.
 The reference machine is an Apple M2 Max (8 performance cores, 4 efficiency cores). Other jobs used the CPU in all runs.
 The numbers are therefore a little worse than on an idle machine. Source: `docs/benchmarks.md`.
 
-| step | reference scripts | nxbuild | speed-up | label |
+| step | reference scripts | nxkit | speed-up | label |
 |---|---|---|---|---|
 | Extract and split | 210 s | 10.5 to 15.5 s | 13 to 20 times | measured |
 | Shaders, cold, Apple front end | 799 s | 650 s | 1.2 times | measured |
@@ -91,7 +94,7 @@ The numbers are therefore a little worse than on an idle machine. Source: `docs/
 | Mac app stage, fresh | 129 s | 23 s | 5.6 times | measured |
 | `nxb build`, shaders given | about 623 s | 317 s | 2.0 times | measured |
 | Full build in sequence | 1,422 s | about 960 s | 1.5 times | estimate |
-| Raw path, compile CPU for each library, 44 shaders | 109 ms | 97.5 ms | 1.1 times | measured, small sample, loaded machine. The left time is nxbuild without the raw path |
+| Raw path, compile CPU for each library, 44 shaders | 109 ms | 97.5 ms | 1.1 times | measured, small sample, loaded machine. The left time is nxkit without the raw path |
 | `nxb build` with overlap, shaders given | 136.2 s | 133.0 s | 1.02 times | measured, one run, no cold gain shown. The left time is the earlier `nxb` binary |
 | `nxb build` with overlap, cold | | | | not timed. A gain is an estimate |
 | Rewrite of a 29 MB main module | 63 s | 3.4 s | 19 times | measured, machine not quiet |
@@ -258,7 +261,7 @@ The tools read no fixed private path. Inputs come from arguments or from these v
 ## Architecture
 
 The workspace has four layers and one separate layer for the own front end. Dependencies point down only.
-The command `cargo run -p xtask -- layers` enforces this.
+The command `cargo run -p xtask -- layers` enforces this. The engine families and title modules are layer T in `titles/`. Refer to [docs/titles.md](docs/titles.md).
 
 ```mermaid
 flowchart TD

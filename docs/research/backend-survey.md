@@ -45,7 +45,7 @@ With `-j 1` and `-j 4`, the output size was different (972,400 against 1,069,488
 and the ISA are private and change with each generation. The OS accepts only archives from its own compiler build.
 On a miss, the device uses the same code generator. Thus an own generator saves no time.
 
-**Subsequent measurements.** The first archive stage of `nxbuild` ran `metal-tt` for each batch. It took 273 s against 257 s
+**Subsequent measurements.** The first archive stage of `nxkit` ran `metal-tt` for each batch. It took 273 s against 257 s
 for the reference build scripts (measured, with load). Then each batch ran `applegpu-nt -j 1` and `air-pack`, with one batch
 for each core. This took 207 s cold and 958 to 1,076 CPU seconds (against 1,974). The loader probe found all 18,300 bases (measured, load 7 to 33).
 

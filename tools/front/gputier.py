@@ -23,7 +23,7 @@ masked because the reference differs from itself) | notbuilt (own path failed on
 tiers: allow-identical (verdict own-identical), gpu-verified (status identical, so 0 differing words in every output
 including vertex positions, and no masked words), rejected (everything else), with their share of the corpus.
 With GPUTIER_RAW=1: raw-verified (status identical in a raw run, any verdict but `apple`) and raw-rejected (tested,
-not identical). raw-verified.txt is the allow list of nxbuild's own-raw tier (`# comment`, one SHA-256 of the MSL per
+not identical). raw-verified.txt is the allow list of nxkit's own-raw tier (`# comment`, one SHA-256 of the MSL per
 line).
 
 same (raw): rebuilds the library of every source in LIST (a raw-verified.txt) with AIRC (default the release airc)

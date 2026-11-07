@@ -1,5 +1,5 @@
 #!/bin/sh
-# Quality gates for the nxbuild workspace: format, lints, tests, layers, size limits.
+# Quality gates for the nxkit workspace: format, lints, tests, layers, size limits.
 # Usage: tools/check.sh            (run from anywhere)
 # NXB_ORACLE_EXACT=1 makes the signer tests compare bytes with the host codesign (set it on the Mac where the signer was proven).
 # Without it they only require that codesign --verify accepts our output.

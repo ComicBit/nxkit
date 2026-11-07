@@ -1,0 +1,26 @@
+[package]
+name = "nxtitles"
+description = "The one list of families and title modules, each behind its own cargo feature"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[package.metadata.nxb]
+layer = "L1"
+in_v = false
+
+[features]
+default = ["agl", "oot"]
+agl = ["dep:nxfamily-agl"]
+oot = ["dep:nxgame-oot"]
+
+[dependencies]
+nxtitle.workspace = true
+nxfamily-agl = { workspace = true, optional = true }
+nxgame-oot = { workspace = true, optional = true }
+
+
+[lints]
+workspace = true

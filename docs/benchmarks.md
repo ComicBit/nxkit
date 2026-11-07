@@ -1,6 +1,6 @@
 # Benchmarks
 
-This document gives the timings of the reference build scripts and of `nxbuild` on the reference title.
+This document gives the timings of the reference build scripts and of `nxkit` on the reference title.
 Each number has a label: measured, derived or estimate. Read the conditions first.
 
 ## Conditions
@@ -22,7 +22,7 @@ Each number has a label: measured, derived or estimate. Read the conditions firs
 | extract, rewrite and split | 2:27 + 0:19 + 0:43 (209 s) |
 | Mac app pack and sign | 2:09 (129 s) |
 
-## nxbuild (measured, 2026-11-05)
+## nxkit (measured, 2026-11-05)
 
 | stage and run | wall | CPU user + system (s) | average cores | reference build scripts | factor |
 |---|---|---|---|---|---|

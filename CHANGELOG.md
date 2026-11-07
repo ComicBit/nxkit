@@ -4,8 +4,14 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ## Unreleased
 
+### Changed
+
+- The repository is now `v0lumehi/nxkit`. GitHub redirects the old `v0lumehi/nxbuild` URLs, including release downloads. The binary `nxb`, the crate names and the release file names stay the same.
+
 ### Added
 
+- The title layer in `titles/`: the API `nxtitle` (families, title modules, hooks, evidence, the catalog), the registry `nxtitles` with one cargo feature per module, the family `nxfamily-agl` and the title module `nxgame-oot` for `0400486024DEC000`. Refer to `docs/titles.md`.
+- `xtask layers` checks layer `T`: a family or title crate uses only `nxtitle` and L0, and only `nxtitles` uses a family or title crate.
 - `tools/hmma-precision/run.sh` shows how the GPU of the Mac sums a half `simdgroup_matrix` product.
 - The `nxb-xlatedev` tool `xlate-msl` writes the MSL of a list of shader keys.
 - `docs/analysis/oot-open-issues.md` gives the cause of three defects of one title on Apple GPUs (upstream issues 1547, 1568 and 1326). The cause of 1326 is in the upstream runtime.
