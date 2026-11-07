@@ -223,6 +223,9 @@ Not overlapped: the shader step with the extract, the copy of the app files duri
 ## Mac app and code signature
 
 - `nxb_pack::macapp::plan` makes a bundle plan from typed inputs. The plan has the same tree as the reference build scripts.
+- The tables in `Contents/Resources/dm/` and in each program folder come from the game profile. `c1_full.tsv` and `cb_extent.tsv` come from `<work>/shader/work/tables` when the shader step wrote them there.
+  The host reads a table only when its header names the stamp of the library's `inputs.tsv`.
+  `nxb build --platform mac` gives the host a folder `<work>/run/tables` with the same tables.
 - Without a previous app, the stage clones the files into `<out>` (`std::fs::copy`, which uses `fclonefileat` on APFS) and writes the generated files directly.
   Then it seals and signs the bundle. The digests come from the plan or from the copy. No file is read twice.
 - With a previous app, the stage moves the old `.app` to the new path and updates it in place. A file whose digest is the same as in the previous `CodeResources` stays and is not read.
