@@ -16,6 +16,9 @@ const SHARED_OPCODES: [u16; 6] = [0x984, 0x388, 0x988, 0x38c, 0x98c, 0xf8c];
 /// The reason of a refused job.
 pub(crate) const REFUSED: &str = "shared memory of its own, or stage memory past Metal's limit";
 
+/// The attribute of the point size in a component list. The job names it `"psiz"`.
+pub(crate) const POINT_SIZE: i64 = -1;
+
 /// An output component of an SPH: its attribute (`None` for the position) and its index.
 type Comp = (Option<i64>, i64);
 
@@ -25,6 +28,8 @@ pub(crate) struct Facts {
     threads: i64,
     payload: i64,
     task: bool,
+    /// The vertices of a primitive: 1 point, 2 line, 3 triangle.
+    verts: i64,
     max_v: i64,
     max_p: i64,
     vertex: Vec<Comp>,
@@ -41,15 +46,20 @@ fn u32_at(b: &[u8], o: usize) -> Option<usize> {
         .and_then(|s| usize::try_from(u32::from_le_bytes([s[0], s[1], s[2], s[3]])).ok())
 }
 
-/// The components an SPH enables in its output map, in the order of the attribute area: the position's (byte 0x35,
-/// bits 4 to 7), then the generic attributes' (bytes 0x36 on, a nibble for each attribute).
+/// The components an SPH enables in its output map, in the order of the attribute area: the point size (byte 0x35,
+/// bit 3), the position's (byte 0x35, bits 4 to 7), then the generic attributes' (bytes 0x36 on, a nibble for each
+/// attribute).
 fn sph_outputs(sph: &[u8]) -> Option<Vec<Comp>> {
     let b = |o: usize| sph.get(o).copied();
-    let mut out: Vec<Comp> = (0..4i64)
-        .filter(|c| b(0x35).is_some_and(|v| v >> (4 + c) & 1 != 0))
-        .map(|c| (None, c))
-        .collect();
-    b(0x35)?;
+    let mut out: Vec<Comp> = Vec::new();
+    if b(0x35)? >> 3 & 1 != 0 {
+        out.push((Some(POINT_SIZE), 0));
+    }
+    out.extend(
+        (0..4i64)
+            .filter(|c| b(0x35).is_some_and(|v| v >> (4 + c) & 1 != 0))
+            .map(|c| (None, c)),
+    );
     for n in 0..32i64 {
         let v = b(0x36 + (n / 2) as usize)?;
         out.extend(
@@ -80,6 +90,7 @@ pub(crate) fn info(key: &str, ctl: &[u8], code_area: &[u8]) -> Result<Facts, Job
         threads: u16_at(ctl, 0x58).ok_or_else(short)?,
         payload: u16_at(ctl, 0x5a).ok_or_else(short)?,
         task: true,
+        verts: 3,
         max_v: 0,
         max_p: 0,
         vertex: Vec::new(),
@@ -87,6 +98,9 @@ pub(crate) fn info(key: &str, ctl: &[u8], code_area: &[u8]) -> Result<Facts, Job
     };
     if kind == "ms" {
         f.task = ctl.get(0x5e).ok_or_else(short)? != &0;
+        f.verts = ctl
+            .get(0x5f)
+            .map_or(3, |&v| if v == 0 { 3 } else { i64::from(v) });
         f.max_v = u16_at(ctl, 0x60).ok_or_else(short)?;
         f.max_p = u16_at(ctl, 0x62).ok_or_else(short)?;
         let incomplete = || bad("the SPH of a mesh shader is incomplete");
@@ -95,7 +109,10 @@ pub(crate) fn info(key: &str, ctl: &[u8], code_area: &[u8]) -> Result<Facts, Job
             let at = u32_at(ctl, 0x64).ok_or_else(short)?;
             if at != 0 {
                 let prim = sph_outputs(area(code_area, at)).ok_or_else(incomplete)?;
-                f.primitive = prim.into_iter().filter(|c| c.0.is_some()).collect();
+                f.primitive = prim
+                    .into_iter()
+                    .filter(|c| c.0.is_some_and(|n| n >= 0))
+                    .collect();
             }
         }
     }
@@ -117,14 +134,14 @@ impl Facts {
                 out + align(self.payload, 4),
             );
         }
-        let blocks = (self.max_v.max(self.max_p).max(1) + BLOCK - 1) / BLOCK;
-        let comps = (self.vertex.len() + self.primitive.len()).max(1) as i64;
-        let prim = out + blocks * comps * BLOCK * 4;
-        // The index bytes are reserved for whole blocks of primitives, as `nxb_xlate::msl::mesh::memory` does.
+        // All vertex blocks come first, then all primitive blocks, as `nxb_xlate::msl::mesh::memory` lays them out.
+        let v_blocks = (self.max_v.max(1) + BLOCK - 1) / BLOCK;
         let p_blocks = (self.max_p.max(1) + BLOCK - 1) / BLOCK;
+        let comps = v_blocks * self.vertex.len() as i64 + p_blocks * self.primitive.len() as i64;
+        let prim = out + comps.max(1) * BLOCK * 4;
         (
             [0, INPUT, out, prim],
-            prim + align(4 + 3 * p_blocks * BLOCK, 4),
+            prim + align(4 + self.verts * p_blocks * BLOCK, 4),
         )
     }
 
@@ -139,7 +156,12 @@ impl Facts {
             Value::List(
                 l.iter()
                     .map(|(a, c)| {
-                        Value::List(vec![a.map_or(Value::Null, Value::Int), Value::Int(*c)])
+                        let a = match a {
+                            Some(POINT_SIZE) => Value::str("psiz"),
+                            Some(n) => Value::Int(*n),
+                            None => Value::Null,
+                        };
+                        Value::List(vec![a, Value::Int(*c)])
                     })
                     .collect(),
             )
@@ -151,6 +173,7 @@ impl Facts {
         ]);
         if self.kind == "ms" {
             v.set("task", Value::Bool(self.task));
+            v.set("verts", Value::Int(self.verts));
             v.set("max_v", Value::Int(self.max_v));
             v.set("max_p", Value::Int(self.max_p));
             v.set("vertex", comps(&self.vertex));
@@ -219,6 +242,62 @@ mod tests {
         let v = f.to_value(true);
         assert_eq!(v.get("max_v"), Some(&Value::Int(6)));
         assert_eq!(v.get("refused"), Some(&Value::str(REFUSED)));
+    }
+
+    #[test]
+    fn the_vertex_blocks_come_before_the_primitive_blocks() {
+        // 128 vertices of 6 components and 64 primitives of 4: four vertex blocks, then two primitive blocks
+        let mut c = ctl(7, 32, 128);
+        c[0x5e] = 1;
+        c[0x60..0x62].copy_from_slice(&128u16.to_le_bytes());
+        c[0x62..0x64].copy_from_slice(&64u16.to_le_bytes());
+        c[0x64..0x68].copy_from_slice(&0x80u32.to_le_bytes());
+        c[0x68] = 0x80;
+        let mut area = vec![0u8; 0x100];
+        area[0x35] = 0xf0;
+        area[0x36] = 0x03;
+        area[0x80 + 0x37] = 0x0f;
+        let f = info("k", &c, &area).expect("mesh");
+        assert_eq!(f.primitive.len(), 4);
+        let (lay, size) = f.memory();
+        assert_eq!(lay[3], lay[2] + (4 * 6 + 2 * 4) * 0x80);
+        assert_eq!(size, lay[3] + 4 + 3 * 2 * 32);
+    }
+
+    #[test]
+    fn a_point_size_is_the_first_vertex_component() {
+        let mut c = ctl(7, 32, 0);
+        c[0x5e] = 1;
+        c[0x5f] = 1;
+        c[0x60..0x62].copy_from_slice(&32u16.to_le_bytes());
+        c[0x62..0x64].copy_from_slice(&32u16.to_le_bytes());
+        let mut area = vec![0u8; 0x80];
+        area[0x35] = 0xf8;
+        let f = info("k", &c, &area).expect("mesh");
+        assert_eq!(f.vertex[0], (Some(POINT_SIZE), 0));
+        assert_eq!(f.vertex[1], (None, 0));
+        assert_eq!(f.vertex.len(), 5);
+        let (lay, size) = f.memory();
+        assert_eq!(lay[3], lay[2] + 5 * 0x80);
+        assert_eq!(size, lay[3] + 4 + 32);
+        let v = f.to_value(false);
+        assert_eq!(v.get("verts"), Some(&Value::Int(1)));
+        let first = v.get("vertex").and_then(Value::as_list).expect("vertex");
+        assert_eq!(
+            first[0],
+            Value::List(vec![Value::str("psiz"), Value::Int(0)])
+        );
+    }
+
+    #[test]
+    fn a_primitive_has_three_vertices_unless_the_control_section_says_otherwise() {
+        let mut c = ctl(7, 32, 0);
+        c[0x5e] = 1;
+        let mut area = vec![0u8; 0x80];
+        area[0x35] = 0xf0;
+        assert_eq!(info("k", &c, &area).expect("mesh").verts, 3);
+        c[0x5f] = 2;
+        assert_eq!(info("k", &c, &area).expect("mesh").verts, 2);
     }
 
     #[test]

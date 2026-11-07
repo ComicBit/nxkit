@@ -10,15 +10,18 @@
 //! - INPUT is the payload of the task shader. Its word 0 is the number of the mesh workgroup among the launches of the
 //!   task.
 //! - The outputs are the payload of a task shader (word 1 is the number of mesh workgroups to launch, the records start
-//!   at +0x10) or the attributes of a mesh shader. Those are blocks of 32 vertices and 32 primitives with a word per
-//!   vertex or primitive for each component. The vertex components of the SPH come first, then the per-primitive ones.
-//! - The primitive bytes of a mesh shader hold the count at +3 and three index bytes a triangle from +4.
+//!   at +0x10) or the attributes of a mesh shader. The attributes are all the blocks of 32 vertices, then all the blocks
+//!   of 32 primitives. A block has a word per vertex or primitive for each component. A vertex block has the components
+//!   of the SPH (the point size first, then the position and the generic attributes). A primitive block has the
+//!   components of the per-primitive SPH.
+//! - The primitive bytes of a mesh shader hold the count at +3 and the index bytes from +4. A primitive has 1, 2 or 3
+//!   index bytes, as the control section says.
 
 use super::abi::MESH_FIRST_SLOT;
 use super::emit::R;
 use super::entry::Param;
 use super::refl::Reflection;
-use crate::job::{Job, MeshStage};
+use crate::job::{Job, MeshStage, POINT_SIZE};
 use nxb_pyjson::Value;
 use std::fmt::Write;
 
@@ -41,6 +44,11 @@ fn align(v: i64, to: i64) -> i64 {
     (v + to - 1) & !(to - 1)
 }
 
+/// The vertices of a primitive: 1 point, 2 line, 3 triangle.
+fn verts(m: &MeshStage) -> u32 {
+    if m.verts == 0 { 3 } else { m.verts }
+}
+
 /// The offsets of the stage memory (the number of the workgroup, the input, the outputs, the primitive bytes) and its
 /// size in bytes.
 pub fn memory(m: &MeshStage) -> ([i32; 4], i64) {
@@ -52,13 +60,13 @@ pub fn memory(m: &MeshStage) -> ([i32; 4], i64) {
             out + align(payload, 4),
         );
     }
-    let blocks = i64::from(m.max_v.max(m.max_p).max(1).div_ceil(BLOCK));
-    let comps = (m.vertex.len() + m.primitive.len()).max(1) as i64;
-    let prim = out + blocks * comps * i64::from(BLOCK) * 4;
+    let v_blocks = i64::from(m.max_v.max(1).div_ceil(BLOCK));
+    let p_blocks = i64::from(m.max_p.max(1).div_ceil(BLOCK));
+    let comps = (v_blocks * m.vertex.len() as i64 + p_blocks * m.primitive.len() as i64).max(1);
+    let prim = out + comps * i64::from(BLOCK) * 4;
     // The guest writes the index bytes of primitive min(count - 1, lane + 32k) in each primitive block. A count of 0
     // wraps count - 1, so every lane of every block writes. The bytes are reserved for whole blocks of 32 primitives.
-    let p_blocks = i64::from(m.max_p.max(1).div_ceil(BLOCK));
-    let size = prim + align(4 + 3 * p_blocks * i64::from(BLOCK), 4);
+    let size = prim + align(4 + i64::from(verts(m)) * p_blocks * i64::from(BLOCK), 4);
     ([0, INPUT as i32, out as i32, prim as i32], size)
 }
 
@@ -86,6 +94,12 @@ pub fn check(job: &Job, code: &[u8]) -> Result<(), String> {
     }
     if m.threads == 0 || m.threads > 1024 {
         return fail(&format!("{} threads in a workgroup", m.threads));
+    }
+    if m.kind == "ms" && !(1..=3).contains(&verts(m)) {
+        return fail(&format!(
+            "primitive vertex count {} is not 1, 2 or 3",
+            m.verts
+        ));
     }
     let (lay, size) = memory(m);
     if own_shared(code) || size > MAX_SHARED {
@@ -163,6 +177,14 @@ fn vector(idx: &[Option<usize>; 4], mem: &str) -> String {
     format!("float4({})", c.join(", "))
 }
 
+fn topology(verts: u32) -> &'static str {
+    match verts {
+        1 => "point",
+        2 => "line",
+        _ => "triangle",
+    }
+}
+
 /// The wrapper functions around the body: the object function `main0` of a task shader, or the mesh functions `main0`
 /// and `main0_z` (the two depth conventions of a vertex shader) of a mesh shader. `shared` is the number of shared
 /// memories of the body and `words` the words of the stage memory.
@@ -228,12 +250,21 @@ pub fn wrap(m: &MeshStage, params: &[Param], shared: usize, words: i64) -> R<Str
     }
     let vm = members(&m.vertex, 0);
     let comps: Vec<(Option<i32>, i32)> = m.primitive.iter().map(|&(n, c)| (Some(n), c)).collect();
-    let pm = members(&comps, m.vertex.len());
-    let stride = (m.vertex.len() + m.primitive.len()).max(1) as u32 * BLOCK;
+    let pm = members(&comps, 0);
     let (max_v, max_p) = (m.max_v, m.max_p);
+    let nv = verts(m);
+    let v_blocks = max_v.max(1).div_ceil(BLOCK);
+    let v_stride = m.vertex.len().max(1) as u32 * BLOCK;
+    let p_stride = m.primitive.len().max(1) as u32 * BLOCK;
+    // The primitive blocks follow all the vertex blocks.
+    let p_out = out + (v_blocks * m.vertex.len() as u32 * BLOCK) as i32;
+    let has_psiz = vm.iter().any(|(n, _)| *n == Some(POINT_SIZE));
     t.push_str("struct dm_vertex_t {\n    float4 position [[position]];\n");
+    if has_psiz {
+        t.push_str("    float point_size [[point_size]];\n");
+    }
     for (n, _) in &vm {
-        if let Some(n) = n {
+        if let Some(n) = n.filter(|n| *n >= 0) {
             let _ = writeln!(t, "    float4 a{n} [[user(locn{n})]];");
         }
     }
@@ -250,13 +281,26 @@ pub fn wrap(m: &MeshStage, params: &[Param], shared: usize, words: i64) -> R<Str
     let prim_ty = if pm.is_empty() { "void" } else { "dm_prim_t" };
     let _ = writeln!(
         t,
-        "using dm_mesh_t = metal::mesh<dm_vertex_t, {prim_ty}, {max_v}, {max_p}, metal::topology::triangle>;"
+        "using dm_mesh_t = metal::mesh<dm_vertex_t, {prim_ty}, {max_v}, {max_p}, metal::topology::{}>;",
+        topology(nv)
     );
-    let block = format!("{out}u + (n / {BLOCK}u) * {stride}u + n % {BLOCK}u");
+    let v_block = format!("{out}u + (n / {BLOCK}u) * {v_stride}u + n % {BLOCK}u");
+    let p_block = format!("{p_out}u + (n / {BLOCK}u) * {p_stride}u + n % {BLOCK}u");
     let mut sets = String::new();
     for (n, idx) in &vm {
-        let member = n.map_or("position".to_string(), |n| format!("a{n}"));
-        let _ = writeln!(sets, "        v.{member} = {};", vector(idx, "dm_mem"));
+        match n {
+            Some(POINT_SIZE) => {
+                let w = idx[0].unwrap_or(0) as u32 * BLOCK;
+                let _ = writeln!(
+                    sets,
+                    "        v.point_size = as_type<float>(dm_mem[b + {w}u]);"
+                );
+            }
+            _ => {
+                let member = n.map_or("position".to_string(), |n| format!("a{n}"));
+                let _ = writeln!(sets, "        v.{member} = {};", vector(idx, "dm_mem"));
+            }
+        }
     }
     let mut psets = String::new();
     for (n, idx) in &pm {
@@ -282,7 +326,7 @@ pub fn wrap(m: &MeshStage, params: &[Param], shared: usize, words: i64) -> R<Str
             "\n[[mesh]] void {name}({sig}, dm_mesh_t dm_out, {input})\n{{\n{start}{fill}{sync}    {call}\n{sync}\
              \x20   uint np = min(dm_mem[{}] >> 24, {max_p}u);\n\
              \x20   if ({lid} == 0u) dm_out.set_primitive_count(np);\n\
-             \x20   for (uint n = {lid}; n < {max_v}u; n += {thr}u)\n    {{\n        uint b = {block};\n        dm_vertex_t v;\n{sets}",
+             \x20   for (uint n = {lid}; n < {max_v}u; n += {thr}u)\n    {{\n        uint b = {v_block};\n        dm_vertex_t v;\n{sets}",
             prim >> 2
         );
         if gl {
@@ -292,12 +336,12 @@ pub fn wrap(m: &MeshStage, params: &[Param], shared: usize, words: i64) -> R<Str
         if !pm.is_empty() {
             let _ = write!(
                 t,
-                "    for (uint n = {lid}; n < np; n += {thr}u)\n    {{\n        uint b = {block};\n        dm_prim_t p;\n{psets}        dm_out.set_primitive(n, p);\n    }}\n"
+                "    for (uint n = {lid}; n < np; n += {thr}u)\n    {{\n        uint b = {p_block};\n        dm_prim_t p;\n{psets}        dm_out.set_primitive(n, p);\n    }}\n"
             );
         }
         let _ = write!(
             t,
-            "    for (uint n = {lid}; n < np * 3u; n += {thr}u)\n    {{\n        uint at = {}u + n;\n        dm_out.set_index(n, (dm_mem[at >> 2] >> ((at & 3u) * 8u)) & 0xffu);\n    }}\n}}\n",
+            "    for (uint n = {lid}; n < np * {nv}u; n += {thr}u)\n    {{\n        uint at = {}u + n;\n        dm_out.set_index(n, (dm_mem[at >> 2] >> ((at & 3u) * 8u)) & 0xffu);\n    }}\n}}\n",
             prim + 4
         );
     }

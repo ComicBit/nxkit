@@ -3,7 +3,7 @@
 
 use super::mesh::{memory, own_shared};
 use super::{Context, Failure, Translated, translate};
-use crate::job::{MeshStage, parse_jobs};
+use crate::job::{MeshStage, POINT_SIZE, parse_jobs};
 use crate::translation::emit_test_util::{AEXIT, APT};
 use nxb_pyjson::Value;
 
@@ -13,6 +13,7 @@ fn mesh(kind: &str) -> MeshStage {
         threads: 32,
         payload: 0x20,
         task: true,
+        verts: 3,
         max_v: 3,
         max_p: 1,
         vertex: vec![
@@ -32,17 +33,25 @@ fn mesh_json(m: &MeshStage) -> String {
     let comps = |l: Vec<(Option<i32>, i32)>| {
         let e: Vec<String> = l
             .iter()
-            .map(|(n, c)| format!("[{}, {c}]", n.map_or("null".to_string(), |n| n.to_string())))
+            .map(|(n, c)| {
+                let n = match n {
+                    Some(POINT_SIZE) => "\"psiz\"".to_string(),
+                    Some(n) => n.to_string(),
+                    None => "null".to_string(),
+                };
+                format!("[{n}, {c}]")
+            })
             .collect();
         format!("[{}]", e.join(", "))
     };
     let prim = comps(m.primitive.iter().map(|&(n, c)| (Some(n), c)).collect());
     format!(
-        r#"{{"kind": "{}", "threads": {}, "payload": {}, "task": {}, "max_v": {}, "max_p": {}, "vertex": {}, "primitive": {}, "refused": {}}}"#,
+        r#"{{"kind": "{}", "threads": {}, "payload": {}, "task": {}, "verts": {}, "max_v": {}, "max_p": {}, "vertex": {}, "primitive": {}, "refused": {}}}"#,
         m.kind,
         m.threads,
         m.payload,
         m.task,
+        m.verts,
         m.max_v,
         m.max_p,
         comps(m.vertex.clone()),
@@ -123,7 +132,8 @@ fn the_stage_memory_follows_the_layout_of_the_engine() {
         ..mesh("ms")
     };
     assert_eq!(memory(&wide).0[2], 16);
-    assert_eq!(memory(&wide).0[3], 16 + 2 * 7 * 128);
+    // two vertex blocks of 6 components, then one primitive block of 1
+    assert_eq!(memory(&wide).0[3], 16 + (2 * 6 + 1) * 128);
 }
 
 #[test]
@@ -194,9 +204,110 @@ fn a_mesh_shader_is_a_body_and_two_mesh_functions() {
         "{msl}"
     );
     assert!(
-        msl.contains("p.p2 = float4(as_type<float>(dm_mem[b + 192u]), 0.0, 0.0, 1.0);"),
+        msl.contains("p.p2 = float4(as_type<float>(dm_mem[b + 0u]), 0.0, 0.0, 1.0);"),
         "{msl}"
     );
+}
+
+#[test]
+fn every_vertex_block_comes_before_the_primitive_blocks() {
+    // 128 vertices of 6 components and 64 primitives of 1: four vertex blocks of 192 words, then primitive blocks of 32
+    let m = MeshStage {
+        payload: 0x20,
+        max_v: 128,
+        max_p: 64,
+        ..mesh("ms")
+    };
+    let msl = run(&m, &ms_ops()).expect("translate").libraries[0]
+        .msl
+        .clone();
+    let out = memory(&m).0[2] / 4;
+    assert!(
+        msl.contains(&format!("uint b = {out}u + (n / 32u) * 192u + n % 32u;")),
+        "{msl}"
+    );
+    let p_out = out + 4 * 6 * 32;
+    assert!(
+        msl.contains(&format!("uint b = {p_out}u + (n / 32u) * 32u + n % 32u;")),
+        "{msl}"
+    );
+    assert_eq!(memory(&m).0[3], 4 * (out + (4 * 6 + 2) * 32));
+}
+
+fn point_mesh() -> MeshStage {
+    MeshStage {
+        verts: 1,
+        max_v: 32,
+        max_p: 32,
+        vertex: vec![
+            (Some(POINT_SIZE), 0),
+            (None, 0),
+            (None, 1),
+            (None, 2),
+            (None, 3),
+        ],
+        primitive: Vec::new(),
+        ..mesh("ms")
+    }
+}
+
+#[test]
+fn a_point_mesh_has_its_point_size_ahead_of_the_position() {
+    let m = point_mesh();
+    let (lay, size) = memory(&m);
+    assert_eq!(lay[3], lay[2] + 5 * 128);
+    assert_eq!(size, i64::from(lay[3]) + 4 + 32);
+    let msl = run(&m, &ms_ops()).expect("translate").libraries[0]
+        .msl
+        .clone();
+    assert!(msl.contains("float point_size [[point_size]];"), "{msl}");
+    assert!(
+        msl.contains("metal::mesh<dm_vertex_t, void, 32, 32, metal::topology::point>"),
+        "{msl}"
+    );
+    assert!(
+        msl.contains("v.point_size = as_type<float>(dm_mem[b + 0u]);"),
+        "{msl}"
+    );
+    assert!(
+        msl.contains("v.position = float4(as_type<float>(dm_mem[b + 32u]), as_type<float>(dm_mem[b + 64u]), as_type<float>(dm_mem[b + 96u]), as_type<float>(dm_mem[b + 128u]));"),
+        "{msl}"
+    );
+    assert!(msl.contains("n < np * 1u;"), "{msl}");
+    assert!(!msl.contains("[[user(locnn"), "{msl}");
+}
+
+#[test]
+fn a_line_mesh_draws_lines_and_another_vertex_count_is_refused() {
+    let line = MeshStage {
+        verts: 2,
+        ..mesh("ms")
+    };
+    let msl = run(&line, &ms_ops()).expect("translate").libraries[0]
+        .msl
+        .clone();
+    assert!(msl.contains("metal::topology::line>"), "{msl}");
+    assert!(msl.contains("n < np * 2u;"), "{msl}");
+    let bad = MeshStage {
+        verts: 4,
+        ..mesh("ms")
+    };
+    let e = run(&bad, &ms_ops()).expect_err("vertex count");
+    assert_eq!(e.reason, "mesh stage failed");
+    assert!(e.detail.contains("not 1, 2 or 3"), "{}", e.detail);
+}
+
+#[test]
+fn a_mesh_job_with_no_vertex_count_has_triangles() {
+    let m = MeshStage {
+        verts: 0,
+        ..mesh("ms")
+    };
+    assert_eq!(memory(&m), memory(&mesh("ms")));
+    let msl = run(&m, &ms_ops()).expect("translate").libraries[0]
+        .msl
+        .clone();
+    assert!(msl.contains("metal::topology::triangle>"), "{msl}");
 }
 
 #[test]
@@ -396,6 +507,7 @@ fn metal_compiles_the_task_and_mesh_functions() {
         ("ts", mesh("ts"), ts_ops()),
         ("ms", mesh("ms"), ms_ops()),
         ("msn", no_task, ms_ops()),
+        ("msp", point_mesh(), ms_ops()),
     ];
     for (name, m, ops) in cases {
         let l = &run(&m, &ops).expect("translate").libraries[0];
