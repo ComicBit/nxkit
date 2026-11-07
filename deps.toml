@@ -1,4 +1,4 @@
-# External dependencies of the nxbuild workspace (CONTRIBUTING.md "Dependencies").
+# External dependencies of the nxkit workspace (CONTRIBUTING.md "Dependencies").
 # One table per crate: reason, licence, version, unsafe count, owner, which workspace crates may use it.
 # A new entry is its own commit. Today the workspace uses std only.
 #

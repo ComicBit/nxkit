@@ -4,6 +4,10 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ## Unreleased
 
+### Changed
+
+- The repository is now `v0lumehi/nxkit`. GitHub redirects the old `v0lumehi/nxbuild` URLs, including release downloads. The binary `nxb`, the crate names and the release file names stay the same.
+
 ### Added
 
 - The title layer in `titles/`: the API `nxtitle` (families, title modules, hooks, evidence, the catalog), the registry `nxtitles` with one cargo feature per module, the family `nxfamily-agl` and the title module `nxgame-oot` for `0400486024DEC000`. Refer to `docs/titles.md`.

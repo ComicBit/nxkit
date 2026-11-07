@@ -1,4 +1,4 @@
-//! Shared ids and digests for the nxbuild workspace (layer L0, in the chain version V).
+//! Shared ids and digests for the nxkit workspace (layer L0, in the chain version V).
 //!
 //! - [`Digest`], [`Sha256`], [`sha256`]: SHA-256, own implementation, std only.
 //! - [`Sha1`], [`DualHasher`], [`DualDigest`]: SHA-1 for `CodeResources`, and both digests in one pass.
