@@ -4,14 +4,19 @@ use super::operand::*;
 use crate::ir::Opd;
 use crate::maxwell::ampere::AmpOp;
 
-/// `AHalfLanes`: a half-pair operand's two lanes after its swizzle, abs / neg applied.
+/// `AHalfLanes`: a half-pair operand's two lanes after its swizzle, abs / neg applied. The swizzle is 0 as is, 1 `.F32`
+/// (the 32-bit float itself in both lanes), 2 low twice and 3 high twice. A constant has its swizzle too. Only an
+/// immediate has none, because those bits are its own.
 pub(super) fn half_lanes(ctx: &mut Ctx, s: &ASrc, swizzle: i32) -> Result<[Opd; 2], String> {
     let v = get(ctx, s)?;
     let (lo, hi);
-    if s.kind == AKind::Imm || s.kind == AKind::Cbuf || swizzle == 0 {
+    if s.kind == AKind::Imm || swizzle == 0 {
         lo = ctx.unpack_half2x16_low(v);
         hi = ctx.unpack_half2x16_high(v);
-    } else if swizzle == 1 || swizzle == 3 {
+    } else if swizzle == 1 {
+        lo = v;
+        hi = v;
+    } else if swizzle == 3 {
         let h = ctx.unpack_half2x16_high(v);
         lo = h;
         hi = h;

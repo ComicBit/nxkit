@@ -1,4 +1,4 @@
-//! Ampere ALU results the translator folds, stored to shared memory so they are kept (upstream `b97f0dc6`, encodings
+//! Ampere ALU results stored to shared memory so they are kept (upstream `b97f0dc6` and later, encodings
 //! checked there with nvdisasm 13.5 for sm_86).
 #![cfg(test)]
 
@@ -81,4 +81,88 @@ fn lea_x_not_b() {
     // LEA.X R6, RZ, ~RZ, 0x0, PT: 0 + 0xffffffff + 1
     let lea = (0x8000_00ff_ff06_7211, 0x000f_c200_038e_04ff);
     assert_eq!(stored(&[lea]), "0u");
+}
+
+/// `S2R Rr, SR_TID.X`: a register the translator cannot fold.
+fn s2r(r: u64) -> (u64, u64) {
+    (0x0000_0000_0000_7919 | r << 16, 0x000e_2600_0000_2100)
+}
+
+/// The MSL of `ops` after `S2R` of R9 and of each register in `srcs`, with R6 stored.
+fn kept_srcs(ops: &[(u64, u64)], srcs: &[u64]) -> String {
+    let mut all: Vec<_> = [9].iter().chain(srcs).map(|&r| s2r(r)).collect();
+    all.extend_from_slice(ops);
+    kept(&all)
+}
+
+/// The lanes that the unpacks of half pairs read, `0` or `1`.
+fn lanes(m: &str) -> Vec<char> {
+    let mut out: Vec<char> = m
+        .match_indices("as_type<half2>(")
+        .filter_map(|(at, _)| {
+            let tail = &m[at..];
+            let end = tail.find(")[")?;
+            tail[end + 2..].chars().next()
+        })
+        .collect();
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
+/// `HMUL2 R6, R19.H0_H0, c[0x0][0x168].H0_H0`.
+const HMUL2_C_H0: (u64, u64) = (0x2000_5a00_1306_7a32, 0x000f_e200_0000_0800);
+/// `HMUL2 R6, R19.H1_H1, c[0x0][0x168].H1_H1`.
+const HMUL2_C_H1: (u64, u64) = (0x3000_5a00_1306_7a32, 0x000f_e200_0000_0c00);
+/// `HMUL2 R6, R19.H0_H0, R20.F32`.
+const HMUL2_F32: (u64, u64) = (0x1000_0014_1306_7232, 0x000f_e200_0000_0800);
+
+#[test]
+fn half_constant_low_half_in_both_lanes() {
+    let m = kept_srcs(&[HMUL2_C_H0], &[19]);
+    assert_eq!(lanes(&m), ['0'], "{m}");
+}
+
+#[test]
+fn half_constant_high_half_in_both_lanes() {
+    let m = kept_srcs(&[HMUL2_C_H1], &[19]);
+    assert_eq!(lanes(&m), ['1'], "{m}");
+}
+
+#[test]
+fn half_f32_operand_is_the_float() {
+    let m = kept_srcs(&[HMUL2_F32], &[19, 20]);
+    // A's unpack alone: R20 is used as a float, not split into halves
+    assert_eq!(m.matches("as_type<half2>(").count(), 1, "{m}");
+    assert_eq!(lanes(&m), ['0'], "{m}");
+}
+
+/// `HSETP2.GT.FTZ.AND P0, PT, R19, R20, PT`.
+const HSETP2_FTZ: (u64, u64) = (0x0000_0014_1300_7234, 0x000f_ca00_03f1_4000);
+/// `HSETP2.GT.AND P0, PT, R19, R20, PT`.
+const HSETP2: (u64, u64) = (0x0000_0014_1300_7234, 0x000f_ca00_03f0_4000);
+/// `HSET2.BF.GT.FTZ.AND R6, R19, R20, PT`.
+const HSET2_FTZ: (u64, u64) = (0x0000_0014_1306_7233, 0x000f_e200_0381_4080);
+/// `FSEL R6, R19, R20, P0`: reads P0.
+const FSEL_P0: (u64, u64) = (0x0000_0014_1306_7208, 0x000f_e400_0000_0000);
+/// The half's own subnormal bound, 2^-14.
+const BOUND: &str = "6.1035156e-5f";
+
+#[test]
+fn hsetp2_ftz_flushes_both_operands() {
+    // Only P0 (the low lanes) is read. The high lanes' comparison goes to PT and is dropped with its flushes.
+    let m = kept_srcs(&[HSETP2_FTZ, FSEL_P0], &[19, 20]);
+    assert_eq!(m.matches(BOUND).count(), 2, "{m}");
+}
+
+#[test]
+fn hset2_ftz_flushes_both_lanes_of_both_operands() {
+    let m = kept_srcs(&[HSET2_FTZ], &[19, 20]);
+    assert_eq!(m.matches(BOUND).count(), 4, "{m}");
+}
+
+#[test]
+fn hsetp2_without_ftz_compares_as_is() {
+    let m = kept_srcs(&[HSETP2, FSEL_P0], &[19, 20]);
+    assert!(!m.contains(BOUND), "{m}");
 }

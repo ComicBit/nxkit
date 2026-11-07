@@ -8,6 +8,7 @@ use crate::ir::Opd;
 use crate::ir::emitter::FP32;
 use crate::ir::inst::{Inst as I, StorageKind};
 use crate::ir::ops::TRUE;
+use crate::maxwell::ampere::AmpOp;
 use crate::maxwell::enums::*;
 
 fn c(ctx: &mut Ctx, v: i32) -> Opd {
@@ -130,9 +131,30 @@ pub(super) fn match_(ctx: &mut Ctx) -> R {
     Ok(())
 }
 
+/// `.FTZ` (bit 80) of HSETP2 and HSET2: a subnormal half compares as zero. The lanes are unpacked to 32-bit floats, where
+/// a half's subnormals are normal, so the bound is the half's own 2^-14.
+fn half_ftz(ctx: &mut Ctx, x: &AmpOp, (a, b): ([Opd; 2], [Opd; 2])) -> ([Opd; 2], [Opd; 2]) {
+    if !x.bit(80) {
+        return (a, b);
+    }
+    let mut flush = |v: [Opd; 2]| {
+        v.map(|l| {
+            let m = ctx.fp_absolute(l);
+            let k = ctx.ir.const_f(6.103_515_6e-5);
+            let small = ctx.fp_compare_less(m, k);
+            let z = ctx.ir.const_f(0.0);
+            ctx.conditional_select(small, z, l)
+        })
+    };
+    let a = flush(a);
+    let b = flush(b);
+    (a, b)
+}
+
 pub(super) fn hsetp2(ctx: &mut Ctx) -> R {
     let x = x(ctx);
-    let (a, b) = half_second(ctx, &x)?;
+    let ab = half_second(ctx, &x)?;
+    let (a, b) = half_ftz(ctx, &x, ab);
     let f = FComp(x.bits(76, 80));
     let mut lo = get_fp_comparison(ctx, f, a[0], b[0], FP32)?;
     let mut hi = get_fp_comparison(ctx, f, a[1], b[1], FP32)?;
@@ -151,7 +173,8 @@ pub(super) fn hsetp2(ctx: &mut Ctx) -> R {
 
 pub(super) fn hset2(ctx: &mut Ctx) -> R {
     let x = x(ctx);
-    let (a, b) = half_second(ctx, &x)?;
+    let ab = half_second(ctx, &x)?;
+    let (a, b) = half_ftz(ctx, &x, ab);
     let p = pred(ctx, &x, 87, 90, false);
     let bop = BoolOp(x.bits(69, 71));
     let mut res = c(ctx, 0);
