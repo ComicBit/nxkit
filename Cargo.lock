@@ -638,6 +638,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "nxfamily-agl"
+version = "0.8.0"
+dependencies = [
+ "nxtitle",
+]
+
+[[package]]
+name = "nxgame-oot"
+version = "0.8.0"
+dependencies = [
+ "nxb-profile",
+ "nxtitle",
+]
+
+[[package]]
+name = "nxtitle"
+version = "0.8.0"
+dependencies = [
+ "nxb-model",
+]
+
+[[package]]
+name = "nxtitles"
+version = "0.8.0"
+dependencies = [
+ "nxfamily-agl",
+ "nxgame-oot",
+ "nxtitle",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"

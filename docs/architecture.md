@@ -5,7 +5,7 @@ For the decisions behind this structure, refer to [decisions.md](decisions.md).
 
 ## Workspace
 
-- The repository is one Cargo workspace. All crates are in `crates/`. The developer tools are in `xtask/`.
+- The repository is one Cargo workspace. The crates of the build are in `crates/`. The families and title modules are in `titles/` (refer to [titles.md](titles.md)). The developer tools are in `xtask/`.
 - Each crate has the name `nxb-<concern>`. The front-end crates of layer F keep their names (`msl-*`, `air-*`, `airc`, `mslcheck`).
 - `nxb-cli` makes the one program, `nxb`. Each stage is a command of `nxb`: `build`, `extract`, `split`, `rewrite`, `profile`, `rewrite-rules`, `nro`, `shaders`, `app`, `ipa`, `sign`, `pso`, `archive`, `ios` and `airc`. The other commands are `cache`, `prune`, `regressions`, `self-check` and `version`. The stage crates are libraries, and `nxb-cli` calls them. The stages have no other program and no dispatch by the program name. The front-end crates `airc` and `mslcheck` also build their own programs.
 - The workspace uses the standard library only. At this time, it has no external crates.
@@ -20,11 +20,14 @@ A crate can use only crates of a lower layer, plus the sideways edges in the tab
 flowchart TD
   L3["L3 connection code: nxb-stages, nxb-cli, nxb-extract, nxb-pack, nxb-archive, nxb-build"]
   L2["L2 runtime, not in V: nxb-obs, nxb-tool, nxb-store, nxb-sched, nxb-io, nxb-nro, nxb-profile"]
-  L1["L1 domain, no I/O: nxb-pyjson, nxb-shader, nxb-air, nxb-xlate, nxb-crypto, nxb-codec, nxb-a64, nxb-plist, nxb-hos, nxb-romfs, nxb-rewrite, nxb-split, nxb-bundle, nxb-zip, nxb-pso"]
+  L1["L1 domain, no I/O: nxb-pyjson, nxb-shader, nxb-air, nxb-xlate, nxb-crypto, nxb-codec, nxb-a64, nxb-plist, nxb-hos, nxb-romfs, nxb-rewrite, nxb-split, nxb-bundle, nxb-zip, nxb-pso, nxtitle, nxtitles"]
   L0["L0 foundation: nxb-model, nxb-error, nxb-maxwell, nxb-sys (the only unsafe code)"]
+  LT["T families and titles: nxfamily-agl, nxgame-oot (only nxtitles uses them)"]
   LF["F front end, standard library only: msl-lex, msl-parse, msl-sema, air-emit, air-bc, air-lib, air-front, airc, mslcheck"]
   L3 --> L2 --> L0
   L3 --> L1 --> L0
+  LT -->|nxtitle only| L1
+  LT --> L0
   L2 -.->|only nxb-tool uses air-front, optional feature| LF
 ```
 
@@ -38,6 +41,7 @@ The rules:
 6. L3 connects the stages. One stage module has a maximum of 400 lines.
 7. The development crates (`nxb-testkit`, `xtask`) are dev-dependencies only.
 8. Layer F uses no `nxb-*` crate. Only `nxb-tool` can use `air-front`, and only `nxb-cli` can use `airc`. Both are behind the cargo feature `air-front`.
+9. Layer T holds the families and title modules. A `T` crate uses only `nxtitle` and L0. Only `nxtitles` uses a `T` crate.
 
 ### Sideways edges
 
@@ -60,6 +64,7 @@ The rules:
 | nxb-cli | nxb-build | the `nxb build` orchestrator (W19) |
 | nxb-cli | nxb-stages | the shader step of `nxb shaders build` |
 | nxb-build | nxb-stages | the shader step in the build graph (W19) |
+| nxtitles | nxtitle | the registry builds the catalog of the title API |
 
 ## Crates
 
@@ -94,6 +99,10 @@ The rules:
 | nxb-pack | L3 | no | impl | the Mac app stage, the ad-hoc signer, the IPA writer |
 | nxb-archive | L3 | no | impl | the pipeline archive: plan, batches, merge |
 | nxb-build | L3 | no | impl | the orchestrator `nxb build`, the rewrite step, the host stages and the iOS stages |
+| nxtitle | L1 | no | impl | the title API: `Family`, `Title`, the hooks, `Fact` and `Evidence`, the `Catalog` that composes them. Refer to [titles.md](titles.md) |
+| nxtitles | L1 | no | impl | the registry: one cargo feature per family and title module |
+| nxfamily-agl | T | no | impl | the family of Nintendo EPD games on sead, agl and gsys |
+| nxgame-oot | T | no | impl | The Legend of Zelda: Ocarina of Time for Nintendo Switch 2 (`0400486024DEC000`) |
 | nxb-testkit, nxb-xlatedev, xtask | dev | no | impl | seeded generators, the corpus tool of the Rust translator (`xlate-corpus`), the layer and size checks |
 | msl-lex, msl-parse, msl-sema, air-emit, air-bc, air-lib, air-front, airc, mslcheck | F | no | impl | the own front end. Refer to [frontend.md](frontend.md). |
 
