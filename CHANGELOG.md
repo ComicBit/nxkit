@@ -4,6 +4,12 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ## Unreleased
 
+### Added
+
+- `tools/hmma-precision/run.sh` shows how the GPU of the Mac sums a half `simdgroup_matrix` product.
+- The `nxb-xlatedev` tool `xlate-msl` writes the MSL of a list of shader keys.
+- `docs/analysis/oot-open-issues.md` gives the cause of three defects of one title on Apple GPUs (upstream issues 1547, 1568 and 1326). The cause of 1326 is in the upstream runtime.
+
 ### Fixed
 
 - A byte or half-word store to shared memory is one Metal store, not a compare-and-swap loop on its word (upstream `ffebfd59`). A task or mesh shader's primitive index bytes no longer retry.
@@ -21,6 +27,9 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 - The rewriter keeps the branches of an exclusive window in its copy (upstream `10fd9705`). A conditional branch to the store of its own window is no longer taken for a retry block, and a `b` in a window is relocated to the copy or to an exit stub.
   A window with a `b` may not leave with a live reservation. A direct branch from another function into the middle of such a window is refused, and so is a retry copy that branches into the middle of its window.
   Before, the first case stopped with "retry block overlaps a window" and the second case was copied without relocation.
+- The `simdgroup_matrix` body of `HMMA.16816.F16` sums in FP32 and rounds D to half once, as Ampere does. Before, it summed in half. On an M2 Max a half product rounds after each step and gives infinity when a partial sum is larger than 65504.
+  A GPU test on the M2 Max with random matrices gave the exact half result for 31 % of the values with the old body and for more than 99.9 % with the new body. The cost is about 1 %.
+  This is the likely cause of the coloured speckles of upstream issue 1568 on M1 and M2. No game was run.
 - `TRANSLATOR_ID` is `msl-2.16`.
 
 ## 0.8.0
