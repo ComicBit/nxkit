@@ -15,7 +15,8 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 - HMMA chains of compute shaders keep the accumulator and A in the SIMD-group between calls (upstream `bd9f422d`).
   A that an `LDSM` read is loaded from shared memory where the `LDSM` read it. Upstream measured the Ocarina of Time movie network at 11.4 ms instead of 14.8 ms.
 - An HMMA call outside every chain no longer overwrites the accumulator that a chain holds in slot 0 (upstream `13b432b4`, issue 1537). Upstream saw dotted rows in Ocarina of Time from it.
-- `TRANSLATOR_ID` is `msl-2.8`.
+- An `LDSM` sits between two SIMD-group barriers (upstream `16776913`). Without them, an `LDSM` could read rows before other lanes stored them. Upstream saw dotted streaks in the Ocarina of Time movie networks and white blotches through the game's upscaler.
+- `TRANSLATOR_ID` is `msl-2.9`.
 
 ## 0.6.7
 
