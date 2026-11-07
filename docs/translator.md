@@ -138,7 +138,7 @@ Each function that calls the helper declares `dm_acc[16]` and `dm_am[4]` and pas
 
 The step stores each translation in the store. The key `nxb.xlate.v2` has the translator identity, the job, the code, the chain version V, the source, the paired shader,
 the answer-table flag, the dual-source and fetch-outputs-only flags and the varyings of the partners.
-The translator identity is a hash of the label `nxb-xlate msl`, V, `nxb_xlate::msl::TRANSLATOR_ID` (now `msl-2.14`) and `NXB_TEST_XLATE_SALT`.
+The translator identity is a hash of the label `nxb-xlate msl`, V, `nxb_xlate::msl::TRANSLATOR_ID` (now `msl-2.15`) and `NXB_TEST_XLATE_SALT`.
 V is a hash of the engine files that `dm/gfx/tools/dmsh_chain.py` lists in `FILES`, and the options string `debug=True reduced=True`. No Rust source goes into V.
 A change of the translator translates again only when someone increases `TRANSLATOR_ID` by hand. Without the increase, the store gives the old MSL. A failure is not stored.
 
@@ -157,6 +157,11 @@ The own front end and the Apple tools compile the MSL as before.
 A geometry shader runs as a compute kernel. One job of stage `gs` gives the libraries `_b` (a copy of `_bg0`), `_bg0` to `_bg4` and `_bgv`. Each has its own `.json`.
 The kernels `_bg0` to `_bg4` are one per input topology. They write the output vertices and the index buffer. The library `_bgv` draws that output.
 The `.json` of a kernel has the member `geometry` (`vertices`, `invocations`, `output`, `index_stride`, `stride` in words). The `.json` of `_bgv` has `geometry_reader`, `geometry_output` and `entry_z`.
+A passthrough geometry shader also gets the lean kernels `_bl0`, `_bl1` and `_bl3`, one for each input topology without adjacency. The engine uses a lean kernel when it has one and the full kernel `_bg<t>` when not.
+A lean kernel writes only the viewport mask, one word per output vertex, and the index buffer. The host then draws the vertices with the game's vertex shader.
+It reads only the capture words that it uses. These words are a record of their own, in the order of `capture_reads`.
+Its `.json` is the `.json` of `_bg<t>` with the key `<key>_bl<t>`. In `geometry`, `stride` is 1, `lean` is true and `capture_reads` lists the capture words. `drv_reads` keeps only the driver constants that the lean kernel reads.
+The lean kernel is a transform of the MSL of `_bg<t>`. The output stores and the capture reads must use literal offsets. If they do not, the shader gets no `_bl<t>` and `notes` of `_bg<t>` gives the reason (`lean geometry: ...`). For `_bl0` the note is also in `_b`.
 A geometry job with `tf` gives `_bgv` the entry `main0_tf` like a vertex job, with `entry_tf` and `tf_strides` in its `.json`. The capture takes its vertex from `dm_tf.order[record]`, so the records follow the order of the kernel output.
 
 A task or mesh shader is a job of stage `cs` with the member `mesh_stage`. The code has no SPH. The job carries `stage_memory`, `shared` and `local` as the engine lays them out,
@@ -165,7 +170,6 @@ The `.json` has `stage` `ts` or `ms`, `msl_entry_kind` null and `mesh_stage` (`k
 The translator fails with `mesh stage failed` when the shader uses shared memory of its own or the sizes do not fit Metal.
 
 Tessellation and vertex as compute are not ported. Each gives `Failure` with the reason `not ported` and a detail that names the stage.
-The lean geometry kernels `_bl0`, `_bl1` and `_bl3` are not emitted.
 
 ## Open points
 
