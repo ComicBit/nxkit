@@ -2,6 +2,13 @@
 
 All notable changes are in this file. The format follows Keep a Changelog. Versions follow Semantic Versioning.
 
+## Unreleased
+
+### Added
+
+- The title layer in `titles/`: the API `nxtitle` (families, title modules, hooks, evidence, the catalog), the registry `nxtitles` with one cargo feature per module, the family `nxfamily-agl` and the title module `nxgame-oot` for `0400486024DEC000`. Refer to `docs/titles.md`.
+- `xtask layers` checks layer `T`: a family or title crate uses only `nxtitle` and L0, and only `nxtitles` uses a family or title crate.
+
 ## 0.8.0
 
 ### Added

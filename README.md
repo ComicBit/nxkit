@@ -258,7 +258,7 @@ The tools read no fixed private path. Inputs come from arguments or from these v
 ## Architecture
 
 The workspace has four layers and one separate layer for the own front end. Dependencies point down only.
-The command `cargo run -p xtask -- layers` enforces this.
+The command `cargo run -p xtask -- layers` enforces this. The engine families and title modules are layer T in `titles/`. Refer to [docs/titles.md](docs/titles.md).
 
 ```mermaid
 flowchart TD

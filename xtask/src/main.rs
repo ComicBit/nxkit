@@ -5,6 +5,8 @@
 //!   the chain version V depends only on crates in V.
 //!   The front-end crates (`msl-*`, `air-*`, `airc`, `mslcheck`) are layer `F` (ADR W20): they depend only on each other and
 //!   on no `nxb-*` crate, and only the entry points `air-front` and `airc` may be used from outside, by `L2` or `L3` crates.
+//!   The title crates are layer `T`: a family or title crate depends only on `nxtitle` and `L0`, and only the registry
+//!   `nxtitles` depends on a `T` crate.
 //! - `limits`: source files at most 600 lines, stage modules of `nxb-stages` at most 400.
 //!
 //! Usage: `cargo run -p xtask -- [layers] [limits]` (both when no argument is given). Std only, the TOML reading is a
@@ -17,6 +19,7 @@ use std::process::ExitCode;
 
 /// Allowed edges between crates of the same layer.
 const SIDEWAYS: &[(&str, &str)] = &[
+    ("nxtitles", "nxtitle"),
     ("nxb-error", "nxb-model"),
     ("nxb-model", "nxb-sys"),
     ("nxb-air", "nxb-shader"),
@@ -53,6 +56,15 @@ const V_EXEMPT: &[(&str, &str)] = &[("nxb-model", "nxb-sys")];
 
 /// The front-end crates that `nxb-*` crates may depend on (ADR W20): the in-process front end and the command line.
 const FRONT_ENTRIES: &[&str] = &["air-front", "airc"];
+
+/// The folders that hold crates, one crate per subfolder.
+const CRATE_DIRS: &[&str] = &["crates", "titles", "titles/families", "titles/games"];
+
+/// The title API, the one crate a `T` crate may use besides `L0`.
+const TITLE_API: &str = "nxtitle";
+
+/// The registry, the one crate that may use a `T` crate.
+const TITLE_REGISTRY: &str = "nxtitles";
 
 const FILE_LIMIT: usize = 600;
 const STAGE_MODULE_LIMIT: usize = 400;
@@ -103,6 +115,7 @@ fn rank(layer: &str) -> Option<u8> {
         "L1" => Some(1),
         "L2" => Some(2),
         "L3" => Some(3),
+        "T" => Some(1),
         "F" => Some(8),
         "dev" => Some(9),
         _ => None,
@@ -110,13 +123,16 @@ fn rank(layer: &str) -> Option<u8> {
 }
 
 fn crates(root: &Path) -> Result<Vec<Krate>, String> {
-    let dir = root.join("crates");
-    let mut manifests: Vec<PathBuf> = fs::read_dir(&dir)
-        .map_err(|e| format!("{}: {e}", dir.display()))?
-        .flatten()
-        .map(|e| e.path().join("Cargo.toml"))
-        .filter(|p| p.exists())
-        .collect();
+    let mut manifests: Vec<PathBuf> = Vec::new();
+    for sub in CRATE_DIRS {
+        let dir = root.join(sub);
+        let rd = fs::read_dir(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        manifests.extend(
+            rd.flatten()
+                .map(|e| e.path().join("Cargo.toml"))
+                .filter(|p| p.exists()),
+        );
+    }
     manifests.push(root.join("xtask/Cargo.toml"));
     manifests.sort();
     manifests.iter().map(|p| parse_manifest(p)).collect()
@@ -145,6 +161,21 @@ fn check_layers(all: &[Krate]) -> Vec<String> {
                 errs.push(format!("{} -> {d}: unknown workspace crate", k.name));
                 continue;
             };
+            if k.layer == "T" || dk.layer == "T" {
+                // A family or title uses only the title API and L0. Only the registry uses a family or title.
+                let ok = if dk.layer == "T" {
+                    k.name == TITLE_REGISTRY
+                } else {
+                    d == TITLE_API || dk.layer == "L0"
+                };
+                if !ok {
+                    errs.push(format!(
+                        "{} ({}) -> {d} ({}): title layer rule",
+                        k.name, k.layer, dk.layer
+                    ));
+                }
+                continue;
+            }
             if k.layer == "F" || dk.layer == "F" {
                 // ADR W20: F depends only on F. Outside crates may use only the entry points, from L2 or L3.
                 let ok = if k.layer == "F" {
@@ -313,6 +344,27 @@ mod tests {
             k("nxb-tool", "L2", false, &["air-emit"]),
         ];
         assert_eq!(check_layers(&bad_front).len(), 2);
+        let titles = [
+            k("nxb-model", "L0", true, &[]),
+            k("nxtitle", "L1", false, &["nxb-model"]),
+            k(
+                "nxtitles",
+                "L1",
+                false,
+                &["nxtitle", "nxfamily-a", "nxgame-b"],
+            ),
+            k("nxfamily-a", "T", false, &["nxtitle"]),
+            k("nxgame-b", "T", false, &["nxtitle", "nxb-model"]),
+        ];
+        assert!(check_layers(&titles).is_empty());
+        let bad_titles = [
+            k("nxtitle", "L1", false, &[]),
+            k("nxb-store", "L2", false, &[]),
+            k("nxfamily-a", "T", false, &["nxtitle"]),
+            k("nxgame-b", "T", false, &["nxfamily-a", "nxb-store"]),
+            k("nxb-build", "L3", false, &["nxgame-b"]),
+        ];
+        assert_eq!(check_layers(&bad_titles).len(), 3);
     }
 
     #[test]

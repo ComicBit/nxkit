@@ -1,0 +1,167 @@
+//! The catalog: families and titles, and how they are composed for one game.
+
+use crate::{
+    BuildHooks, Fact, Family, Match, Need, Pacing, RuntimeHooks, Seed, ShaderRole, ShaderView,
+    Title, TitleFacts, Upscaler,
+};
+use std::collections::BTreeSet;
+
+/// All families and titles that are built in.
+pub struct Catalog {
+    families: Vec<&'static dyn Family>,
+    titles: Vec<&'static dyn Title>,
+}
+
+/// How the family of a game was found.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FamilyFrom {
+    /// The title module names it.
+    Declared,
+    /// A family's detection said yes.
+    Detected,
+    /// No family.
+    None,
+}
+
+impl Catalog {
+    /// A catalog. Fails on a duplicate family id or title id.
+    pub fn new(
+        families: Vec<&'static dyn Family>,
+        titles: Vec<&'static dyn Title>,
+    ) -> Result<Catalog, String> {
+        let mut ids = BTreeSet::new();
+        for f in &families {
+            if !ids.insert(f.id().to_string()) {
+                return Err(format!("family {} is listed twice", f.id()));
+            }
+        }
+        let mut tids = BTreeSet::new();
+        for t in &titles {
+            if !tids.insert(t.id()) {
+                return Err(format!("title {} is listed twice", t.id()));
+            }
+        }
+        Ok(Catalog { families, titles })
+    }
+
+    /// The families.
+    pub fn families(&self) -> &[&'static dyn Family] {
+        &self.families
+    }
+
+    /// The titles.
+    pub fn titles(&self) -> &[&'static dyn Title] {
+        &self.titles
+    }
+
+    /// Titles that name a family this catalog does not hold, as `(title, family)`. A build without that family's
+    /// feature has such titles. They still work, with the core defaults in place of the family.
+    pub fn missing_families(&self) -> Vec<(&'static dyn Title, &'static str)> {
+        self.titles
+            .iter()
+            .filter_map(|t| t.family().map(|f| (*t, f)))
+            .filter(|(_, f)| !self.families.iter().any(|x| x.id() == *f))
+            .collect()
+    }
+
+    /// The title module and family for one game. A family the title names wins. Without one, the first family
+    /// whose detection says yes is taken.
+    pub fn resolve(&self, facts: &TitleFacts) -> Resolved {
+        let title = self
+            .titles
+            .iter()
+            .copied()
+            .find(|t| t.id() == facts.title_id);
+        let declared = title.and_then(|t| t.family());
+        let (family, from) = match declared {
+            Some(id) => (
+                self.families.iter().copied().find(|f| f.id() == id),
+                FamilyFrom::Declared,
+            ),
+            None => (
+                self.families
+                    .iter()
+                    .copied()
+                    .find(|f| f.detect(facts) == Match::Yes),
+                FamilyFrom::Detected,
+            ),
+        };
+        let from = if family.is_some() {
+            from
+        } else {
+            FamilyFrom::None
+        };
+        Resolved {
+            title,
+            family,
+            family_from: from,
+        }
+    }
+}
+
+/// The composed answers for one game: the title first, then the family, then `None` for the core default.
+#[derive(Clone, Copy)]
+pub struct Resolved {
+    /// The title module, if one is built in.
+    pub title: Option<&'static dyn Title>,
+    /// The family, if one was found.
+    pub family: Option<&'static dyn Family>,
+    /// How the family was found.
+    pub family_from: FamilyFrom,
+}
+
+impl Resolved {
+    fn build(&self) -> impl Iterator<Item = &'static dyn BuildHooks> {
+        let t = self.title.map(|t| t as &'static dyn BuildHooks);
+        let f = self.family.map(|f| f as &'static dyn BuildHooks);
+        t.into_iter().chain(f)
+    }
+
+    fn runtime(&self) -> impl Iterator<Item = &'static dyn RuntimeHooks> {
+        let t = self.title.map(|t| t as &'static dyn RuntimeHooks);
+        let f = self.family.map(|f| f as &'static dyn RuntimeHooks);
+        t.into_iter().chain(f)
+    }
+
+    /// The role of a shader.
+    pub fn shader_role(&self, shader: &ShaderView<'_>) -> Option<Fact<ShaderRole>> {
+        self.build().find_map(|h| h.shader_role(shader))
+    }
+
+    /// The seeds of the family, then the title's.
+    pub fn seeds(&self) -> Vec<Seed> {
+        let hooks: Vec<_> = self.build().collect();
+        hooks
+            .into_iter()
+            .rev()
+            .flat_map(|h| h.seeds().iter().copied())
+            .collect()
+    }
+
+    /// The rewriter rules of the family, then the title's.
+    pub fn rewrite_rules(&self) -> Vec<&'static str> {
+        let mut v: Vec<&'static str> = self.build().filter_map(|h| h.rewrite_rules()).collect();
+        v.reverse();
+        v
+    }
+
+    /// The needs of the family, then the title's.
+    pub fn needs(&self) -> Vec<Fact<Need>> {
+        let hooks: Vec<_> = self.runtime().collect();
+        hooks
+            .into_iter()
+            .rev()
+            .flat_map(|h| h.needs().iter().copied())
+            .collect()
+    }
+
+    /// How to handle the game's upscaler.
+    pub fn upscaler(&self) -> Option<Fact<Upscaler>> {
+        self.runtime().find_map(|h| h.upscaler())
+    }
+
+    /// Who paces the frames.
+    pub fn pacing(&self) -> Option<Fact<Pacing>> {
+        self.runtime().find_map(|h| h.pacing())
+    }
+}
