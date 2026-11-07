@@ -100,11 +100,26 @@ A raw global access whose buffer is not known at translation time looks up the b
 Each lookup keeps the entry it chose last in a zeroed local word `gmem_last_N`. The next access first checks that entry.
 When the address is outside it, the lookup tries the hint and then searches all entries. The end of the chosen entry is checked once more after the search.
 
+## Tensor cores
+
+`LDSM` and `HMMA.16816.F16` run on `simdgroup_matrix` code. The tensor pass (`xform/tensor.rs`) turns each `HMMA` into a call of the helper `dmsh_hmma16816_f16`.
+The helper gets 17 word arguments and the out argument D1. Argument 10 holds flags, and arguments 11 to 16 hold A's `LDSM` address, offsets and row stride.
+The flags are constants at each call. The tensor pass sets them for HMMA chains in compute shaders.
+
+- A chain is a run of calls where D of one call is C of the next. Its accumulator stays in a slot `acc[k]` between the calls. Bits 8 and up give k.
+- A call with the same A as the call before loads no A.
+- C = 0 is a multiply.
+- A that an `LDSM` read is loaded from shared memory at the `LDSM`'s address. This needs exactly one shared memory besides the scratch, and the address must be the same in the whole SIMD-group.
+
+In a compute shader an `LDSM` becomes one `MatrixLoad` per matrix. The tensor pass reads the address from it and then lowers it to shuffles, as in other stages.
+A divergence analysis (`xform/uniformity.rs`) decides which values are the same in the whole SIMD-group.
+Each function that calls the helper declares `dm_acc[16]` and `dm_am[4]` and passes them by reference. The helper is always inlined.
+
 ## Identity and the cache
 
 The step stores each translation in the store. The key `nxb.xlate.v2` has the translator identity, the job, the code, the chain version V, the source, the paired shader,
 the answer-table flag, the dual-source and fetch-outputs-only flags and the varyings of the partners.
-The translator identity is a hash of the label `nxb-xlate msl`, V, `nxb_xlate::msl::TRANSLATOR_ID` (now `msl-2.6`) and `NXB_TEST_XLATE_SALT`.
+The translator identity is a hash of the label `nxb-xlate msl`, V, `nxb_xlate::msl::TRANSLATOR_ID` (now `msl-2.7`) and `NXB_TEST_XLATE_SALT`.
 V is a hash of the engine files that `dm/gfx/tools/dmsh_chain.py` lists in `FILES`, and the options string `debug=True reduced=True`. No Rust source goes into V.
 A change of the translator translates again only when someone increases `TRANSLATOR_ID` by hand. Without the increase, the store gives the old MSL. A failure is not stored.
 

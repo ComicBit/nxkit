@@ -149,7 +149,12 @@ pub(super) fn raw_target(
     b.raw(Inst::Copy, StorageKind::None, Some(selected), &[index]);
     b.mark_label(found_label);
     let c_last = b.ir.const_(last_id);
-    b.raw(Inst::Store, StorageKind::LocalMemory, None, &[c_last, selected]);
+    b.raw(
+        Inst::Store,
+        StorageKind::LocalMemory,
+        None,
+        &[c_last, selected],
+    );
     let cw = b.ir.const_(GMEM_MAP_ENTRY_WORDS);
     let found = b.op(Inst::Multiply, &[selected, cw]);
     let end_high = map_word(&mut b, map_binding, found, 3);

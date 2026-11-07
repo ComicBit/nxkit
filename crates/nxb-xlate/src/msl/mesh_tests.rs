@@ -421,7 +421,8 @@ fn the_last_entry_of_a_raw_lookup_stays_in_the_body() {
     let body = &msl[msl.find("void dm_body_main0(").expect("body")..];
     let (body, entries) = body.split_at(body.find("[[mesh]] void main0(").expect("entry"));
     assert!(
-        body.lines().any(|l| l.starts_with("    uint lm") && l.ends_with(" = {};")),
+        body.lines()
+            .any(|l| l.starts_with("    uint lm") && l.ends_with(" = {};")),
         "{msl}"
     );
     assert!(!entries.contains(" = {};"), "{msl}");
