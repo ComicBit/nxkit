@@ -180,18 +180,56 @@ fn members(comps: &[(Option<i32>, i32)], shift: usize) -> Members {
     out
 }
 
-/// A vector of 4 from the words of the attribute area at `b`. A component the shader does not write is 0, and 1 for w.
-fn vector(idx: &[Option<usize>; 4], mem: &str) -> String {
+/// A vector of `width` components from the words of the attribute area at `b`. A component the shader does not write is
+/// 0, and 1 for w.
+fn vector(idx: &[Option<usize>; 4], mem: &str, width: usize) -> String {
     let c: Vec<String> = idx
         .iter()
         .enumerate()
+        .take(width)
         .map(|(k, i)| match i {
             Some(i) => format!("as_type<float>({mem}[b + {}u])", *i as u32 * BLOCK),
             None if k == 3 => "1.0".into(),
             None => "0.0".into(),
         })
         .collect();
-    format!("float4({})", c.join(", "))
+    if width == 1 {
+        c[0].clone()
+    } else {
+        format!("float{width}({})", c.join(", "))
+    }
+}
+
+fn float_type(width: usize) -> String {
+    if width == 1 {
+        "float".into()
+    } else {
+        format!("float{width}")
+    }
+}
+
+/// The components an output needs: the ones the shader writes, and a w that the pixel shaders read and the shader does
+/// not write, because it must hold 1. `read` is the mask of the components they read, `None` when it is not known.
+/// A Metal fragment input wider than the output it links to reads 0 in the missing components.
+fn width(idx: &[Option<usize>; 4], read: Option<u8>) -> usize {
+    let written = idx.iter().rposition(Option::is_some).map_or(0, |k| k + 1);
+    let w = idx[3].is_none() && read.unwrap_or(0xf) & 8 != 0;
+    written.max(if w { 4 } else { 0 }).max(1)
+}
+
+/// The components of a location that the paired pixel shaders read, `None` without partners.
+fn read_mask(partners: &[StageInputs], location: i32) -> Option<u8> {
+    if partners.is_empty() {
+        return None;
+    }
+    let l = u32::try_from(location).ok()?;
+    Some(
+        partners
+            .iter()
+            .flat_map(|p| &p.varyings)
+            .filter(|v| v.location == l)
+            .fold(0, |m, v| m | v.read),
+    )
 }
 
 fn topology(verts: u32) -> &'static str {
@@ -288,20 +326,23 @@ pub fn wrap(
     if has_psiz {
         t.push_str("    float point_size [[point_size]];\n");
     }
-    for (n, _) in &vm {
+    for (n, idx) in &vm {
         if let Some(n) = n.filter(|n| *n >= 0) {
-            let _ = writeln!(t, "    float4 a{n} [[user(locn{n})]];");
+            let w = width(idx, read_mask(partners, n));
+            let _ = writeln!(t, "    {} a{n} [[user(locn{n})]];", float_type(w));
         }
     }
     for n in &pads {
-        let _ = writeln!(t, "    float4 dm_pad{n} [[user(locn{n})]];");
+        let w = width(&[None; 4], read_mask(partners, *n as i32));
+        let _ = writeln!(t, "    {} dm_pad{n} [[user(locn{n})]];", float_type(w));
     }
     t.push_str("};\n");
     if !pm.is_empty() {
         t.push_str("struct dm_prim_t {\n");
-        for (n, _) in &pm {
+        for (n, idx) in &pm {
             if let Some(n) = n {
-                let _ = writeln!(t, "    float4 p{n} [[user(locn{n})]];");
+                let w = width(idx, read_mask(partners, *n));
+                let _ = writeln!(t, "    {} p{n} [[user(locn{n})]];", float_type(w));
             }
         }
         t.push_str("};\n");
@@ -326,17 +367,24 @@ pub fn wrap(
             }
             _ => {
                 let member = n.map_or("position".to_string(), |n| format!("a{n}"));
-                let _ = writeln!(sets, "        v.{member} = {};", vector(idx, "dm_mem"));
+                let w = n.map_or(4, |n| width(idx, read_mask(partners, n)));
+                let _ = writeln!(sets, "        v.{member} = {};", vector(idx, "dm_mem", w));
             }
         }
     }
     for n in &pads {
-        let _ = writeln!(sets, "        v.dm_pad{n} = float4(0.0, 0.0, 0.0, 1.0);");
+        let w = width(&[None; 4], read_mask(partners, *n as i32));
+        let _ = writeln!(
+            sets,
+            "        v.dm_pad{n} = {};",
+            vector(&[None; 4], "dm_mem", w)
+        );
     }
     let mut psets = String::new();
     for (n, idx) in &pm {
         let member = n.map_or(String::new(), |n| format!("p{n}"));
-        let _ = writeln!(psets, "        p.{member} = {};", vector(idx, "dm_mem"));
+        let w = n.map_or(4, |n| width(idx, read_mask(partners, n)));
+        let _ = writeln!(psets, "        p.{member} = {};", vector(idx, "dm_mem", w));
     }
     for (name, gl) in [("main0", true), ("main0_z", false)] {
         let fill = if m.task {

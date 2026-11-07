@@ -254,6 +254,7 @@ pub(super) fn partner(v: &[(u32, &str, &str)]) -> StageInputs {
                 location: *l,
                 msl_type: (*t).into(),
                 interpolation: (*i).into(),
+                read: 0xf,
             })
             .collect(),
     }

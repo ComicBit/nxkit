@@ -120,6 +120,8 @@ pub struct Varying {
     pub msl_type: String,
     /// The interpolation qualifier (`""`, `flat`, `center_no_perspective`, ...).
     pub interpolation: String,
+    /// The components the pixel shader reads, one bit each (bit 3 is w). All four when its map does not name them.
+    pub read: u8,
 }
 
 /// The user varyings a pixel shader reads, in location order.

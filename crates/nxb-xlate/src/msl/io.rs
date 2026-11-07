@@ -404,6 +404,12 @@ fn builtin(p: &mut Plan, shader: Shader, v: IoVariable) -> R<()> {
     Ok(())
 }
 
+/// The components of an input that its map reads, one bit each. A map that names none counts as all four.
+fn read_mask(imap: &[u8; 4]) -> u8 {
+    let m = (0..4).filter(|c| imap[*c] != 0).fold(0, |m, c| m | 1 << c);
+    if m == 0 { 0xf } else { m }
+}
+
 /// The member of a pixel shader input at a location, with the interpolation its map names.
 pub(super) fn varying(p: &mut Plan, imap: &[u8; 4], l: i32) {
     let iq = imap.iter().copied().find(|x| *x != 0).unwrap_or(imap[3]);
@@ -418,6 +424,7 @@ pub(super) fn varying(p: &mut Plan, imap: &[u8; 4], l: i32) {
         location: l as u32,
         msl_type: "float4".into(),
         interpolation: interp.into(),
+        read: read_mask(imap),
     });
 }
 
@@ -545,6 +552,16 @@ mod tests {
             ..Plan::default()
         };
         assert_eq!(z.input(IoVariable::SubgroupLaneId, 0).unwrap().0, "0u");
+    }
+
+    #[test]
+    fn a_varying_reads_the_components_its_map_names() {
+        let mut p = Plan::default();
+        varying(&mut p, &[3, 3, 3, 0], 4);
+        varying(&mut p, &[0, 2, 0, 2], 5);
+        varying(&mut p, &[0; 4], 6);
+        let read: Vec<u8> = p.varyings.iter().map(|v| v.read).collect();
+        assert_eq!(read, vec![0x7, 0xa, 0xf]);
     }
 
     #[test]
