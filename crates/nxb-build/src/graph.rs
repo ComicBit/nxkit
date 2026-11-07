@@ -185,6 +185,16 @@ pub fn plan(a: &Args) -> Result<Build, String> {
         .get("shader_versions")
         .map(|v| v.split(' ').map(str::to_string).collect())
         .unwrap_or_else(|| vec![package.clone()]);
+    // a version the input lacks has no image: stop here with the reason (exit code 4 where the script derives a profile)
+    crate::versions::check(
+        &src,
+        &work,
+        &title,
+        &package,
+        &split_versions,
+        a.package.is_some(),
+    )
+    .map_err(|(code, text)| crate::exit::fail(code, text))?;
     // the shader step's library folder: given (--shaders: an existing folder, the step is skipped) or the one this
     // build writes, `<work>/shader/cache/b-<V>` with V from the engine (dmsh_chain.py)
     let shaders = match &a.shaders {

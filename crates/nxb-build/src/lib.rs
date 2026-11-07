@@ -41,6 +41,7 @@ mod programs;
 mod provisional;
 pub mod rewrite;
 mod stages;
+mod versions;
 
 /// The exit code a failing stage asks for (the first one wins). Stage closures return `Result<String, String>`, so the
 /// class of an error (damaged data 3, not supported yet 4, bad arguments 2, missing key 6) travels beside the text.
