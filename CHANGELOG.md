@@ -4,6 +4,8 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ## Unreleased
 
+## 0.9.2 - 2026-11-07
+
 ### Fixed
 
 - `nxb build` names a version that the input lacks. Before, the rewrite stage stopped with an NRO collection error about a missing `extract/<version>/RomFS.img`. Now the build stops before the extraction. Where the NSP script derives a profile from the version it has (the `package` or a `shader_versions` entry of the profile is not in the input), the exit code is 4, so a launcher can run the script. `-p` with a version that the input lacks is an error (exit code 1), as in the script.
