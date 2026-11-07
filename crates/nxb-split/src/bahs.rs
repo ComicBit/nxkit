@@ -3,7 +3,9 @@
 use std::collections::BTreeMap;
 
 use crate::SplitError;
-use crate::shaders::{CS_MAGIC, CTL_MAGIC, Found, GFX_MAGIC, check, nvn2_ctl, sph_stage, u32le};
+use crate::shaders::{
+    CS_MAGIC, CTL_MAGIC, Found, GFX_MAGIC, check, ctl_len, nvn2_ctl, sph_stage, u32le,
+};
 
 /// BAHS entry label to its program variation (`BAHS_VAR`).
 pub type BahsVar = BTreeMap<String, String>;
@@ -24,7 +26,7 @@ pub fn bahs_shaders(d: &[u8], label: &str, var: &mut BahsVar) -> Result<Vec<Foun
             "{label} BAHS code region out of bounds"
         )));
     }
-    let mut out = Vec::new();
+    let mut found = Vec::new();
     let mut a = 0usize;
     while a + 16 <= region && a < region.saturating_sub(16) {
         let off = u32le(d, a).unwrap_or(0) as usize;
@@ -67,13 +69,30 @@ pub fn bahs_shaders(d: &[u8], label: &str, var: &mut BahsVar) -> Result<Vec<Foun
         if check(st, ctl, code).is_some() {
             continue;
         }
-        out.push(Found {
-            place: format!("{label}#BAHS@{a0:#x}"),
-            stage: st,
-            ctl: ctl.to_vec(),
-            code: code.to_vec(),
-        });
+        found.push((
+            a0,
+            c,
+            Found {
+                place: format!("{label}#BAHS@{a0:#x}"),
+                stage: st,
+                ctl: ctl.to_vec(),
+                code: code.to_vec(),
+            },
+        ));
     }
+    // A program entry never lies inside a control section. The words +0x38..+0x47 of an NVN2 section (instruction
+    // length, c1 start and end, code length) read as an entry whose control is the next program's and whose code is
+    // whatever lies at that length. Each section counts with its own length (`ctl_len`), not the length an entry
+    // gives it.
+    let spans: Vec<(usize, usize)> = found
+        .iter()
+        .map(|(_, c, f)| (*c, c + ctl_len(&f.ctl)))
+        .collect();
+    let out: Vec<Found> = found
+        .into_iter()
+        .filter(|(a, _, _)| !spans.iter().any(|&(lo, hi)| lo <= *a && *a < hi))
+        .map(|(_, _, f)| f)
+        .collect();
     bahs_variations(d, label, &out, var);
     Ok(out)
 }
@@ -167,5 +186,57 @@ fn bahs_variations(d: &[u8], label: &str, entries: &[Found], var: &mut BahsVar) 
             }
             seen[k as usize] += 1;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const REGION: usize = 0x400;
+    const CODE: usize = 0x100;
+
+    fn put(d: &mut [u8], at: usize, words: &[u32]) {
+        for (i, w) in words.iter().enumerate() {
+            d[at + 4 * i..at + 4 * i + 4].copy_from_slice(&w.to_le_bytes());
+        }
+    }
+
+    /// An NVN2 control section of 0xe0 bytes: +0x38 instruction length, +0x40 and +0x44 c1 start and end (the
+    /// code area's length), +0x56 the stage byte (vertex).
+    fn nvn2_section() -> Vec<u8> {
+        let mut c = vec![0u8; 0xe0];
+        c[..4].copy_from_slice(&CTL_MAGIC);
+        c[4] = 0xc9;
+        put(&mut c, 0x38, &[CODE as u32, 0, CODE as u32, CODE as u32]);
+        c
+    }
+
+    /// Two vertex programs with entries at 0x100 and 0x238 and their control sections 0x68 after them. The words of
+    /// the first control section at 0x1a0 read (0x100, 0, 0x100, 0x100): an entry whose control is the second
+    /// program's and whose code is the second program's.
+    fn bahs() -> Vec<u8> {
+        let mut d = vec![0u8; REGION + 2 * CODE];
+        put(&mut d, 0x18, &[2 * CODE as u32, REGION as u32]);
+        for (entry, off) in [(0x100usize, 0usize), (0x238, CODE)] {
+            put(&mut d, entry, &[off as u32, 0, 0xe0, 0x68]);
+            d[entry + 0x68..entry + 0x68 + 0xe0].copy_from_slice(&nvn2_section());
+            put(&mut d, REGION + off, &[0x000c_0481 + off as u32]);
+        }
+        d
+    }
+
+    #[test]
+    fn control_words_are_no_entry() {
+        let d = bahs();
+        assert_eq!(&d[0x1a0..0x1a8], &[0, 1, 0, 0, 0, 0, 0, 0]);
+        let mut var = BahsVar::new();
+        let got = bahs_shaders(&d, "f.sharcb", &mut var).unwrap();
+        let places: Vec<&str> = got.iter().map(|f| f.place.as_str()).collect();
+        assert_eq!(places, ["f.sharcb#BAHS@0x100", "f.sharcb#BAHS@0x238"]);
+        assert!(got.iter().all(|f| f.stage == "vs"));
+        // The scan's own checks take the false entry: the rule is what leaves it out
+        let ctl = &d[0x2a0..0x2a0 + CODE];
+        assert!(nvn2_ctl(ctl) && check("vs", ctl, &d[REGION + CODE..REGION + 2 * CODE]).is_none());
     }
 }

@@ -169,6 +169,15 @@ impl ResourceManager {
         }
     }
 
+    /// `AddRawLastEntryMemory`: the pool table entry a raw global memory helper chose last in this invocation, one
+    /// word for each helper, zero at the start.
+    pub fn add_raw_last_entry_memory(&mut self) -> i32 {
+        let name = format!("gmem_last_{}", self.properties.local_memories.len());
+        let mut m = MemoryDefinition::new(&name, AggregateType::U32, 1);
+        m.zero_init = true;
+        self.properties.add_local_memory(m)
+    }
+
     /// `GetHmmaScratchMemoryId`.
     pub fn get_hmma_scratch_memory_id(&mut self, subgroups: i32) -> i32 {
         if self.hmma_scratch_memory_id < 0 {

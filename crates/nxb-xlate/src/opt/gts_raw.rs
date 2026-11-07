@@ -23,6 +23,24 @@ fn map_word(b: &mut B, binding: i32, entry: Opd, word: i32) -> Opd {
     b.op_kind(Inst::Load, StorageKind::StorageBuffer, &[c_b, c0, idx])
 }
 
+/// The address `{lo, hi}` is at or above `{low, high}`.
+fn at_or_below(b: &mut B, high: Opd, low: Opd, lo: Opd, hi: Opd) -> Opd {
+    let lt = b.op(Inst::CompareLessU32, &[high, hi]);
+    let eq = b.op(Inst::CompareEqual, &[high, hi]);
+    let le = b.op(Inst::CompareLessOrEqualU32, &[low, lo]);
+    let and = b.op(Inst::BitwiseAnd, &[eq, le]);
+    b.op(Inst::BitwiseOr, &[lt, and])
+}
+
+/// The address `{lo, hi}` is below `{low, high}`.
+fn below(b: &mut B, high: Opd, low: Opd, lo: Opd, hi: Opd) -> Opd {
+    let lt = b.op(Inst::CompareLessU32, &[hi, high]);
+    let eq = b.op(Inst::CompareEqual, &[hi, high]);
+    let lt2 = b.op(Inst::CompareLessU32, &[lo, low]);
+    let and = b.op(Inst::BitwiseAnd, &[eq, lt2]);
+    b.op(Inst::BitwiseOr, &[lt, and])
+}
+
 /// `TryGenerateRawStorageOp`: `Ok(None)` when a storage buffer cannot be reserved. Sets `UsesPhysicalPointers`.
 pub(super) fn raw_target(
     ir: &mut crate::ir::Ir,
@@ -67,9 +85,30 @@ pub(super) fn raw_target(
     } else {
         2
     };
+    let last_id = env.rm.add_raw_last_entry_memory();
     let mut b = B::new(ir);
     let addr_low = b.ir.argument(0);
     let addr_high = b.ir.argument(1);
+    let selected = b.ir.local();
+    let found_label = b.ir.label();
+    let chosen = b.ir.label();
+    // The entry this helper chose last in this invocation, if it holds the address. A shader reads a structure word
+    // after word from one pool, so all but the first access of a run choose the entry the first one chose. The
+    // table's ranges are disjoint and the host binds one table for a whole draw or dispatch, so the search below would
+    // choose the same entry. The word starts at 0, the empty entry.
+    let c_last = b.ir.const_(last_id);
+    let last = b.op_kind(Inst::Load, StorageKind::LocalMemory, &[c_last]);
+    let c_words = b.ir.const_(GMEM_MAP_ENTRY_WORDS);
+    let last_entry = b.op(Inst::Multiply, &[last, c_words]);
+    let start_high = map_word(&mut b, map_binding, last_entry, 1);
+    let start_low = map_word(&mut b, map_binding, last_entry, 0);
+    let from = at_or_below(&mut b, start_high, start_low, addr_low, addr_high);
+    let end_high = map_word(&mut b, map_binding, last_entry, 3);
+    let end_low = map_word(&mut b, map_binding, last_entry, 2);
+    let to = below(&mut b, end_high, end_low, addr_low, addr_high);
+    let last_holds = b.op(Inst::BitwiseAnd, &[from, to]);
+    b.raw(Inst::Copy, StorageKind::None, Some(selected), &[last]);
+    b.branch_if_true(chosen, last_holds);
     // The hint of the address's 2 MiB chunk names an entry holding the whole chunk. An address too high for the tag
     // searches.
     let c_up = b.ir.const_(32 - GMEM_HINT_SHIFT);
@@ -79,7 +118,6 @@ pub(super) fn raw_target(
     let chunk = b.op(Inst::BitwiseOr, &[chunk_hi, chunk_lo]);
     let index_mask = b.ir.const_((1 << GMEM_MAP_LOG2) - 1);
     let chunk_index = b.op(Inst::BitwiseAnd, &[chunk, index_mask]);
-    let c_words = b.ir.const_(GMEM_MAP_ENTRY_WORDS);
     let hint_entry = b.op(Inst::Multiply, &[chunk_index, c_words]);
     let hint = map_word(&mut b, map_binding, hint_entry, 6);
     let hint_index = b.op(Inst::BitwiseAnd, &[hint, index_mask]);
@@ -92,8 +130,6 @@ pub(super) fn raw_target(
     let c_limit = b.ir.const_(1 << (GMEM_HINT_SHIFT - GMEM_MAP_LOG2));
     let low_enough = b.op(Inst::CompareLessU32, &[addr_high, c_limit]);
     let hint_fits = b.op(Inst::BitwiseAnd, &[named, low_enough]);
-    let selected = b.ir.local();
-    let found_label = b.ir.label();
     b.raw(Inst::Copy, StorageKind::None, Some(selected), &[hint_index]);
     b.branch_if_true(found_label, hint_fits);
     // The last entry whose start is at or below the address (entry 0 starts at 0, so there always is one)
@@ -104,29 +140,33 @@ pub(super) fn raw_target(
         let candidate = b.op(Inst::Add, &[index, cs]);
         let cw = b.ir.const_(GMEM_MAP_ENTRY_WORDS);
         let entry = b.op(Inst::Multiply, &[candidate, cw]);
-        let start_low = map_word(&mut b, map_binding, entry, 0);
         let start_high = map_word(&mut b, map_binding, entry, 1);
-        let lt = b.op(Inst::CompareLessU32, &[start_high, addr_high]);
-        let eq = b.op(Inst::CompareEqual, &[start_high, addr_high]);
-        let le = b.op(Inst::CompareLessOrEqualU32, &[start_low, addr_low]);
-        let and = b.op(Inst::BitwiseAnd, &[eq, le]);
-        let at_or_below = b.op(Inst::BitwiseOr, &[lt, and]);
-        index = b.op(Inst::ConditionalSelect, &[at_or_below, candidate, index]);
+        let start_low = map_word(&mut b, map_binding, entry, 0);
+        let holds = at_or_below(&mut b, start_high, start_low, addr_low, addr_high);
+        index = b.op(Inst::ConditionalSelect, &[holds, candidate, index]);
         step >>= 1;
     }
     b.raw(Inst::Copy, StorageKind::None, Some(selected), &[index]);
     b.mark_label(found_label);
+    let c_last = b.ir.const_(last_id);
+    b.raw(
+        Inst::Store,
+        StorageKind::LocalMemory,
+        None,
+        &[c_last, selected],
+    );
     let cw = b.ir.const_(GMEM_MAP_ENTRY_WORDS);
     let found = b.op(Inst::Multiply, &[selected, cw]);
-    let end_low = map_word(&mut b, map_binding, found, 2);
     let end_high = map_word(&mut b, map_binding, found, 3);
-    let lt = b.op(Inst::CompareLessU32, &[addr_high, end_high]);
-    let eq = b.op(Inst::CompareEqual, &[addr_high, end_high]);
-    let lt2 = b.op(Inst::CompareLessU32, &[addr_low, end_low]);
-    let and = b.op(Inst::BitwiseAnd, &[eq, lt2]);
-    let in_pool = b.op(Inst::BitwiseOr, &[lt, and]);
+    let end_low = map_word(&mut b, map_binding, found, 2);
+    // An address in no pool: the entry below it ends below it
+    let in_pool = below(&mut b, end_high, end_low, addr_low, addr_high);
     let skip = b.ir.label();
     b.branch_if_false(skip, in_pool);
+    // The last entry's range held it, or the hint's or the search's entry does
+    b.mark_label(chosen);
+    let cw = b.ir.const_(GMEM_MAP_ENTRY_WORDS);
+    let found = b.op(Inst::Multiply, &[selected, cw]);
     if writes {
         // The write log is a bitmap of the table entries the stores and atomics wrote through. A bit is set once, so a
         // store usually costs a load and no atomic.

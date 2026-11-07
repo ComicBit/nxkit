@@ -111,15 +111,13 @@ pub(super) fn iadd3(ctx: &mut Ctx) -> R {
     }
     set(ctx, &x, sum, u);
     if carries {
-        let one = c(ctx, 1);
-        let m = ctx.bitwise_and(carry_count, one);
+        // The first predicate is sum >= 2^32, the second sum >= 2 * 2^32 (Mesa NAK's OpIAdd3 fold). The IADD3.X of the
+        // high word adds both, so a carry of 2 sets both.
         let z = c(ctx, 0);
-        let v = ctx.i_compare_not_equal(m, z);
+        let v = ctx.i_compare_not_equal(carry_count, z);
         set_pred(ctx, o0, v, u);
-        let two = c(ctx, 2);
-        let m = ctx.bitwise_and(carry_count, two);
-        let z = c(ctx, 0);
-        let v = ctx.i_compare_not_equal(m, z);
+        let one = c(ctx, 1);
+        let v = ctx.i_compare_less_unsigned(one, carry_count);
         set_pred(ctx, o1, v, u);
     }
     Ok(())
@@ -389,34 +387,44 @@ pub(super) fn lea(ctx: &mut Ctx) -> R {
     let ex = x.bit(74);
     let neg_inter = x.bit(72);
     let mut src_b = get(ctx, &b)?;
-    if matches!(x.form(), 1 | 5 | 6) && x.bit(63) {
-        src_b = ctx.i_negate(src_b);
+    // B's negation is the bitwise not with .X, else ~B + 1, whose + 1 counts in the carry out (Mesa NAK's OpLea fold)
+    let neg_b = matches!(x.form(), 1 | 5 | 6) && x.bit(63);
+    if neg_b {
+        src_b = ctx.bitwise_not(src_b);
     }
     let lo = get(ctx, &a)?;
     let mut t;
     if !high {
         let k = c(ctx, shift);
         t = ctx.shift_left(lo, k);
-    } else if shift == 0 {
-        t = get(ctx, &cc)?;
     } else {
-        let gc = get(ctx, &cc)?;
-        let k = c(ctx, shift);
-        let l = ctx.shift_left(gc, k);
-        let k2 = c(ctx, 32 - shift);
-        let r = ctx.shift_right_u32(lo, k2);
-        t = ctx.bitwise_or(l, r);
+        // .SX32 (bit 73): the high word is a's sign extension, not a source
+        let hi = if x.bit(73) {
+            let k = c(ctx, 31);
+            ctx.shift_right_s32(lo, k)
+        } else {
+            get(ctx, &cc)?
+        };
+        t = if shift == 0 {
+            hi
+        } else {
+            let k = c(ctx, shift);
+            let l = ctx.shift_left(hi, k);
+            let k2 = c(ctx, 32 - shift);
+            let r = ctx.shift_right_u32(lo, k2);
+            ctx.bitwise_or(l, r)
+        };
     }
-    let mut plus_one = 0;
+    let mut plus_one = i32::from(neg_b && !ex);
     if neg_inter {
         t = ctx.bitwise_not(t);
         if !ex {
-            plus_one = 1;
+            plus_one += 1;
         }
     }
     let mut sum = ctx.i_add(t, src_b);
     let mut carry = ctx.i_compare_less_unsigned(sum, t);
-    if plus_one != 0 {
+    for _ in 0..plus_one {
         let one = c(ctx, 1);
         let next = ctx.i_add(sum, one);
         let c2 = ctx.i_compare_less_unsigned(next, sum);

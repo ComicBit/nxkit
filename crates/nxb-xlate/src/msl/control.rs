@@ -19,9 +19,18 @@ impl Em<'_> {
         {
             ps.push(format!("thread {}& a{n}", msl_type(*t)?));
         }
+        let helper = super::hmma::is_helper(self, i);
+        if helper {
+            ps.push(super::hmma::PARAMS.to_string());
+        }
         ps.extend(self.shared.params.iter().map(|(d, _)| d.clone()));
         Ok(format!(
-            "{} fn{i}({})",
+            "{}{} fn{i}({})",
+            if helper {
+                "inline __attribute__((always_inline)) "
+            } else {
+                ""
+            },
             msl_type(f.return_type)?,
             ps.join(", ")
         ))
@@ -34,6 +43,7 @@ impl Em<'_> {
         }
         self.func = i;
         self.may_return = false;
+        self.hmma_caller = false;
         let f = self.info.functions.get(i).ok_or("unknown function")?;
         let main = f.main_block;
         let locals = f.locals.clone();
@@ -54,7 +64,11 @@ impl Em<'_> {
         if i != 0 && ret != AggType::VOID {
             self.line(&format!("return {};", literal(ret, 0)));
         }
-        Ok(std::mem::replace(&mut self.out, saved))
+        let mut out = std::mem::replace(&mut self.out, saved);
+        if self.hmma_caller {
+            out.insert_str(0, &format!("    {}\n", super::hmma::DECL));
+        }
+        Ok(out)
     }
 
     fn children(&mut self, b: A) -> R<()> {

@@ -34,6 +34,28 @@ fn text(p: &Path) -> String {
     p.to_string_lossy().into_owned()
 }
 
+/// The folder the host reads its tables from, beside `DM_NVN_SHMAP`: the profile, or `<run>/tables` when the shader
+/// step wrote `c1_full.tsv` or `cb_extent.tsv`. That folder holds the profile's tables with the step's in their place.
+fn run_tables(a: &Args, b: &Build, cwd: &Path) -> Result<PathBuf, String> {
+    let guard = crate::pipeline::guard_tables(a, b);
+    let made = guard.as_deref().is_some_and(|g| {
+        nxb_pack::macapp::GUARD_TABLES
+            .iter()
+            .any(|n| g.join(n).is_file())
+    });
+    if !made {
+        return Ok(b.profile.0.clone());
+    }
+    let dir = cwd.join("tables");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    for t in nxb_pack::macapp::table_files(&b.profile.0, guard.as_deref()) {
+        let to = dir.join(t.file_name().unwrap_or_default());
+        std::fs::copy(&t, &to).map_err(|e| format!("{}: {e}", t.display()))?;
+    }
+    Ok(dir)
+}
+
 /// The run of the build `b` with the host and the font folder of the application's first program: its folders
 /// `<work>/run/{save,temp}` are made, `partial` (`--seen-shaders`) gives the pipeline bases an archive of their own.
 pub(crate) fn run_of(
@@ -71,10 +93,11 @@ pub(crate) fn run_of(
         set(&mut env, "DM_AOC_DIR", text(&work.join("aoc")));
     }
     if gfx == "nvn" {
+        let tables = run_tables(a, b, &cwd)?;
         set(
             &mut env,
             "DM_NVN_SHMAP",
-            text(&b.profile.0.join("shader_map.tsv")),
+            text(&tables.join("shader_map.tsv")),
         );
     }
     if partial {
@@ -305,6 +328,43 @@ mod tests {
         assert!(get("DM_MSL_DIR").ends_with("work/shader/cache"));
         assert!(get("DM_PSO_ARCHIVE").ends_with("work/run/pso_archive_partial"));
         assert!(work.join("run/save").is_dir() && work.join("run/temp").is_dir());
+        assert_eq!(get("DM_NVN_SHMAP"), text(&prof.join("shader_map.tsv")));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_run_reads_the_guard_tables_of_its_shader_step() {
+        let d = std::env::temp_dir().join(format!("nxb-macrun-guard-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let (work, prof) = (d.join("work"), d.join("prof"));
+        std::fs::create_dir_all(work.join("shader/work/tables")).unwrap();
+        std::fs::create_dir_all(&prof).unwrap();
+        std::fs::write(prof.join("shader_map.tsv"), "map").unwrap();
+        std::fs::write(prof.join("c1_full.tsv"), "old").unwrap();
+        std::fs::write(prof.join("cb_extent.tsv"), "old").unwrap();
+        std::fs::write(work.join("shader/work/tables/c1_full.tsv"), "new").unwrap();
+        let mut b = Build::for_test(work.clone(), prof.clone());
+        b.shaders = work.join("shader/cache/b-1");
+        let r = run_of(
+            &Args::default(),
+            &b,
+            Path::new("/h/dmhost"),
+            Path::new("/f"),
+            false,
+        )
+        .unwrap();
+        let map = r.env.iter().find(|(n, _)| n == "DM_NVN_SHMAP").unwrap();
+        let dir = PathBuf::from(&map.1).parent().unwrap().to_path_buf();
+        assert!(dir.ends_with("run/tables"));
+        let read = |n: &str| std::fs::read_to_string(dir.join(n)).unwrap();
+        assert_eq!(
+            [
+                read("shader_map.tsv"),
+                read("c1_full.tsv"),
+                read("cb_extent.tsv")
+            ],
+            ["map", "new", "old"]
+        );
         let _ = std::fs::remove_dir_all(&d);
     }
 }

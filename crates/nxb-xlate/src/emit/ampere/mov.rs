@@ -312,9 +312,10 @@ pub(super) fn plop3(ctx: &mut Ctx) -> R {
     let cc = pred(ctx, &x, 68, 71, u || x.bit(67));
     let lut0 = x.bits(64, 67) | (x.bits(72, 77) << 3);
     let lut1 = x.bits(16, 24);
+    // Both results from the sources as they were: the first destination may be a source
     let v0 = pred_lut(ctx, a, b, cc, lut0);
-    set_pred(ctx, x.bits(81, 84), v0, u);
     let v1 = pred_lut(ctx, a, b, cc, lut1);
+    set_pred(ctx, x.bits(81, 84), v0, u);
     set_pred(ctx, x.bits(84, 87), v1, u);
     Ok(())
 }

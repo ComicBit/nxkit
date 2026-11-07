@@ -90,11 +90,55 @@ A fragment shader interlock (`FSIBegin`, `FSIEnd`) has no statements. The images
 
 Every fragment entry gets `[[early_fragment_tests]]` when `early_tests` is true. That is the case when the shader forces the early depth test, or when its texture pool marks IDs and the shader has no discard, depth write or memory write (`pool::early`). The rule lives in `entry::early_tests`, and the base entries, the side entries and the fetch entry use it.
 
+## Ampere global memory
+
+`ATOMG.CAS` (opcode 0x3a9) is a compare and swap. Rb holds the expected value and Rc (bits 64 to 71) the new value. Rd gets the old value.
+`ATOMG` and `RED` with `INC` or `DEC` become a compare and swap loop. `INC` gives 0 when the old value is at least the operand. `DEC` gives the operand when the old value is 0 or above the operand.
+`ATOMS` with `INC` or `DEC` is the same loop on shared memory.
+`ATOMS.CAS` with bit 87 clear gives the old value. With bit 87 set it is `CAST` or `CAST.SPIN`, and Rd is 1 when the swap happened, else 0.
+Bit 76 of `LDG` and `STG` and bit 71 of `ATOMG` and `RED` mark the uniform register as a memory descriptor. A descriptor is not added to the address.
+
+A raw global access whose buffer is not known at translation time looks up the bound storage buffers at run time (`opt/gts_raw.rs`).
+Each lookup keeps the entry it chose last in a zeroed local word `gmem_last_N`. The next access first checks that entry.
+When the address is outside it, the lookup tries the hint and then searches all entries. The end of the chosen entry is checked once more after the search.
+
+## Ampere ALU details
+
+`IADD3` sets its first carry predicate when the 64-bit sum is at least 2^32 and its second when it is at least 2 * 2^32. The `IADD3.X` of the high word adds both.
+`PLOP3` computes both truth tables from the sources before it writes a destination. The first destination may be a source.
+`POPC` and `FLO` take bit 63 as a bitwise not only in forms 1, 5 and 6. In the immediate form it is the immediate's top bit.
+`LEA.HI` with `.SX32` (bit 73) takes the sign extension of A as the high word instead of C.
+`LEA` with a negated B (bit 63, forms 1, 5 and 6) adds ~B with `.X` and ~B + 1 without it. The + 1 counts in the carry predicate.
+A half-pair operand has a swizzle in A (bits 74 to 75), in the 32-bit slot (bits 60 to 61) and in the 64-bit slot (bits 81 to 82). A constant has one too. Only an immediate has none.
+The values are 0 as is, 1 `.F32` (the 32-bit float in both lanes), 2 the low half twice and 3 the high half twice. `MUFU.F16` reads bits 60 to 61 as a half select, where an odd value picks the high half.
+`HSETP2` and `HSET2` with `.FTZ` (bit 80) set a lane below 2^-14 in magnitude to zero before they compare.
+`I2F` from a 32-bit integer to a 32-bit float and `F2F.F16.F32` apply the rounding in bits 78 to 79 (`.RM` 1, `.RP` 2, `.RZ` 3).
+The result rounded to nearest is compared with the exact value, and its bits step by one to the neighbour that the mode asks for.
+`F2F` reads the half back through the mask `0xffff`, because the optimizer folds an unpack of a pack into the packed float. `I2F` to a half and from a narrow integer rounds to nearest.
+`MUFU.SIN` and `MUFU.COS` take turns and use only the fraction. The translator emits sin or cos of (t - rint(t)) * 2pi. The difference t - rint(t) is exact for every float and lies in [-0.5, 0.5], where Metal's fast sin and cos are accurate.
+
+## Tensor cores
+
+`LDSM` and `HMMA.16816.F16` run on `simdgroup_matrix` code. The tensor pass (`xform/tensor.rs`) turns each `HMMA` into a call of the helper `dmsh_hmma16816_f16`.
+The helper gets 17 word arguments and the out argument D1. Argument 10 holds flags, and arguments 11 to 16 hold A's `LDSM` address, offsets and row stride.
+The flags are constants at each call. The tensor pass sets them for HMMA chains in compute shaders.
+
+- A chain is a run of calls where D of one call is C of the next. Its accumulator stays in a slot `acc[k]` between the calls. Bits 8 and up give k.
+  The helper computes C and D in matrices of its own. It reads a slot only for a chain's C and writes it only for a chain's D. A call outside every chain touches no slot.
+- A call with the same A as the call before loads no A.
+- C = 0 is a multiply.
+- A that an `LDSM` read is loaded from shared memory at the `LDSM`'s address. This needs exactly one shared memory besides the scratch, and the address must be the same in the whole SIMD-group.
+
+In a compute shader an `LDSM` becomes one `MatrixLoad` per matrix. The tensor pass reads the address from it and then lowers it to shuffles, as in other stages.
+A divergence analysis (`xform/uniformity.rs`) decides which values are the same in the whole SIMD-group.
+An `LDSM` sits between two SIMD-group barriers. A warp often stores the rows and reads them with `LDSM` without a `BAR` between. The Switch runs these accesses in order. Metal orders the store of another lane only through a barrier.
+Each function that calls the helper declares `dm_acc[16]` and `dm_am[4]` and passes them by reference. The helper is always inlined.
+
 ## Identity and the cache
 
 The step stores each translation in the store. The key `nxb.xlate.v2` has the translator identity, the job, the code, the chain version V, the source, the paired shader,
 the answer-table flag, the dual-source and fetch-outputs-only flags and the varyings of the partners.
-The translator identity is a hash of the label `nxb-xlate msl`, V, `nxb_xlate::msl::TRANSLATOR_ID` (now `msl-2.4`) and `NXB_TEST_XLATE_SALT`.
+The translator identity is a hash of the label `nxb-xlate msl`, V, `nxb_xlate::msl::TRANSLATOR_ID` (now `msl-2.14`) and `NXB_TEST_XLATE_SALT`.
 V is a hash of the engine files that `dm/gfx/tools/dmsh_chain.py` lists in `FILES`, and the options string `debug=True reduced=True`. No Rust source goes into V.
 A change of the translator translates again only when someone increases `TRANSLATOR_ID` by hand. Without the increase, the store gives the old MSL. A failure is not stored.
 

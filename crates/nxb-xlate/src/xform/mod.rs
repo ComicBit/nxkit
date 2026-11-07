@@ -8,6 +8,7 @@ pub mod shuffle;
 pub mod softfloat;
 pub mod tensor;
 pub mod texture;
+mod uniformity;
 
 use crate::accessor::Accessor;
 use crate::ir::{Block, Inst, Ir, OperandType};
@@ -37,6 +38,8 @@ pub struct XformCtx<'a> {
     pub hfm: &'a mut Hfm,
     /// the definitions of the original stage (`TransformContext.Definitions`), for the vertex-as-compute passes
     pub definitions: Option<&'a Definitions>,
+    /// The immediate dominator of each block (`BasicBlock.ImmediateDominator`), for the tensor pass's divergence analysis
+    pub idom: &'a [Option<usize>],
 }
 
 fn fp(i: Inst) -> Inst {
@@ -45,6 +48,8 @@ fn fp(i: Inst) -> Inst {
 
 /// `TransformPasses.RunPass`.
 pub fn run_pass(ir: &mut Ir, blocks: &mut [Block], env: &mut Env, ctx: &mut XformCtx) -> R<()> {
+    // on the optimised IR, before any lowering
+    tensor::prepare(ir, blocks, ctx);
     if ctx.stage == ShaderStage::Vertex {
         draw_parameters(ir, blocks, env.acc, ctx.used_features)?;
     }
