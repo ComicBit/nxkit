@@ -14,6 +14,9 @@ jobs:
         run: rustup toolchain install stable --profile minimal --component rustfmt,clippy && rustup default stable
       - name: Hygiene
         run: tools/no-game-data.sh
+      - name: Fetch dependencies
+        # tools/check.sh runs offline, nxb-layer needs naga and glslang from crates.io
+        run: cargo fetch --locked
       - name: Quality gates
         # Tests that need game data are ignored or skip themselves. No NXB_PARITY variable is set here.
         run: tools/check.sh
