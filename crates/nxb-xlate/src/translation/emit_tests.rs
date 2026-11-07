@@ -105,6 +105,21 @@ fn pixld_is_refused_outside_a_pixel_shader() {
     assert!(r.is_err_and(|e| e.contains("0x925 form 1")));
 }
 
+#[test]
+fn a_pixel_shader_reads_its_depth_after_four_registers_per_target() {
+    let t = ampere_ps_depth_text(0x10f, &[]).expect("emit");
+    let depth = t
+        .lines()
+        .find(|l| l.contains("s=#b,"))
+        .unwrap_or_else(|| panic!("no depth store\n{t}"));
+    assert!(depth.contains("R1:9"), "{depth}");
+    let t = ampere_ps_depth_text(0xf, &[]).expect("emit");
+    assert!(
+        t.lines().any(|l| l.contains("s=#b,") && l.contains("R1:5")),
+        "{t}"
+    );
+}
+
 /// `UP2UR UR4, URZ, mask`.
 fn up2ur(mask: u64) -> (u64, u64) {
     (0x883 | APT | 4 << 16 | 63 << 24 | mask << 32, 0)

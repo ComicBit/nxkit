@@ -8,6 +8,7 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 - A byte or half-word store to shared memory is one Metal store, not a compare-and-swap loop on its word (upstream `ffebfd59`). A task or mesh shader's primitive index bytes no longer retry.
   A call passes each argument as a variable, because the helper's parameters are references. Before, a literal argument gave MSL that did not compile.
+- A pixel shader's depth output is read from register 4 times the number of enabled colour targets plus 1 (upstream `473c9026`). Before, it counted enabled components, which is wrong when a target has fewer than four.
 - `TRANSLATOR_ID` is `msl-2.16`.
 
 ## 0.8.0

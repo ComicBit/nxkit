@@ -41,6 +41,21 @@ pub fn ampere_ps_text(ops: &[(u64, u64)]) -> Result<String, String> {
     ampere_text("ps", ops)
 }
 
+/// The same for a pixel shader whose header has the colour target mask `targets` and writes depth.
+pub fn ampere_ps_depth_text(targets: u32, ops: &[(u64, u64)]) -> Result<String, String> {
+    let jobs = parse_jobs(r#"[{"key": "t", "stage": "ps", "local": [1, 1, 1], "arch": "sm86"}]"#)?;
+    let mut header = [0u32; 32];
+    header[0] = 5 << 10;
+    header[18] = targets;
+    header[19] = 2;
+    let mut code: Vec<u8> = header.iter().flat_map(|w| w.to_le_bytes()).collect();
+    for (lo, hi) in ops.iter().chain([AEXIT].iter()) {
+        code.extend(lo.to_le_bytes());
+        code.extend(hi.to_le_bytes());
+    }
+    emit_text(&jobs[0], &code)
+}
+
 /// The same for a vertex shader (a zero header in front of the code).
 pub fn ampere_vs_text(ops: &[(u64, u64)]) -> Result<String, String> {
     ampere_text("vs", ops)

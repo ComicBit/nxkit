@@ -125,6 +125,11 @@ Each byte is its own memory location, so neighbouring threads need no atomic. Tw
 A task or mesh workgroup stores its primitive index bytes this way. With the loop, four threads contended for each word.
 A call passes each argument as a variable, because the parameters are references.
 
+## Pixel shader depth output
+
+A pixel shader reads its colours from four registers for each render target with any component enabled. Component c of the n-th such target is in R(4n + c). The sample mask register follows, then the depth.
+The depth register is 4 times the number of enabled targets plus 1 (`depth_register` in `ir/emitter_ret.rs`).
+
 ## Tensor cores
 
 `LDSM` and `HMMA.16816.F16` run on `simdgroup_matrix` code. The tensor pass (`xform/tensor.rs`) turns each `HMMA` into a call of the helper `dmsh_hmma16816_f16`.
