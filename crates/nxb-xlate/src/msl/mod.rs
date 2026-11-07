@@ -55,6 +55,7 @@ pub mod library;
 mod loop_tests;
 pub mod mesh;
 #[cfg(test)]
+mod mesh_pad_tests;
 mod mesh_tests;
 pub mod pool;
 #[cfg(test)]

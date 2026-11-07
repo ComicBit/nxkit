@@ -86,6 +86,7 @@ pub fn run(a: &Args, say: &mut dyn FnMut(&str)) -> Result<(), String> {
     }
     let names = [
         "reflection",
+        "mesh",
         "stage inputs",
         "library",
         "layer",

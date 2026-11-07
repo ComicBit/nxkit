@@ -141,8 +141,8 @@ pub struct Plan {
     pub bases: Vec<PlannedBase>,
     /// Pairs left to the device (function constants).
     pub rest: Vec<(String, String)>,
-    /// Pairs left out: reflection, stage inputs, library, layer, primitive ID, entry.
-    pub left: [usize; 6],
+    /// Pairs left out: reflection, mesh, stage inputs, library, layer, primitive ID, entry.
+    pub left: [usize; 7],
 }
 
 /// `plan`.
@@ -171,6 +171,11 @@ pub fn plan(lib_dir: &Path, chain: &str, pairs: &[(String, String)], zero: bool)
             out.left[0] += 1;
             continue;
         }
+        // A mesh shader's pipelines are built at the draw, not from archive bases.
+        if matches!(vj.get("mesh_stage"), Some(Value::Object(m)) if !m.is_empty()) {
+            out.left[1] += 1;
+            continue;
+        }
         let truthy_str = |v: Option<&Value>| {
             v.and_then(Value::as_str)
                 .filter(|s| !s.is_empty())
@@ -192,7 +197,7 @@ pub fn plan(lib_dir: &Path, chain: &str, pairs: &[(String, String)], zero: bool)
             _ => false,
         };
         if !pull && has_inputs {
-            out.left[1] += 1;
+            out.left[2] += 1;
             continue;
         }
         let prim = match fj.get("raster") {
@@ -205,7 +210,7 @@ pub fn plan(lib_dir: &Path, chain: &str, pairs: &[(String, String)], zero: bool)
             _ => false,
         };
         if prim {
-            out.left[4] += 1;
+            out.left[5] += 1;
             continue;
         }
         let vl = format!("{vk}{}", if pull { "_bp" } else { "_b" });
@@ -219,7 +224,7 @@ pub fn plan(lib_dir: &Path, chain: &str, pairs: &[(String, String)], zero: bool)
             .or_insert_with(|| functions(&lib_dir.join(format!("{fl}.metallib"))))
             .clone();
         let (Some(vf), Some(ff)) = (vf, ff) else {
-            out.left[2] += 1;
+            out.left[3] += 1;
             continue;
         };
         let writes = *layer.entry(vl.clone()).or_insert_with(|| {
@@ -227,14 +232,14 @@ pub fn plan(lib_dir: &Path, chain: &str, pairs: &[(String, String)], zero: bool)
                 .is_ok_and(|b| b.windows(LAYER.len()).any(|w| w == LAYER))
         });
         if writes {
-            out.left[3] += 1;
+            out.left[4] += 1;
             continue;
         }
         let find =
             |f: &[(String, bool)], e: &str| f.iter().rev().find(|(n, _)| n == e).map(|x| x.1);
         let ve = ventry.unwrap_or_default();
         let (Some(vc), Some(fc)) = (find(&vf, &ve), find(&ff, &fentry)) else {
-            out.left[5] += 1;
+            out.left[6] += 1;
             continue;
         };
         if vc || fc {

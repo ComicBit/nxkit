@@ -13,6 +13,7 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
   Lanes 126 and 127 of a mesh with `max_p` 126 wrote past the array, into the memory of the next workgroup.
 - A mesh shader reads its attributes as the guest lays them out (upstream `3ccb7da0`). All vertex blocks come before the primitive blocks, and each block has only the components of its own SPH.
   The point size is the first vertex component and becomes `[[point_size]]`. The topology and the index bytes of a primitive come from control +0x5f. The job carries `verts` and a `"psiz"` component.
+- Mesh shaders get the outputs that their paired pixel shaders read and they do not write, as (0, 0, 0, 1). The split pairs a mesh key with its pixel key and the pipeline archive plan leaves mesh pairs out (upstream `5e344a87`).
 - `TRANSLATOR_ID` is `msl-2.16`.
 
 ## 0.8.0

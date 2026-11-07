@@ -83,7 +83,7 @@ fn run(a: &[String]) -> Result<(), String> {
     let st = crate::plan::stamp(&chain, zero, &text);
     let l = p.left;
     println!(
-        "pso_offline: {} pairs: {} bases, {} left to the device (function constants), left out as the host leaves them: reflection {}, stage inputs {}, library {}, layer {}, primitive ID {}, entry {} ({:.1} s)",
+        "pso_offline: {} pairs: {} bases, {} left to the device (function constants), left out as the host leaves them: reflection {}, mesh {}, stage inputs {}, library {}, layer {}, primitive ID {}, entry {} ({:.1} s)",
         ps.len(),
         p.bases.len(),
         p.rest.len(),
@@ -93,6 +93,7 @@ fn run(a: &[String]) -> Result<(), String> {
         l[3],
         l[4],
         l[5],
+        l[6],
         t0.elapsed().as_secs_f64()
     );
     let write = |name: &str, t: &str| std::fs::write(out.join(name), t).map_err(|e| e.to_string());

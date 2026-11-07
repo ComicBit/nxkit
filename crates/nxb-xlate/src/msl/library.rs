@@ -193,9 +193,13 @@ fn build_with(s: &Structured, ctx: &Context<'_>, opt: &Options, ints: &[u32]) ->
                 let words = (job.shared.max(0) + 3) / 4;
                 let shared = s.props.properties.shared_memories.len();
                 entries.text.push('\n');
-                entries
-                    .text
-                    .push_str(&mesh::wrap(m, &params(&res, &plan), shared, words)?);
+                entries.text.push_str(&mesh::wrap(
+                    m,
+                    &params(&res, &plan),
+                    shared,
+                    words,
+                    ctx.partners,
+                )?);
             }
             None => {
                 let name = EntryName {

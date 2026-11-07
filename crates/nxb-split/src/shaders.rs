@@ -558,7 +558,8 @@ fn scan_blob_in(
     Ok(())
 }
 
-/// `var_pairs`: (vertex key, pixel key, from a BAHS program) within one variation.
+/// `var_pairs`: (vertex or mesh key, pixel key, from a BAHS program) within one variation. A mesh shader is the stage
+/// before the pixel shader as a vertex shader is, so the translator can pad the outputs that the pixel shader reads.
 pub fn var_pairs(
     p: &Profile,
     found: &[Found],
@@ -578,12 +579,11 @@ pub fn var_pairs(
         }
     }
     g.iter()
-        .filter_map(|(grp, v)| {
-            Some((
-                v.get("vs")?.clone(),
-                v.get("ps")?.clone(),
-                grp.contains("#BAHS#prog"),
-            ))
+        .flat_map(|(grp, v)| {
+            let ps = v.get("ps");
+            ["vs", "ms"].into_iter().filter_map(move |st| {
+                Some((v.get(st)?.clone(), ps?.clone(), grp.contains("#BAHS#prog")))
+            })
         })
         .collect()
 }
