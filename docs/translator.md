@@ -117,6 +117,14 @@ The result rounded to nearest is compared with the exact value, and its bits ste
 `F2F` reads the half back through the mask `0xffff`, because the optimizer folds an unpack of a pack into the packed float. `I2F` to a half and from a narrow integer rounds to nearest.
 `MUFU.SIN` and `MUFU.COS` take turns and use only the fraction. The translator emits sin or cos of (t - rint(t)) * 2pi. The difference t - rint(t) is exact for every float and lies in [-0.5, 0.5], where Metal's fast sin and cos are accurate.
 
+## Shared memory byte stores
+
+A store of a byte or half word to shared memory is a call of the helper `SharedStore8_<id>` or `SharedStore16_<id>(byte offset, value)`. The helper's own body is a compare-and-swap loop on the word.
+The emitter writes one Metal store instead: a `uchar` store, or an aligned `ushort` store through a `may_alias` type. The pointer is in `threadgroup` memory, or in `device` memory when the kernel spills.
+Each byte is its own memory location, so neighbouring threads need no atomic. Two threads that store the same byte leave one of the two values, as on the console.
+A task or mesh workgroup stores its primitive index bytes this way. With the loop, four threads contended for each word.
+A call passes each argument as a variable, because the parameters are references.
+
 ## Tensor cores
 
 `LDSM` and `HMMA.16816.F16` run on `simdgroup_matrix` code. The tensor pass (`xform/tensor.rs`) turns each `HMMA` into a call of the helper `dmsh_hmma16816_f16`.
@@ -138,7 +146,7 @@ Each function that calls the helper declares `dm_acc[16]` and `dm_am[4]` and pas
 
 The step stores each translation in the store. The key `nxb.xlate.v2` has the translator identity, the job, the code, the chain version V, the source, the paired shader,
 the answer-table flag, the dual-source and fetch-outputs-only flags and the varyings of the partners.
-The translator identity is a hash of the label `nxb-xlate msl`, V, `nxb_xlate::msl::TRANSLATOR_ID` (now `msl-2.15`) and `NXB_TEST_XLATE_SALT`.
+The translator identity is a hash of the label `nxb-xlate msl`, V, `nxb_xlate::msl::TRANSLATOR_ID` (now `msl-2.16`) and `NXB_TEST_XLATE_SALT`.
 V is a hash of the engine files that `dm/gfx/tools/dmsh_chain.py` lists in `FILES`, and the options string `debug=True reduced=True`. No Rust source goes into V.
 A change of the translator translates again only when someone increases `TRANSLATOR_ID` by hand. Without the increase, the store gives the old MSL. A failure is not stored.
 
