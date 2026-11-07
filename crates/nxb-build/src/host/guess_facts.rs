@@ -321,6 +321,13 @@ pub fn splitext(p: &str) -> &str {
 
 /// `facts_of(ExeFS, RomFS)`.
 pub fn facts_of(exefs: &Path, romfs: &Path) -> Result<Facts, String> {
+    let mut f = exefs_facts(exefs)?;
+    f.romfs = romfs_facts(romfs)?;
+    Ok(f)
+}
+
+/// The ExeFS part of `facts_of`: the modules and `main.npdm`, with no RomFS facts.
+pub fn exefs_facts(exefs: &Path) -> Result<Facts, String> {
     let mut f = Facts::default();
     for p in nso_files_all(exefs) {
         let name = p
@@ -389,7 +396,6 @@ pub fn facts_of(exefs: &Path, romfs: &Path) -> Result<Facts, String> {
         .filter_map(|v| v.split('_').next().and_then(|m| m.parse::<u64>().ok()))
         .min()
         .unwrap_or(0);
-    f.romfs = romfs_facts(romfs)?;
     Ok(f)
 }
 
