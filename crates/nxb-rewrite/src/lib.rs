@@ -11,6 +11,8 @@ mod error;
 mod finders;
 mod finders2;
 mod frame;
+/// The `nn::jit` image (port of `jit_capture.py`).
+pub mod jit;
 mod jumps;
 mod jumps2;
 mod jumps3;

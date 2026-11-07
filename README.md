@@ -125,7 +125,7 @@ The first estimate in the table is the sum of the measured stages, and it does n
 - `nxb build` was run with a registered profile on one title (Mac app). A game without a profile gets a provisional profile. The heap check, the region check and the shader captures boot the game in the Mac host.
   These boots were tested with synthetic data only. With `--no-heap-check`, the memory layout is a guess. Nobody checked it with a run. The shader step and the stages after it were **not** run for the Switch 2 package.
 - `nxb build` reads the files of `RomFS.img` at build time (Unreal paks, Frostbite headers and the other source checks of the reference script). They were checked with synthetic files only.
-  `--platform mac` (the development build) ends with the command that runs the game on the Mac. It does not run the pipeline prebuild, which starts the host. It does not set `DM_JIT_CAPTURE` either.
+  `--platform mac` (the development build) ends with the command that runs the game on the Mac. It does not run the pipeline prebuild, which starts the host. For a game that imports `nn::jit`, it sets `DM_JIT_CAPTURE` to `<version>/jit_capture/play`.
   `--program N` and the other programs of a multi-program profile are built for `--platform mac` and `mac-app`. They were checked with synthetic files only. An iOS build of a profile with `programs` packs the first program only. `--allow-shader-regressions` has no effect. `--mac-sign` was not run with a real identity.
 - iOS: no device test. The IPA writer is serial.
 - The overlap of stages is partial. The shader step does not start while the extract runs. Nobody timed a cold full run on a quiet machine. Each gain from overlap, the host and the raw path is an estimate.
