@@ -1,6 +1,6 @@
 //! Exclusive windows: `ldxr` ... `stxr` sequences that use x18, and the retry blocks that re-enter them.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use nxb_a64::{Insn, encode};
 
@@ -52,10 +52,12 @@ fn window_adrp(x: &Insn, s: u32, pc: i64) -> R<u32> {
     ))
 }
 
-/// Re-encodes a copied conditional branch (`cbz`, `tbz`, `b.cond`) at `pc` to `newt`.
+/// Re-encodes a copied branch (`b`, `cbz`, `tbz`, `b.cond`) at `pc` to `newt`.
 fn rebranch(x: &Insn, w: u32, pc: i64, newt: i64) -> R<u32> {
     let off = (newt - pc) >> 2;
-    let w = if matches!(x.mn, "tbz" | "tbnz") {
+    let w = if x.mn == "b" {
+        reach(encode::b(pc, newt))?
+    } else if matches!(x.mn, "tbz" | "tbnz") {
         (w & 0xfff8_001f) | (((off as u32) & 0x3fff) << 5)
     } else {
         (w & 0xff00_001f) | (((off as u32) & 0x7_ffff) << 5)
@@ -65,6 +67,53 @@ fn rebranch(x: &Insn, w: u32, pc: i64, newt: i64) -> R<u32> {
         return fail("assertion failed: copied branch");
     }
     Ok(w)
+}
+
+/// For a window with a `b`: rejects a path that leaves with a live reservation. The exit stub stores the
+/// stand-in register, and that store would end the reservation.
+pub(crate) fn check_window_branches(seg: &[Insn]) -> R<()> {
+    if !seg.iter().any(|x| x.mn == "b") {
+        return Ok(());
+    }
+    if let Some(p) = seg.windows(2).find(|p| p[1].addr != p[0].addr + 4) {
+        return fail(format!(
+            "assertion failed: noncontiguous window {:x}",
+            p[0].addr
+        ));
+    }
+    let by_addr: HashMap<u64, &Insn> = seg.iter().map(|x| (x.addr, x)).collect();
+    let mut pending = vec![(seg[0].addr, false)];
+    let mut seen: HashSet<(u64, bool)> = HashSet::new();
+    while let Some((addr, live)) = pending.pop() {
+        let Some(x) = by_addr.get(&addr) else {
+            if live {
+                return fail(format!(
+                    "assertion failed: branch leaves window with live reservation {addr:x}"
+                ));
+            }
+            continue;
+        };
+        if !seen.insert((addr, live)) {
+            continue;
+        }
+        let m = x.mn;
+        let live = if EXCL_LD.contains(&m) {
+            true
+        } else if EXCL_ST.contains(&m) || m == "clrex" {
+            false
+        } else {
+            live
+        };
+        if m == "b" {
+            pending.push((x.target().unwrap_or(0), live));
+        } else if matches!(m, "cbz" | "cbnz" | "tbz" | "tbnz") || m.starts_with("b.") {
+            pending.push((x.target().unwrap_or(0), live));
+            pending.push((addr + 4, live));
+        } else {
+            pending.push((addr + 4, live));
+        }
+    }
+    Ok(())
 }
 
 fn check_plain(x: &Insn) -> R<()> {
@@ -96,6 +145,7 @@ impl Rw {
 
     /// The rewrite block of a window, returns `(block start, window start, window end)`.
     pub(crate) fn site_window(&mut self, seg: &[Insn]) -> R<(i64, i64, i64)> {
+        check_window_branches(seg)?;
         let mut used = Vec::new();
         for x in seg {
             used.extend(regs_in(x));
@@ -114,7 +164,7 @@ impl Rw {
             if x.has18() {
                 w = subst(x, s)?;
             }
-            if is_direct_branch(x.mn) && !matches!(x.mn, "b" | "bl") {
+            if is_direct_branch(x.mn) && x.mn != "bl" {
                 let tgt = x.target().unwrap_or(0) as i64;
                 let newt = if lo <= tgt && tgt < hi {
                     copy0 + (tgt - lo)

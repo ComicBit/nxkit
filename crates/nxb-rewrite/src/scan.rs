@@ -283,14 +283,7 @@ impl Rw {
     pub(crate) fn scan(&self) -> R<Scan> {
         let starts = self.function_starts()?;
         let blocks = data_blocks(&self.img, self.text_end)?;
-        let mut code_ranges = Vec::new();
-        let mut from = 0;
-        for (s, e) in &blocks {
-            code_ranges.push((from, *s));
-            from = *e;
-        }
-        code_ranges.push((from, self.text_end));
-        // zip([0] + ends, starts + [TEXT_END])
+        let code_ranges = code_ranges(&blocks, self.text_end);
         let mut kinds = BTreeMap::new();
         let mut spin_cand: BTreeMap<i64, Vec<i64>> = BTreeMap::new();
         for (s, e) in &code_ranges {
@@ -359,6 +352,18 @@ impl Rw {
             spin_cand,
         })
     }
+}
+
+/// The code between the data blocks: `zip([0] + ends, starts + [text_end])`.
+pub(crate) fn code_ranges(blocks: &[(i64, i64)], text_end: i64) -> Vec<(i64, i64)> {
+    let mut out = Vec::new();
+    let mut from = 0;
+    for (s, e) in blocks {
+        out.push((from, *s));
+        from = *e;
+    }
+    out.push((from, text_end));
+    out
 }
 
 /// Big functions are analysed in pieces of about this size.
