@@ -107,6 +107,10 @@ pub struct Summary {
     pub seconds: (f64, f64),
     /// The images closing in the background, wait before the process ends.
     pub closing: crate::write::Closing,
+    /// The fused split stopped on a file only the game's own decoder reads (Oodle, LZ5): the reason. The split
+    /// outputs are not written, the caller runs the split again over the version directories once the Mac host
+    /// can decode.
+    pub split_unsupported: Option<String>,
 }
 
 fn write_file(path: &Path, bytes: &[u8]) -> Result<()> {
@@ -383,10 +387,6 @@ pub fn extract(req: &Request) -> Result<Summary> {
         }
         None => None,
     };
-    if templates.is_some() {
-        let dirs: Vec<PathBuf> = jobs.iter().map(|j| j.0.clone()).collect();
-        crate::split_out::env_guards(&dirs)?;
-    }
     if let Some(t) = &templates {
         // zstd dictionaries of a title that ships them: read before any file is scanned
         for (_, fs) in &jobs {
@@ -464,6 +464,7 @@ pub fn extract(req: &Request) -> Result<Summary> {
         r
     })?;
     let t_images = t1.elapsed().as_secs_f64();
+    let mut split_unsupported = None;
     if let (Some(t), Some((_, outs))) = (templates, &req.split) {
         let t2 = Instant::now();
         let mut vin = Vec::new();
@@ -487,18 +488,29 @@ pub fn extract(req: &Request) -> Result<Summary> {
                 tag: tags[k].trim_start_matches('/').to_string(),
                 main,
                 files,
+                dir: Some(out.clone()),
             });
         }
-        t.post_images(&tags, &results, req.threads)?;
-        let scanned = t.scanned();
-        let (_, bad) = t.merge(&vin, outs)?;
-        for b in bad {
-            println!("{b}");
+        let merged = t.post_images(&tags, &results, req.threads).and_then(|()| {
+            let scanned = t.scanned();
+            t.merge(&vin, outs).map(|(_, bad)| (scanned, bad))
+        });
+        match merged {
+            Ok((scanned, bad)) => {
+                for b in bad {
+                    println!("{b}");
+                }
+                eprintln!(
+                    "nxb-extract: split fused, {scanned} distinct files scanned, merge {:.2} s",
+                    t2.elapsed().as_secs_f64()
+                );
+            }
+            Err(ExtractError::Unsupported(why)) => {
+                eprintln!("nxb-extract: split left for later: {why}");
+                split_unsupported = Some(why);
+            }
+            Err(e) => return Err(e),
         }
-        eprintln!(
-            "nxb-extract: split fused, {scanned} distinct files scanned, merge {:.2} s",
-            t2.elapsed().as_secs_f64()
-        );
     }
 
     let mut stdout = std::io::stdout().lock();
@@ -562,6 +574,7 @@ pub fn extract(req: &Request) -> Result<Summary> {
         cache: cache.stats(),
         seconds: (t_small, t_images),
         closing,
+        split_unsupported,
     })
 }
 

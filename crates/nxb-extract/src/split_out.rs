@@ -4,7 +4,7 @@
 use nxb_split::records::Outputs;
 
 use crate::error::{ExtractError, Result};
-use crate::split::{SplitOutputs, write};
+use crate::split::{SplitOutputs, split_err, write};
 
 /// `{n:,}` of the Python.
 fn thousands(n: usize) -> String {
@@ -135,39 +135,49 @@ fn stage_long(s: &str) -> &'static str {
     }
 }
 
-/// Folders the reference split also reads (`glslc_capture`, `ue_shaders`): present with
-/// content, they are `Unsupported`, as this port does not read what they hold.
-pub fn env_guards(version_dirs: &[std::path::PathBuf]) -> Result<()> {
-    let has = |dir: &std::path::Path, ext: &str| {
-        std::fs::read_dir(dir).is_ok_and(|rd| {
-            rd.flatten().any(|e| {
-                let n = e.file_name().to_string_lossy().into_owned();
-                n.ends_with(ext) && !n.starts_with("._")
-            })
+/// The files of `dir` ending in `ext`, sorted, AppleDouble files (`._*`) left out.
+fn named(dir: &std::path::Path, ext: &str) -> Vec<String> {
+    let mut v: Vec<String> = std::fs::read_dir(dir)
+        .map(|rd| {
+            rd.flatten()
+                .filter_map(|e| e.file_name().into_string().ok())
+                .filter(|n| n.ends_with(ext) && !n.starts_with("._"))
+                .collect()
         })
-    };
-    let env = |k: &str| {
+        .unwrap_or_default();
+    v.sort();
+    v
+}
+
+/// What the build's boots wrote beside a version's image, scanned after main: the GLSLC outputs the game compiled at
+/// run time (`<dir>/glslc_capture` or `DM_GLSLC_CAPTURE`, labels `/glslc_capture/<name>`) and the Unreal shader code
+/// archives decoded with the game's Oodle (`<dir>/ue_shaders` or `DM_UE_SHADERS`, labels `/ue_shaders/<name>`).
+pub(crate) fn host_made(dir: &std::path::Path) -> Result<Vec<nxb_split::shaders::Found>> {
+    let env = |k: &str, d: &str| {
         std::env::var_os(k)
             .filter(|v| !v.is_empty())
-            .map(std::path::PathBuf::from)
+            .map_or_else(|| dir.join(d), std::path::PathBuf::from)
     };
-    for v in version_dirs {
-        let cap = env("DM_GLSLC_CAPTURE").unwrap_or_else(|| v.join("glslc_capture"));
-        if has(&cap, ".glslc") {
-            return Err(ExtractError::Unsupported(format!(
-                "captured GLSLC outputs in {}",
-                cap.display()
-            )));
-        }
-        let ue = env("DM_UE_SHADERS").unwrap_or_else(|| v.join("ue_shaders"));
-        if has(&ue, ".ushaderbytecode") {
-            return Err(ExtractError::Unsupported(format!(
-                "decoded Unreal shader archives in {}",
-                ue.display()
-            )));
-        }
+    let read = |p: &std::path::Path| {
+        std::fs::read(p).map_err(|e| ExtractError::io(format!("read {}", p.display()), e))
+    };
+    let mut found = Vec::new();
+    let cap = env("DM_GLSLC_CAPTURE", "glslc_capture");
+    for n in named(&cap, ".glslc") {
+        let d = read(&cap.join(&n))?;
+        found.extend(
+            nxb_split::glslc::glslc_shaders(&d, &format!("/glslc_capture/{n}"), true, &[])
+                .map_err(split_err)?,
+        );
     }
-    Ok(())
+    let ued = env("DM_UE_SHADERS", "ue_shaders");
+    for n in named(&ued, ".ushaderbytecode") {
+        let d = read(&ued.join(&n))?;
+        found.extend(
+            nxb_split::jobs::ue_shaders(&d, &format!("/ue_shaders/{n}")).map_err(split_err)?,
+        );
+    }
+    Ok(found)
 }
 
 /// The NROs of `DM_NRO_DIR` (`*.nro`, hidden files left out, sorted by name): the file table of a CRA archive is in
@@ -180,8 +190,11 @@ pub(crate) struct Nros {
     pub files: Vec<(String, std::sync::Arc<Vec<u8>>)>,
 }
 
-pub(crate) fn read_nros() -> Result<Nros> {
-    let Some(dir) = std::env::var_os("DM_NRO_DIR") else {
+pub(crate) fn read_nros(given: Option<&std::path::Path>) -> Result<Nros> {
+    let Some(dir) = given
+        .map(|d| d.as_os_str().to_os_string())
+        .or_else(|| std::env::var_os("DM_NRO_DIR"))
+    else {
         return Ok(Nros {
             dir: "None".into(),
             files: Vec::new(),

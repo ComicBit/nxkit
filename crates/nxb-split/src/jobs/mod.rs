@@ -27,6 +27,7 @@ pub mod trinity;
 pub mod ue;
 mod uepak;
 mod uerec;
+pub use uerec::ue_shaders;
 mod uetoc;
 pub mod zip;
 
