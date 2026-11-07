@@ -95,6 +95,16 @@ pub struct State {
     pub(crate) icon: String,
 }
 
+/// `MSLDIR`: the folder of the iOS shader libraries under `MSL_IOS` and under the app's `msl` (`vk`, `gl`, else the
+/// NVN chain's `b-<V>`).
+pub(crate) fn msl_dir_name(gfx: &str, v: &str) -> String {
+    match gfx {
+        "vulkan" => "vk".into(),
+        "gl" => "gl".into(),
+        _ => format!("b-{v}"),
+    }
+}
+
 /// `${X:-default}`.
 pub(crate) fn or(v: &Option<String>, d: impl Into<String>) -> String {
     v.clone()
@@ -491,11 +501,7 @@ pub fn generate(
             .replace('\n', " ");
         say(&format!("env: {kept}"));
     }
-    let msldir = match gfx.as_str() {
-        "vulkan" => "vk".to_string(),
-        "gl" => "gl".to_string(),
-        _ => format!("b-{v}"),
-    };
+    let msldir = msl_dir_name(&gfx, &v);
     let r = runner(&exports)?;
     let scheme = exports
         .iter()

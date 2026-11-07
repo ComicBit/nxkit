@@ -15,6 +15,8 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
   An encrypted container opens with the AES-256 key that main holds for the paks. The reference script has no key for these containers.
   The tests use synthetic containers and a fake decoder. No real IoStore game was run.
 
+- `nxb build --platform ios` builds the iPhone app of a Vulkan or OpenGL game. The stage `Vulkan shaders` (or `GL shaders`) writes `<work>/shader/ios/vk` (or `gl`), and the IPA has it in `msl/vk` (or `msl/gl`). The NVN split and chain do not run. Unit tests only, no real game IPA and no device test.
+
 ### Fixed
 
 - The split reads the export chunks of IoStore containers of TOC version 4 and later. Before, it found none in these containers.
