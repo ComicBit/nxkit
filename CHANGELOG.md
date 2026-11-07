@@ -2,7 +2,7 @@
 
 All notable changes are in this file. The format follows Keep a Changelog. Versions follow Semantic Versioning.
 
-## Unreleased
+## 0.9.0
 
 ### Changed
 
