@@ -3,9 +3,11 @@
 //! The engine runs a geometry shader as a compute kernel (geometry as compute). One kernel exists per input
 //! topology (`_bg0` to `_bg4`). It reads the captured vertices of the draw from `vertex_output`, writes the emitted
 //! vertices to `geometry_vb_output` and their indices to `geometry_ib_output`. The vertex shader `_bgv` draws what
-//! the kernel wrote. `_b` is a copy of `_bg0`. Refer to `docs/translator.md`.
+//! the kernel wrote. `_b` is a copy of `_bg0`. A passthrough shader also gets the lean kernels `_bl0`, `_bl1` and
+//! `_bl3` ([`geom_lean`]). Refer to `docs/translator.md`.
 
 use super::emit::{Options, R};
+use super::geom_lean;
 use super::geom_reader;
 use super::library;
 use super::refl::Reflection;
@@ -118,8 +120,15 @@ pub fn passthrough(code: &[u8]) -> bool {
     word(code, 0).is_some_and(|w| w >> 24 & 1 != 0)
 }
 
-/// The kernel of one input topology as the library `_bg<topology>`.
-fn kernel(job: &Job, code: &[u8], ctx: &Context<'_>, opt: &Options, t: i32) -> R<Library> {
+/// The kernel of one input topology as the library `_bg<topology>`, and the lean kernel `_bl<topology>` when the
+/// shader has one.
+fn kernel(
+    job: &Job,
+    code: &[u8],
+    ctx: &Context<'_>,
+    opt: &Options,
+    t: i32,
+) -> R<(Library, Option<Library>)> {
     let layout = output_layout(code, t)?;
     let mut j = job.clone();
     j.key = format!("{}_g{t}", job.key);
@@ -139,20 +148,34 @@ fn kernel(job: &Job, code: &[u8], ctx: &Context<'_>, opt: &Options, t: i32) -> R
     r.key = format!("{}_bg{t}", job.key);
     r.drv_unfillable = Vec::new();
     r.set_extra("geometry", layout.to_value(stride));
+    let mut lean = None;
     if passthrough(code) && matches!(t, 0 | 1 | 3) {
-        r.notes
-            .push("no lean geometry kernel (_bl): not ported".into());
+        match geom_lean::lean(&lib.msl, stride) {
+            Ok(l) => {
+                let refl = geom_lean::reflection(&r, &l, t, &job.key, layout.to_value(stride));
+                lean = Some(Library {
+                    suffix: format!("_bl{t}"),
+                    msl: l.msl,
+                    reflection: Some(refl),
+                });
+            }
+            Err(e) => r.notes.push(e),
+        }
     }
     lib.suffix = format!("_bg{t}");
     lib.reflection = Some(r);
-    Ok(lib)
+    Ok((lib, lean))
 }
 
-/// All libraries of a geometry shader: `_b`, `_bg0` to `_bg4` and `_bgv`.
+/// All libraries of a geometry shader: `_b`, `_bg0` to `_bg4`, `_bgv`, then the lean kernels `_bl0`, `_bl1` and `_bl3`
+/// of a passthrough shader.
 pub fn translate(job: &Job, code: &[u8], ctx: &Context<'_>, opt: &Options) -> R<Translated> {
     let mut libs = Vec::new();
+    let mut lean = Vec::new();
     for t in 0..INPUT_TOPOLOGIES {
-        libs.push(kernel(job, code, ctx, opt, t)?);
+        let (full, l) = kernel(job, code, ctx, opt, t)?;
+        libs.push(full);
+        lean.extend(l);
     }
     let mut base = libs[0].clone();
     base.suffix = "_b".into();
@@ -161,6 +184,7 @@ pub fn translate(job: &Job, code: &[u8], ctx: &Context<'_>, opt: &Options) -> R<
     }
     libs.insert(0, base);
     libs.push(geom_reader::library(job, code, ctx, opt)?);
+    libs.extend(lean);
     Ok(Translated {
         key: job.key.clone(),
         stage: job.stage.clone(),
