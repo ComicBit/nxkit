@@ -2,7 +2,7 @@
 
 All notable changes are in this file. The format follows Keep a Changelog. Versions follow Semantic Versioning.
 
-## Unreleased
+## 0.7.0
 
 ### Added
 
@@ -21,6 +21,16 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ### Fixed
 
+- The shader split finds the shaders of NVN2 games that it missed.
+  It reads the NVN2 shaders of agl `BAHS` files, the task and mesh shaders of `BNSH` programs, and nn::ndve `NDVE` files.
+  An `NDSR` pack may hold data entries of 8 bytes between its shaders. The split steps over them.
+  On one NVN2 title the split now finds 42,854 shaders, the same keys as the profile's map. Before, it found 35,732.
+- The shader step reads each record through the split's own `shader_map.tsv`.
+  Before, it took the record indices from the profile's map. When the two maps differed, a shader was built from another shader's record.
+  A profile key that the split did not find fails with "the split did not find it" in `_b_build.json`.
+- A gather with four offsets kept its coordinates in a scalar `float`. Metal rejected the shader when the coordinates had two or three components.
+- A size query for a component the texture does not have, such as the depth of a 2D texture, failed with "size component out of range". It now returns 1.
+  A size query on a 1D texture or a texture buffer returns the width for every component.
 - The translator emits `ATOMG.CAS` of NVN2 shaders as a compare and swap. Before, the instruction was unknown.
   `ATOMG` and `RED` with `INC` or `DEC` run as a compare and swap loop with the wrap of the hardware.
   A memory descriptor in the uniform register of `LDG`, `STG`, `ATOMG` and `RED` is no longer added to the address.
@@ -64,22 +74,6 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 - The JIT capture is not ported. `nxb build --platform ios` stops for a game that imports `nn::jit` and has no `jit/jit.img`.
 - Unreal Engine 5.6 IoStore shader libraries are not read. The Unreal decode stops with an error.
 - No boot and no host decoder was tested with a real game. The tests use synthetic data.
-
-## 0.6.7
-
-### Fixed
-
-- The shader split finds the shaders of NVN2 games that it missed.
-  It reads the NVN2 shaders of agl `BAHS` files, the task and mesh shaders of `BNSH` programs, and nn::ndve `NDVE` files.
-  An `NDSR` pack may hold data entries of 8 bytes between its shaders. The split steps over them.
-  On one NVN2 title the split now finds 42,854 shaders, the same keys as the profile's map. Before, it found 35,732.
-- The shader step reads each record through the split's own `shader_map.tsv`.
-  Before, it took the record indices from the profile's map. When the two maps differed, a shader was built from another shader's record.
-  A profile key that the split did not find fails with "the split did not find it" in `_b_build.json`.
-- A gather with four offsets kept its coordinates in a scalar `float`. Metal rejected the shader when the coordinates had two or three components.
-- A size query for a component the texture does not have, such as the depth of a 2D texture, failed with "size component out of range". It now returns 1.
-  A size query on a 1D texture or a texture buffer returns the width for every component.
-- `TRANSLATOR_ID` is `msl-2.4`, so the store translates the shaders again.
 
 ## 0.6.6
 
