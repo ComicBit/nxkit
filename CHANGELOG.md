@@ -14,7 +14,8 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 - A raw global access first checks the storage buffer it chose last. A loop over one buffer no longer searches all buffers on each access.
 - HMMA chains of compute shaders keep the accumulator and A in the SIMD-group between calls (upstream `bd9f422d`).
   A that an `LDSM` read is loaded from shared memory where the `LDSM` read it. Upstream measured the Ocarina of Time movie network at 11.4 ms instead of 14.8 ms.
-- `TRANSLATOR_ID` is `msl-2.7`.
+- An HMMA call outside every chain no longer overwrites the accumulator that a chain holds in slot 0 (upstream `13b432b4`, issue 1537). Upstream saw dotted rows in Ocarina of Time from it.
+- `TRANSLATOR_ID` is `msl-2.8`.
 
 ## 0.6.7
 

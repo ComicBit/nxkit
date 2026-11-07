@@ -12,7 +12,9 @@
 //! and A's four matrices (`dm_am`) and passes them by reference, so the inlined helper keeps them in registers. A
 //! chain's accumulator stays in its slot from one call to the next, a call with the previous call's A loads none, C = 0
 //! is a multiply, and A read by an LDSM is loaded from shared memory where the LDSM read it. That last one needs the
-//! one shared memory besides the scratch. With none or several, A goes through the block.
+//! one shared memory besides the scratch. With none or several, A goes through the block. C and D are in the call's
+//! own matrices, and a slot is read only for a chain's C and written only for its D. A call outside every chain has no
+//! slot bits and must not touch slot 0 (upstream issue 1537, dotted rows in Ocarina of Time).
 
 use super::emit::{Em, R};
 use super::types::{msl_type, scalar};
@@ -170,18 +172,22 @@ pub(super) fn body(em: &Em<'_>, i: usize) -> R<Option<String>> {
     }
     put("    simdgroup_load(am[0], h, 16, ulong2(0, 0)); simdgroup_load(am[1], h, 16, ulong2(8, 0)); simdgroup_load(am[2], h, 16, ulong2(0, 8)); simdgroup_load(am[3], h, 16, ulong2(8, 8));".into());
     put("}".into());
-    put("simdgroup_half8x8 b0, b1;".into());
+    put("simdgroup_half8x8 b0, b1, c0, c1;".into());
     put("simdgroup_load(b0, h + 256, 16, ulong2(0, 0), true); simdgroup_load(b1, h + 256, 16, ulong2(8, 0), true);".into());
-    put("if (czero) { simdgroup_multiply(acc[k], am[0], b0); simdgroup_multiply(acc[k + 1], am[2], b0); }".into());
+    put(
+        "if (czero) { simdgroup_multiply(c0, am[0], b0); simdgroup_multiply(c1, am[2], b0); }"
+            .into(),
+    );
     put("else {".into());
-    put("    if (!cslot) { simdgroup_load(acc[k], h + 384, 8, ulong2(0, 0)); simdgroup_load(acc[k + 1], h + 384, 8, ulong2(0, 8)); }".into());
-    put("    simdgroup_multiply_accumulate(acc[k], am[0], b0, acc[k]); simdgroup_multiply_accumulate(acc[k + 1], am[2], b0, acc[k + 1]);".into());
+    put("    if (cslot) { c0 = acc[k]; c1 = acc[k + 1]; }".into());
+    put("    else { simdgroup_load(c0, h + 384, 8, ulong2(0, 0)); simdgroup_load(c1, h + 384, 8, ulong2(0, 8)); }".into());
+    put("    simdgroup_multiply_accumulate(c0, am[0], b0, c0); simdgroup_multiply_accumulate(c1, am[2], b0, c1);".into());
     put("}".into());
-    put("simdgroup_multiply_accumulate(acc[k], am[1], b1, acc[k]); simdgroup_multiply_accumulate(acc[k + 1], am[3], b1, acc[k + 1]);".into());
+    put("simdgroup_multiply_accumulate(c0, am[1], b1, c0); simdgroup_multiply_accumulate(c1, am[3], b1, c1);".into());
     put(format!(
-        "if (dslot) {{ simdgroup_barrier({flags}); a17 = 0; return 0; }}"
+        "if (dslot) {{ acc[k] = c0; acc[k + 1] = c1; simdgroup_barrier({flags}); a17 = 0; return 0; }}"
     ));
-    put("simdgroup_store(acc[k], h + 384, 8, ulong2(0, 0)); simdgroup_store(acc[k + 1], h + 384, 8, ulong2(0, 8));".into());
+    put("simdgroup_store(c0, h + 384, 8, ulong2(0, 0)); simdgroup_store(c1, h + 384, 8, ulong2(0, 8));".into());
     put(format!("simdgroup_barrier({flags});"));
     put("uint d0 = s[192 + g * 4 + t], d1 = s[192 + (g + 8) * 4 + t];".into());
     put(format!("simdgroup_barrier({flags});"));

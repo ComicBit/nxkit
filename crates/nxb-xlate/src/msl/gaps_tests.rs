@@ -233,13 +233,36 @@ fn the_hmma_helper_runs_on_simdgroup_matrices() {
         "uint g = uint(a0) >> 2, t = uint(a0) & 3;",
         "const int f = int(uint(a10)), k = (f >> 8) * 2;",
         "adirect = false;",
-        "simdgroup_multiply_accumulate(acc[k], am[0], b0, acc[k]);",
+        "simdgroup_multiply_accumulate(c0, am[0], b0, c0);",
         "simdgroup_load(b0, h + 256, 16, ulong2(0, 0), true);",
         "a17 = as_type<uint>(d1);",
         "return as_type<uint>(d0);",
     ] {
         assert!(m.contains(want), "missing {want}\n{m}");
     }
+}
+
+/// A call outside every chain has no slot bits. It must not write slot 0, where a chain may hold its accumulator
+/// (upstream issue 1537, dotted rows in Ocarina of Time).
+#[test]
+fn the_hmma_helper_touches_a_slot_only_for_a_chain() {
+    let m = msl(&hmma_sample());
+    let body = &m[m.find("fn1(").expect("helper")..];
+    let body = &body[..body.find("\n}\n").expect("end")];
+    let writes: Vec<&str> = body.lines().filter(|l| l.contains("acc[k")).collect();
+    assert_eq!(writes.len(), 2, "{body}");
+    assert!(
+        writes[0]
+            .trim_start()
+            .starts_with("if (cslot) { c0 = acc[k];"),
+        "{body}"
+    );
+    assert!(
+        writes[1]
+            .trim_start()
+            .starts_with("if (dslot) { acc[k] = c0;"),
+        "{body}"
+    );
 }
 
 fn bind_1d_level() -> B {
