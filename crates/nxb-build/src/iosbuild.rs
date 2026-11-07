@@ -1,20 +1,25 @@
 //! `nxb build --platform ios`: the NSP script's iOS branch as stages. Extract and split, then the shader step (the
 //! iOS libraries `<work>/shader/ios/b-<V>`, from the same translation as the Mac ones), the "app build" (the script's
 //! `build_ipa.sh` up to `xcodebuild` and the signature, in [`crate::ios::ipa`]) and the "IPA pack". The rewrite
-//! (`patched_<package>`) comes from the work folder, as for the Mac app. Events are those of the other platform.
+//! (`patched_<package>`) comes from the work folder, as for the Mac app. A Vulkan or OpenGL game skips the split and
+//! the NVN chain: its shader step is nxb-layer's (`<work>/shader/ios/vk` or `ios/gl`). Events are those of the other
+//! platform.
 
 use crate::Args;
 use crate::events::{Progress, Update};
 use crate::graph::{Build, Node};
 use crate::host::Runner;
 use crate::ios::{ipa, ipapack};
+use crate::layer::Gfx;
 use crate::order::{Stage, Work};
 use nxb_model::ContentKey;
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-/// The stages of an iOS build.
+/// The stages of an iOS build. A Vulkan or OpenGL game (the extract's graphics API, before the extract the profile's
+/// `graphics` key) has no NVN shader split and chain: one stage ("Vulkan shaders" or "GL shaders", the script's names)
+/// translates its shaders with nxb-layer into the iPhone's library `<work>/shader/ios/vk` or `ios/gl`.
 pub(crate) fn nodes(a: &Args, b: &Build) -> Vec<Node> {
     let key = |name: &str, f: &[(&str, String)]| {
         let mut k = ContentKey::builder(&format!("nxb-build ios {name} 1"));
@@ -24,30 +29,46 @@ pub(crate) fn nodes(a: &Args, b: &Build) -> Vec<Node> {
         k.finish()
     };
     let reuse = |i: usize| b.nodes.get(i).and_then(|n| n.reused.clone());
-    let mut nodes = vec![
-        Node {
-            name: b.nodes[0].name.clone(),
-            deps: vec![],
-            key: b.nodes[0].key,
-            reused: reuse(0),
-        },
-        Node {
-            name: "shader split".into(),
+    let mut nodes = vec![Node {
+        name: b.nodes[0].name.clone(),
+        deps: vec![],
+        key: b.nodes[0].key,
+        reused: reuse(0),
+    }];
+    // a plan that cannot read the API takes NVN, and the stages check the extract again when they run
+    match crate::layer::gfx(b).unwrap_or(Gfx::Nvn) {
+        Gfx::Nvn => nodes.extend([
+            Node {
+                name: "shader split".into(),
+                deps: vec![0],
+                key: b.nodes[1].key,
+                reused: reuse(1),
+            },
+            Node {
+                name: "iOS shaders".into(),
+                deps: vec![1],
+                key: key("shaders", &[("libraries", b.shaders.display().to_string())]),
+                reused: reuse(2),
+            },
+        ]),
+        g => nodes.push(Node {
+            name: layer_stage(g).into(),
             deps: vec![0],
-            key: b.nodes[1].key,
-            reused: reuse(1),
-        },
-        Node {
-            name: "iOS shaders".into(),
-            deps: vec![1],
-            key: key("shaders", &[("libraries", b.shaders.display().to_string())]),
-            reused: reuse(2),
-        },
-    ];
+            key: key(
+                "layer",
+                &[
+                    ("api", g.name().into()),
+                    ("libraries", b.work.join("shader/ios").display().to_string()),
+                ],
+            ),
+            reused: None,
+        }),
+    }
+    let shader = nodes.len() - 1;
     let one = |name: &str| {
         vec![Node {
             name: name.into(),
-            deps: vec![2],
+            deps: vec![shader],
             key: key(name, &[("out", b.out.display().to_string())]),
             reused: None,
         }]
@@ -60,7 +81,7 @@ pub(crate) fn nodes(a: &Args, b: &Build) -> Vec<Node> {
         nodes.extend(vec![
             Node {
                 name: "app build".into(),
-                deps: vec![2],
+                deps: vec![shader],
                 key: key(
                     "app",
                     &[
@@ -73,13 +94,22 @@ pub(crate) fn nodes(a: &Args, b: &Build) -> Vec<Node> {
             },
             Node {
                 name: "IPA pack".into(),
-                deps: vec![3],
+                deps: vec![shader + 1],
                 key: key("pack", &[("out", b.out.display().to_string())]),
                 reused: None,
             },
         ]);
     }
     nodes
+}
+
+/// The name of the shader stage of a Vulkan or OpenGL game.
+fn layer_stage(g: Gfx) -> &'static str {
+    if g == Gfx::Gl {
+        "GL shaders"
+    } else {
+        "Vulkan shaders"
+    }
 }
 
 /// `uses_jit`: main imports `nn::jit::CreateJitEnvironment` (Super Mario 64 of Super Mario 3D All-Stars).
@@ -100,12 +130,6 @@ fn inputs(a: &Args, b: &Build) -> Result<ipa::Inputs, String> {
     let ex = w.join("extract").join(&b.package);
     let base_ex = w.join("extract/v0");
     let p = |x: PathBuf| Some(x.to_string_lossy().into_owned());
-    if crate::layer::gfx(b)? != crate::layer::Gfx::Nvn {
-        return Err(
-            "unsupported: a Vulkan or OpenGL game in nxb build --platform ios (run the script)"
-                .into(),
-        );
-    }
     if !ex.join("jit/jit.img").is_file() && uses_jit(&ex.join("ExeFS"))? {
         return Err(format!(
             "unsupported: main imports nn::jit, and the iPhone needs an image of the code the game's JIT plugin makes ({}): the JIT capture (two boots with DM_JIT_CAPTURE and jit_capture.py) is not ported to nxb (run the script)",
@@ -164,7 +188,7 @@ fn inputs(a: &Args, b: &Build) -> Result<ipa::Inputs, String> {
         romfs: p(romfs),
         msl_ios: p(w.join("shader/ios")),
         guard_tables: crate::pipeline::guard_tables(a, b),
-        gfxapi: Some("nvn".into()),
+        gfxapi: Some(crate::layer::gfx(b)?.name().into()),
         display_name: name,
         bundle_id: a.bundle_id.clone(),
         lang: Some(lang),
@@ -225,23 +249,35 @@ pub(crate) fn run(a: &Args, b: &Build, p: &Arc<Progress>) -> Result<(), String> 
     };
     let mut stages: Vec<Stage<'_>> = Vec::new();
     for (i, n) in b.nodes.iter().enumerate() {
-        let work = match (&n.reused, i) {
-            (Some(r), _) => Work::Reused(format!("reused: {r}")),
-            (_, 0) => Work::Turn(Box::new(move || crate::extract_stage::run(a, b, p))),
-            (_, 1) if b.split_fused() => Work::Reused("in the extract's pass".into()),
-            (_, 1) => Work::Turn(Box::new(move || crate::extract_stage::split(a, b, p))),
-            (_, 2) => Work::Turn(Box::new(move || {
-                crate::pipeline::shaders_and_archive(a2, b, p).map(|o| o.shaders)
+        let work = match (&n.reused, i, n.name.as_str()) {
+            (Some(r), _, _) => Work::Reused(format!("reused: {r}")),
+            (_, 0, _) => Work::Turn(Box::new(move || crate::extract_stage::run(a, b, p))),
+            (_, _, "shader split") if b.split_fused() => {
+                Work::Reused("in the extract's pass".into())
+            }
+            (_, _, "shader split") => Work::Turn(Box::new(move || {
+                if crate::layer::gfx(b)? != Gfx::Nvn {
+                    return Ok("not needed: the game does not draw with NVN".into());
+                }
+                crate::extract_stage::split(a, b, p)
             })),
-            (_, 3) if a.shell_framework.is_some() => Work::Turn(Box::new(move || {
+            (_, _, "iOS shaders" | "Vulkan shaders" | "GL shaders") => {
+                Work::Turn(Box::new(move || {
+                    if crate::layer::gfx(b)? != Gfx::Nvn {
+                        return crate::layer::stage(a2, b, p);
+                    }
+                    crate::pipeline::shaders_and_archive(a2, b, p).map(|o| o.shaders)
+                }))
+            }
+            (_, _, "game framework") => Work::Turn(Box::new(move || {
                 // route C's shell: the game's framework alone, the game files stay where they are
                 let inp = inputs(a, b)?;
                 let r = Runner::from_parent()?;
                 let fw = ipa::run(&r, ipa::Target::Ipa(None), &inp, &mut |l| step(l))?;
                 Ok(fw.display().to_string())
             })),
-            (_, 3) if a.prepare_xcode => Work::Turn(Box::new(move || prepare_xcode(a, b, &step))),
-            (_, 3) => Work::Turn(Box::new(move || {
+            (_, _, "prepare Xcode") => Work::Turn(Box::new(move || prepare_xcode(a, b, &step))),
+            (_, _, "app build") => Work::Turn(Box::new(move || {
                 let inp = inputs(a, b)?;
                 let r = Runner::from_parent()?;
                 let st = ipa::generate(&r, false, Some(&b.out), &inp, &mut |l| step(l))?;
@@ -351,3 +387,7 @@ fn prepare_xcode(a: &Args, b: &Build, step: &dyn Fn(&str)) -> Result<String, Str
         project.display()
     ))
 }
+
+#[cfg(test)]
+#[path = "iosbuild_tests.rs"]
+mod tests;
