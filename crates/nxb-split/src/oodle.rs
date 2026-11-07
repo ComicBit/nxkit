@@ -34,7 +34,22 @@ pub fn set_decoder(d: Option<Arc<dyn Decoder>>) {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    static LOCAL: std::cell::RefCell<Option<Option<Arc<dyn Decoder>>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Overrides the installed decoder on this thread only (`Some(None)`: no decoder), so that tests run in parallel.
+#[cfg(test)]
+pub(crate) fn set_local_decoder(d: Option<Option<Arc<dyn Decoder>>>) {
+    LOCAL.with(|l| *l.borrow_mut() = d);
+}
+
 fn current() -> Option<Arc<dyn Decoder>> {
+    #[cfg(test)]
+    if let Some(d) = LOCAL.with(|l| l.borrow().clone()) {
+        return d;
+    }
     DECODER.read().ok().and_then(|g| g.clone())
 }
 
