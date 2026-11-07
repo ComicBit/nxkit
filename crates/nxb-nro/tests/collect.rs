@@ -73,7 +73,7 @@ fn loose_nro_is_collected_and_missing_hash_is_unsupported() {
     )
     .expect("img");
     let out = d.join("out");
-    let s = collect(&img, &out, None).ok().expect("collect");
+    let s = collect(&img, &out, None, false).ok().expect("collect");
     assert_eq!((s.written, s.refused, s.bytes), (2, 0, 0x100));
     let tsv = std::fs::read_to_string(out.join("nro.tsv")).expect("tsv");
     assert!(tsv.starts_with("# name\tsha256\tsize\tnrr\twhere\nnro0\t"));
@@ -83,11 +83,20 @@ fn loose_nro_is_collected_and_missing_hash_is_unsupported() {
         std::fs::read(out.join("nro0.nro")).expect("nro0").len(),
         0x80
     );
-    // a registered hash that is nowhere: the script scans, so this is unsupported
+    // a registered hash that is nowhere: an error, or with missing_ok a row of missing.tsv
     std::fs::write(&img, image(&[("a.nrr", nrr(&[ha, [9; 32]])), ("m.nro", a)])).expect("img2");
     assert!(matches!(
-        collect(&img, &d.join("o2"), None),
-        Err(Fail::Unsupported(_))
+        collect(&img, &d.join("o2"), None, false),
+        Err(Fail::Error(_))
     ));
+    assert!(!d.join("o2").exists());
+    let s = collect(&img, &d.join("o3"), None, true)
+        .ok()
+        .expect("missing ok");
+    assert_eq!((s.written, s.missing), (1, 1));
+    assert_eq!(
+        std::fs::read_to_string(d.join("o3/missing.tsv")).expect("missing"),
+        format!("{}\ta.nrr\n", "09".repeat(32))
+    );
     let _ = std::fs::remove_dir_all(&d);
 }

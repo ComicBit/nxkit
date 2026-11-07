@@ -13,7 +13,10 @@ mod tests;
 
 pub use dict::{Dicts, decompress_dict, dict_id};
 use huf::Huf;
-pub use stream::{Input, Sink, decompress_limited, decompress_one, decompress_stream};
+pub use stream::{
+    Input, Sink, decompress_first, decompress_head, decompress_limited, decompress_one,
+    decompress_stream,
+};
 
 pub(crate) fn err(m: &str) -> SplitError {
     SplitError::Format(format!("zstd: {m}"))

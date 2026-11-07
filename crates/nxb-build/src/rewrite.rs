@@ -339,16 +339,20 @@ pub fn main(args: &[String]) -> i32 {
     }
 }
 
-/// `nxb nro <RomFS image> <out dir> [<nrr name>]`: `nro_collect.py`'s command line (exit code 0, 1, or 4).
+/// `nxb nro <RomFS image> <out dir> [<nrr name>] [--missing-ok]`: `nro_collect.py`'s command line (exit code 0, 1,
+/// or 4).
 pub fn nro_main(args: &[String]) -> i32 {
+    let missing_ok = args.iter().any(|a| a == "--missing-ok");
+    let args: Vec<&String> = args.iter().filter(|a| *a != "--missing-ok").collect();
     let (Some(romfs), Some(out)) = (args.first(), args.get(1)) else {
-        eprintln!("usage: nxb nro <RomFS image> <out dir> [<nrr name>]");
+        eprintln!("usage: nxb nro <RomFS image> <out dir> [<nrr name>] [--missing-ok]");
         return 2;
     };
     match nxb_nro::collect(
-        Path::new(romfs),
-        Path::new(out),
-        args.get(2).map(String::as_str),
+        Path::new(romfs.as_str()),
+        Path::new(out.as_str()),
+        args.get(2).map(|s| s.as_str()),
+        missing_ok,
     ) {
         Ok(s) => {
             println!(
@@ -456,7 +460,7 @@ pub fn ensure(
         let dir = work.join(format!("nro_{package}"));
         if !dir.join("nro.tsv").is_file() {
             // the first build: the collection of the script, in Rust (`nxb-nro`)
-            match nxb_nro::collect(&ex.join("RomFS.img"), &dir, None) {
+            match nxb_nro::collect(&ex.join("RomFS.img"), &dir, None, true) {
                 Ok(_) => {}
                 Err(nxb_nro::Fail::Unsupported(m)) => {
                     return Err(stopped(&format!("nro collection: {m}")));
