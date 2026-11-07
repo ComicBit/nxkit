@@ -90,11 +90,17 @@ A fragment shader interlock (`FSIBegin`, `FSIEnd`) has no statements. The images
 
 Every fragment entry gets `[[early_fragment_tests]]` when `early_tests` is true. That is the case when the shader forces the early depth test, or when its texture pool marks IDs and the shader has no discard, depth write or memory write (`pool::early`). The rule lives in `entry::early_tests`, and the base entries, the side entries and the fetch entry use it.
 
+## Ampere global memory
+
+`ATOMG.CAS` (opcode 0x3a9) is a compare and swap. Rb holds the expected value and Rc (bits 64 to 71) the new value. Rd gets the old value.
+`ATOMG` and `RED` with `INC` or `DEC` become a compare and swap loop. `INC` gives 0 when the old value is at least the operand. `DEC` gives the operand when the old value is 0 or above the operand.
+Bit 76 of `LDG` and `STG` and bit 71 of `ATOMG` and `RED` mark the uniform register as a memory descriptor. A descriptor is not added to the address.
+
 ## Identity and the cache
 
 The step stores each translation in the store. The key `nxb.xlate.v2` has the translator identity, the job, the code, the chain version V, the source, the paired shader,
 the answer-table flag, the dual-source and fetch-outputs-only flags and the varyings of the partners.
-The translator identity is a hash of the label `nxb-xlate msl`, V, `nxb_xlate::msl::TRANSLATOR_ID` (now `msl-2.4`) and `NXB_TEST_XLATE_SALT`.
+The translator identity is a hash of the label `nxb-xlate msl`, V, `nxb_xlate::msl::TRANSLATOR_ID` (now `msl-2.5`) and `NXB_TEST_XLATE_SALT`.
 V is a hash of the engine files that `dm/gfx/tools/dmsh_chain.py` lists in `FILES`, and the options string `debug=True reduced=True`. No Rust source goes into V.
 A change of the translator translates again only when someone increases `TRANSLATOR_ID` by hand. Without the increase, the store gives the old MSL. A failure is not stored.
 

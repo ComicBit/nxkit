@@ -66,7 +66,7 @@ A panic and a job that the step cannot read are `translation failed`. The step c
 A key that the translator does not do is a `ShaderError` of that key. The build continues.
 
 The translation store key has the translator identity, the job, the code, V, the source, the paired shader, the answer-table flag, the dual-source and fetch-outputs-only flags and the partner varyings.
-The translator identity is a hash of the label `nxb-xlate msl`, V, `nxb_xlate::msl::TRANSLATOR_ID` (now `msl-2.4`) and `NXB_TEST_XLATE_SALT`.
+The translator identity is a hash of the label `nxb-xlate msl`, V, `nxb_xlate::msl::TRANSLATOR_ID` (now `msl-2.5`) and `NXB_TEST_XLATE_SALT`.
 No Rust source goes into V. A change of the translator translates again only when someone increases `TRANSLATOR_ID` by hand. Without the increase, the store gives the old MSL. A failure is not stored.
 
 The output is not byte-identical to the output of the former C# translator and `spirv-cross`. No game ran with it yet (D20). Unit tests and Metal compile tests on built samples cover it.
@@ -119,8 +119,9 @@ The step does not pass `DEVELOPER_DIR`, `TOOLCHAINS`, `MTL_*`, `METAL_*`, `CLANG
 
 Compile conventions:
 
-- Mac: `-c -O1 -fpreserve-invariance`.
-- iOS: `-c -O1 -mios-version-min=18.0 -fmetal-math-mode=relaxed -fpreserve-invariance`.
+- Mac: `-c -O1 -fpreserve-invariance -fbracket-depth=1024`.
+- iOS: `-c -O1 -mios-version-min=18.0 -fmetal-math-mode=relaxed -fpreserve-invariance -fbracket-depth=1024`.
+- `-fbracket-depth=1024` allows more nested brackets than the default of 256. A source within 256 compiles to the same bytes with it. The record string (`chain_metal`) does not name it.
 - The source goes to stdin. There is one PCH for each convention and target.
 
 **Recovery.** Each child is in its own process group. On SIGINT or SIGTERM, the step kills all groups (exit code 130).
