@@ -318,6 +318,7 @@ Some checks of the reference script start the game on the Mac. `nxb build` does 
 - The heap check and the region check. A game that has one of them stops with exit code 4. The build writes the profile first. The message names `--no-heap-check`.
   With `--no-heap-check`, the build omits the two checks and keeps the memory layout that the survey guessed. **A run of the game did not check this layout.**
 - The shader captures (Vulkan, OpenGL, `glslc`, Unreal decode and others). The build writes a `[RED]` line for each capture that it leaves out.
+  A Vulkan or OpenGL game gets the shaders of its files without a capture (see [Vulkan and OpenGL games](#vulkan-and-opengl-games)). Shaders that the game makes at run time are missing.
 
 `nxb profile` has four commands: `guess`, `show`, `check` and `manifest`. `guess` writes the values of the survey, `show` shows a profile,
 `check` compares the guess with a registered profile, and `manifest` lists a RomFS image.
@@ -398,6 +399,29 @@ Limits of the iOS stages:
 entry sequence, headers, zip64 rules, times, modes and deflate decisions of the reference build scripts. Deflate comes from
 the system zlib, thus compressed bytes are the same only with the same zlib. Measured: byte-identical on a 59-entry sample
 and on a bundle with a 300 MB streamed file. A full game IPA was not compared. The reuse of the previous IPA is described in the iOS section.
+
+## Vulkan and OpenGL games
+
+Some games draw with Vulkan or OpenGL and not with NVN. The host has a layer for each API (`dm/gfx/vk/hle_vk.m`, `dm/gfx/gl/hle_gl.m`).
+`nxb build` finds the API from the imports of `main` and from the files of `RomFS.img`, as `profile_guess.build_sources` does (`nxb-build/src/layer.rs`).
+A game without an extract uses the `graphics` key of the profile. Without the key, the game is an NVN game.
+
+For a Vulkan or OpenGL game, the build changes these stages:
+
+- The shader split and the pipeline archive are not needed. Their lines say "not needed: the game does not draw with NVN".
+- The Mac shader stage runs `nxb-layer` in place of the NVN shader chain. It reads the SPIR-V files (Vulkan) or the GLSL sources (OpenGL) of the base, the update and the DLC images.
+  OpenGL sources are `.mvgl` packs, `.vert` and `.frag` files and the GLSL strings in `main`.
+- naga translates each shader to MSL. `xcrun metal` and `metallib` link all of them into one library. The output is `<work>/shader/vk/vk_shaders.metallib` and `vk_shaders.tsv`, or `<work>/shader/gl/gl_shaders.*`.
+  The format is the format of `dm/gfx/tools/vk_shaders.py` and `gl_shaders.py`.
+- A Vulkan shader that does not translate stops the stage and names the shader. An OpenGL shader that does not translate gives a `[RED]` line, and the build goes on.
+- The Mac app ships `msl/vk` or `msl/gl` and not `b-<chain>`. The host gets `GFXAPI` and `DM_MSL_DIR`.
+- The reuse key is `<work>/shader/vk.key` (or `gl.key`). It hashes the translator id, the images and `main`.
+
+With `--also-ios`, the stage also writes `<work>/shader/ios/vk` (or `gl`) for the iPhone SDK. The iOS app build refuses a Vulkan or OpenGL game.
+The run-time captures of the reference script (`capture_shaders`) are not ported.
+
+Measured on Hades (`0100535012974000`): 74 of 74 SPIR-V modules translate, and `xcrun metal` compiles all of them (2 s). The app builds and ships `msl/vk`.
+The game was not started. The OpenGL path has unit tests only, no real game.
 
 ## Pipeline archive
 

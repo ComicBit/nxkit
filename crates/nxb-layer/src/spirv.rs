@@ -76,7 +76,9 @@ impl Spv {
             return Err("not a SPIR-V module".into());
         }
         let words: Vec<u32> = bytes
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
             .collect();
         let mut header = [0u32; 5];
@@ -340,11 +342,11 @@ pub(crate) fn split_combined(s: &mut Spv) -> Result<Twins, String> {
     }
     // the twins share the set and binding of their image; the entry point lists them where it lists the image
     for i in &out {
-        if i.op == OP_DECORATE && (i.w.get(1) == Some(&DEC_BINDING) || i.w.get(1) == Some(&DEC_SET))
+        if i.op == OP_DECORATE
+            && (i.w.get(1) == Some(&DEC_BINDING) || i.w.get(1) == Some(&DEC_SET))
+            && let Some(&t) = twins.get(&i.w[0])
         {
-            if let Some(&t) = twins.get(&i.w[0]) {
-                extra_decs.push(Inst::new(OP_DECORATE, vec![t, i.w[1], i.w[2]]));
-            }
+            extra_decs.push(Inst::new(OP_DECORATE, vec![t, i.w[1], i.w[2]]));
         }
     }
     for i in &mut out {
