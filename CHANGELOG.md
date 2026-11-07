@@ -11,6 +11,8 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 - A pixel shader's depth output is read from register 4 times the number of enabled colour targets plus 1 (upstream `473c9026`). Before, it counted enabled components, which is wrong when a target has fewer than four.
 - The stage memory of a mesh shader reserves the primitive index bytes for every block of 32 primitives (upstream `d365496d`). Before, the bytes were 4 plus 3 times `max_p`.
   Lanes 126 and 127 of a mesh with `max_p` 126 wrote past the array, into the memory of the next workgroup.
+- A mesh shader reads its attributes as the guest lays them out (upstream `3ccb7da0`). All vertex blocks come before the primitive blocks, and each block has only the components of its own SPH.
+  The point size is the first vertex component and becomes `[[point_size]]`. The topology and the index bytes of a primitive come from control +0x5f. The job carries `verts` and a `"psiz"` component.
 - `TRANSLATOR_ID` is `msl-2.16`.
 
 ## 0.8.0

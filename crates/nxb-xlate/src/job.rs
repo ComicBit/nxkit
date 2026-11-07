@@ -120,6 +120,9 @@ fn transform_feedback(v: Option<&Value>) -> Result<Option<TransformFeedback>, St
     Ok(tf.buffers.iter().any(Option::is_some).then_some(tf))
 }
 
+/// The attribute of the point size in the vertex components of a mesh shader. The job names it `"psiz"`.
+pub const POINT_SIZE: i32 = -1;
+
 /// The facts of a task or mesh shader (`mesh_stage` of the job, `dmsh_meshstage.info`).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct MeshStage {
@@ -131,11 +134,14 @@ pub struct MeshStage {
     pub payload: u32,
     /// Whether a mesh shader has a task shader (`ts` always has its mesh shaders).
     pub task: bool,
+    /// The vertices of a primitive of a mesh shader: 1 point, 2 line, 3 triangle. 0 reads as 3.
+    pub verts: u32,
     /// The most vertices of a mesh shader.
     pub max_v: u32,
     /// The most primitives of a mesh shader.
     pub max_p: u32,
-    /// The vertex components the SPH enables in attribute order: (attribute, component), position as `None`.
+    /// The vertex components the SPH enables in attribute order: (attribute, component), position as `None` and the
+    /// point size as `POINT_SIZE`.
     pub vertex: Vec<(Option<i32>, i32)>,
     /// The per-primitive components: (attribute, component).
     pub primitive: Vec<(i32, i32)>,
@@ -155,7 +161,12 @@ fn mesh_stage(v: &Value) -> Option<MeshStage> {
         list.iter()
             .filter_map(|e| {
                 let e = e.as_list()?;
-                let at = e.first().and_then(Value::as_i64).map(|x| x as i32);
+                let first = e.first();
+                let at = if first.and_then(Value::as_str) == Some("psiz") {
+                    Some(POINT_SIZE)
+                } else {
+                    first.and_then(Value::as_i64).map(|x| x as i32)
+                };
                 Some((at, e.get(1)?.as_i64()? as i32))
             })
             .collect()
@@ -165,12 +176,13 @@ fn mesh_stage(v: &Value) -> Option<MeshStage> {
         threads: n("threads"),
         payload: n("payload"),
         task: !matches!(v.get("task"), Some(Value::Bool(false))),
+        verts: n("verts"),
         max_v: n("max_v"),
         max_p: n("max_p"),
         vertex: comps("vertex"),
         primitive: comps("primitive")
             .into_iter()
-            .filter_map(|(a, c)| Some((a?, c)))
+            .filter_map(|(a, c)| Some((a.filter(|n| *n >= 0)?, c)))
             .collect(),
         refused: v.get("refused").and_then(Value::as_str).map(str::to_string),
         kind,
