@@ -145,6 +145,16 @@ pub(super) fn fsel(ctx: &mut Ctx) -> R {
     Ok(())
 }
 
+/// `ATurnsToRadians`: MUFU.SIN and MUFU.COS use only the fraction of their turns. t * 2pi in float rounds that fraction
+/// away (0.4 rad steps at 2^20 turns), and Metal's fast sin and cos return 0 from about 2^20 turns on. t - rint(t) is
+/// exact for every float and lies in [-0.5, 0.5], where the fast functions are accurate. A small t stays itself.
+fn turns_to_radians(ctx: &mut Ctx, turns: Opd) -> Opd {
+    let r = ctx.fp_round(turns);
+    let f = ctx.fp_subtract(turns, r);
+    let k = cf(ctx, 2.0 * std::f32::consts::PI);
+    ctx.fp_multiply(f, k)
+}
+
 pub(super) fn mufu(ctx: &mut Ctx) -> R {
     let x = x(ctx);
     let half = x.bit(73);
@@ -160,16 +170,14 @@ pub(super) fn mufu(ctx: &mut Ctx) -> R {
     if half && (op == 6 || op == 7) {
         return Err(fail(ctx, "MUFU.F16 RCP64H / RSQ64H"));
     }
-    let tau = 2.0f32 * std::f32::consts::PI;
     res = match op {
+        // Volta and later take the argument in turns. Maxwell's came through RRO in radians.
         0 => {
-            let k = cf(ctx, tau);
-            let m = ctx.fp_multiply(res, k);
+            let m = turns_to_radians(ctx, res);
             ctx.fp_cosine(m)
         }
         1 => {
-            let k = cf(ctx, tau);
-            let m = ctx.fp_multiply(res, k);
+            let m = turns_to_radians(ctx, res);
             ctx.fp_sine(m)
         }
         2 => ctx.fp_exponent_b2(res),

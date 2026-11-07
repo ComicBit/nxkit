@@ -115,6 +115,7 @@ The values are 0 as is, 1 `.F32` (the 32-bit float in both lanes), 2 the low hal
 `I2F` from a 32-bit integer to a 32-bit float and `F2F.F16.F32` apply the rounding in bits 78 to 79 (`.RM` 1, `.RP` 2, `.RZ` 3).
 The result rounded to nearest is compared with the exact value, and its bits step by one to the neighbour that the mode asks for.
 `F2F` reads the half back through the mask `0xffff`, because the optimizer folds an unpack of a pack into the packed float. `I2F` to a half and from a narrow integer rounds to nearest.
+`MUFU.SIN` and `MUFU.COS` take turns and use only the fraction. The translator emits sin or cos of (t - rint(t)) * 2pi. The difference t - rint(t) is exact for every float and lies in [-0.5, 0.5], where Metal's fast sin and cos are accurate.
 
 ## Tensor cores
 
@@ -137,7 +138,7 @@ Each function that calls the helper declares `dm_acc[16]` and `dm_am[4]` and pas
 
 The step stores each translation in the store. The key `nxb.xlate.v2` has the translator identity, the job, the code, the chain version V, the source, the paired shader,
 the answer-table flag, the dual-source and fetch-outputs-only flags and the varyings of the partners.
-The translator identity is a hash of the label `nxb-xlate msl`, V, `nxb_xlate::msl::TRANSLATOR_ID` (now `msl-2.13`) and `NXB_TEST_XLATE_SALT`.
+The translator identity is a hash of the label `nxb-xlate msl`, V, `nxb_xlate::msl::TRANSLATOR_ID` (now `msl-2.14`) and `NXB_TEST_XLATE_SALT`.
 V is a hash of the engine files that `dm/gfx/tools/dmsh_chain.py` lists in `FILES`, and the options string `debug=True reduced=True`. No Rust source goes into V.
 A change of the translator translates again only when someone increases `TRANSLATOR_ID` by hand. Without the increase, the store gives the old MSL. A failure is not stored.
 
