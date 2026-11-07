@@ -1,12 +1,13 @@
 //! The build steps that boot the game in the Mac host (`<work>/tools/dmhost`, headless and silent), as the NSP script
 //! runs them: the NRO capture, the heap and address region checks of a provisional profile, the shader captures
-//! (GLSLC, Vulkan, GL) and the Unreal shader decode. Each boot has its own run folder under `<work>/tmp`, its log
-//! under `<work>/logs`, a time limit and a test that ends it early. Every step keeps its output where the next build
-//! finds it and skips the boot while that output is complete.
+//! (GLSLC, Vulkan, GL), the JIT capture of an iOS build and the Unreal shader decode. Each boot has its own run folder
+//! under `<work>/tmp`, its log under `<work>/logs`, a time limit and a test that ends it early. Every step keeps its
+//! output where the next build finds it and skips the boot while that output is complete.
 
 pub(crate) mod captures;
 pub(crate) mod checks;
 pub(crate) mod inputs;
+pub(crate) mod jit;
 pub(crate) mod nro;
 pub(crate) mod run;
 pub(crate) mod uedec;

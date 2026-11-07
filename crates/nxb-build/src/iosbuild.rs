@@ -1,6 +1,6 @@
 //! `nxb build --platform ios`: the NSP script's iOS branch as stages. Extract and split, then the shader step (the
-//! iOS libraries `<work>/shader/ios/b-<V>`, from the same translation as the Mac ones), the "app build" (the script's
-//! `build_ipa.sh` up to `xcodebuild` and the signature, in [`crate::ios::ipa`]) and the "IPA pack". The rewrite
+//! iOS libraries `<work>/shader/ios/b-<V>`, from the same translation as the Mac ones), the "JIT capture" of a game that imports
+//! `nn::jit` ([`crate::boot::jit`]), the "app build" (the script's `build_ipa.sh` up to `xcodebuild` and the signature, in [`crate::ios::ipa`]) and the "IPA pack". The rewrite
 //! (`patched_<package>`) comes from the work folder, as for the Mac app. A Vulkan or OpenGL game skips the split and
 //! the NVN chain: its shader step is nxb-layer's (`<work>/shader/ios/vk` or `ios/gl`). Events are those of the other
 //! platform.
@@ -14,7 +14,7 @@ use crate::layer::Gfx;
 use crate::order::{Stage, Work};
 use nxb_model::ContentKey;
 use std::cell::RefCell;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 /// The stages of an iOS build. A Vulkan or OpenGL game (the extract's graphics API, before the extract the profile's
@@ -64,11 +64,17 @@ pub(crate) fn nodes(a: &Args, b: &Build) -> Vec<Node> {
             reused: None,
         }),
     }
-    let shader = nodes.len() - 1;
+    nodes.push(Node {
+        name: "JIT capture".into(),
+        deps: vec![nodes.len() - 1],
+        key: key("jit", &[("work", b.work.display().to_string())]),
+        reused: None,
+    });
+    let jit = nodes.len() - 1;
     let one = |name: &str| {
         vec![Node {
             name: name.into(),
-            deps: vec![shader],
+            deps: vec![jit],
             key: key(name, &[("out", b.out.display().to_string())]),
             reused: None,
         }]
@@ -81,7 +87,7 @@ pub(crate) fn nodes(a: &Args, b: &Build) -> Vec<Node> {
         nodes.extend(vec![
             Node {
                 name: "app build".into(),
-                deps: vec![shader],
+                deps: vec![jit],
                 key: key(
                     "app",
                     &[
@@ -94,7 +100,7 @@ pub(crate) fn nodes(a: &Args, b: &Build) -> Vec<Node> {
             },
             Node {
                 name: "IPA pack".into(),
-                deps: vec![shader + 1],
+                deps: vec![jit + 1],
                 key: key("pack", &[("out", b.out.display().to_string())]),
                 reused: None,
             },
@@ -112,27 +118,15 @@ fn layer_stage(g: Gfx) -> &'static str {
     }
 }
 
-/// `uses_jit`: main imports `nn::jit::CreateJitEnvironment` (Super Mario 64 of Super Mario 3D All-Stars).
-fn uses_jit(exefs: &Path) -> Result<bool, String> {
-    let main = exefs.join("main");
-    if !main.is_file() {
-        return Ok(false);
-    }
-    let (img, ..) = crate::host::guess::read_nso(&main)?;
-    Ok(crate::host::nsofacts::dynsyms(&img)?
-        .iter()
-        .any(|s| !s.1 && s.0.starts_with("_ZN2nn3jit20CreateJitEnvironment")))
-}
-
 /// The script's environment for `build_ipa.sh`, from the build's plan.
 fn inputs(a: &Args, b: &Build) -> Result<ipa::Inputs, String> {
     let w = &b.work;
     let ex = w.join("extract").join(&b.package);
     let base_ex = w.join("extract/v0");
     let p = |x: PathBuf| Some(x.to_string_lossy().into_owned());
-    if !ex.join("jit/jit.img").is_file() && uses_jit(&ex.join("ExeFS"))? {
+    if !ex.join("jit/jit.img").is_file() && crate::boot::jit::uses_jit(&ex.join("ExeFS"))? {
         return Err(format!(
-            "unsupported: main imports nn::jit, and the iPhone needs an image of the code the game's JIT plugin makes ({}): the JIT capture (two boots with DM_JIT_CAPTURE and jit_capture.py) is not ported to nxb (run the script)",
+            "main imports nn::jit, and the JIT capture made no image of the code the game's JIT plugin makes ({})",
             ex.join("jit/jit.img").display()
         ));
     }
@@ -269,6 +263,7 @@ pub(crate) fn run(a: &Args, b: &Build, p: &Arc<Progress>) -> Result<(), String> 
                     crate::pipeline::shaders_and_archive(a2, b, p).map(|o| o.shaders)
                 }))
             }
+            (_, _, "JIT capture") => Work::Turn(Box::new(move || crate::boot::jit::stage(b, p))),
             (_, _, "game framework") => Work::Turn(Box::new(move || {
                 // route C's shell: the game's framework alone, the game files stay where they are
                 let inp = inputs(a, b)?;

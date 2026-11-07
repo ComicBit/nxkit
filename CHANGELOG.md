@@ -14,8 +14,8 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
   Stored, zlib and LZ4 blocks decode in nxb. Oodle blocks and shader groups decode with the game's own decoder in the Mac host (`DM_OODLE_SERVE`).
   An encrypted container opens with the AES-256 key that main holds for the paks. The reference script has no key for these containers.
   The tests use synthetic containers and a fake decoder. No real IoStore game was run.
-
 - `nxb build --platform ios` builds the iPhone app of a Vulkan or OpenGL game. The stage `Vulkan shaders` (or `GL shaders`) writes `<work>/shader/ios/vk` (or `gl`), and the IPA has it in `msl/vk` (or `msl/gl`). The NVN split and chain do not run. Unit tests only, no real game IPA and no device test.
+- The JIT capture is ported. An iOS build of a game whose main imports `nn::jit` boots the game in the Mac host and builds `jit/jit.img` with `nxb_rewrite::jit`, the port of `jit_capture.py`. The build no longer stops when `jit.img` is missing. `--platform mac` sets `DM_JIT_CAPTURE` for such a game.
 
 ### Fixed
 
@@ -26,7 +26,7 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ### Known gaps
 
-- The known gaps of 0.7.0 apply, except the IoStore shader libraries.
+- The known gaps of 0.7.0 apply, except the IoStore shader libraries, the lean geometry kernels, the JIT capture and the iPhone app of a Vulkan or OpenGL game.
 
 ## 0.7.0
 

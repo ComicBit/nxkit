@@ -41,8 +41,11 @@ fn a_vulkan_or_gl_game_has_the_layer_stage_and_no_nvn_stages() {
     for (api, stage) in [("vulkan", "Vulkan shaders"), ("gl", "GL shaders")] {
         let b = build(&format!("plan-{api}"), Some(api));
         let n = nodes(&Args::default(), &b);
-        assert_eq!(names(&n), ["extract v0", stage, "app build", "IPA pack"]);
-        assert_eq!(deps(&n), [vec![], vec![0], vec![1], vec![2]]);
+        assert_eq!(
+            names(&n),
+            ["extract v0", stage, "JIT capture", "app build", "IPA pack"]
+        );
+        assert_eq!(deps(&n), [vec![], vec![0], vec![1], vec![2], vec![3]]);
         assert!(n[1].reused.is_none());
         keys.push(n[1].key);
         let inp = inputs(&Args::default(), &b).unwrap();
@@ -64,8 +67,16 @@ fn the_layer_stage_feeds_the_framework_and_the_xcode_project() {
         ..Args::default()
     };
     let n = nodes(&a, &b);
-    assert_eq!(names(&n), ["extract v0", "Vulkan shaders", "prepare Xcode"]);
-    assert_eq!(n[2].deps, [1]);
+    assert_eq!(
+        names(&n),
+        [
+            "extract v0",
+            "Vulkan shaders",
+            "JIT capture",
+            "prepare Xcode"
+        ]
+    );
+    assert_eq!(n[3].deps, [2]);
     let a = Args {
         shell_framework: Some("fw".into()),
         ..Args::default()
@@ -73,9 +84,14 @@ fn the_layer_stage_feeds_the_framework_and_the_xcode_project() {
     let n = nodes(&a, &b);
     assert_eq!(
         names(&n),
-        ["extract v0", "Vulkan shaders", "game framework"]
+        [
+            "extract v0",
+            "Vulkan shaders",
+            "JIT capture",
+            "game framework"
+        ]
     );
-    assert_eq!(n[2].deps, [1]);
+    assert_eq!(n[3].deps, [2]);
     let _ = std::fs::remove_dir_all(&b.work);
 }
 
@@ -89,11 +105,15 @@ fn an_nvn_game_keeps_the_split_and_the_chain() {
             "extract v0",
             "shader split",
             "iOS shaders",
+            "JIT capture",
             "app build",
             "IPA pack"
         ]
     );
-    assert_eq!(deps(&n), [vec![], vec![0], vec![1], vec![2], vec![3]]);
+    assert_eq!(
+        deps(&n),
+        [vec![], vec![0], vec![1], vec![2], vec![3], vec![4]]
+    );
     assert_eq!(n[1].key, b.nodes[1].key);
     assert_eq!(
         inputs(&Args::default(), &b).unwrap().gfxapi.as_deref(),
