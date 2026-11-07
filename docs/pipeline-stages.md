@@ -396,6 +396,7 @@ Added in 0.4.0:
   The `pso_offline` run for iOS gave `prebuilt.tsv`, `archive.tsv` and `bases.mtl4-json` byte-identical on 40 pairs.
 
 `nxb build --platform ios` has the stages `extract`, `shader split`, `iOS shaders`, `app build` and `IPA pack`, with the usual events.
+A Vulkan or OpenGL game has the stages `extract`, `Vulkan shaders` (or `GL shaders`), `app build` and `IPA pack`. Refer to [Vulkan and OpenGL games](#vulkan-and-opengl-games).
 The shader step runs with the iOS target (and builds the Mac libraries also). The wiring is checked: `--dry-run` prints the graph, and a run reaches the first check with real inputs.
 **It was not run end to end**, because no iOS libraries were available and the translator run takes minutes. The default platform is `ios`, as in the reference script.
 
@@ -432,11 +433,21 @@ For a Vulkan or OpenGL game, the build changes these stages:
 - The Mac app ships `msl/vk` or `msl/gl` and not `b-<chain>`. The host gets `GFXAPI` and `DM_MSL_DIR`.
 - The reuse key is `<work>/shader/vk.key` (or `gl.key`). It hashes the translator id, the images and `main`.
 
-With `--also-ios`, the stage also writes `<work>/shader/ios/vk` (or `gl`) for the iPhone SDK. The iOS app build refuses a Vulkan or OpenGL game.
+With `--also-ios`, the stage also writes `<work>/shader/ios/vk` (or `gl`) for the iPhone SDK (`-sdk iphoneos`).
+
+`nxb build --platform ios` builds an iPhone app for a Vulkan or OpenGL game, as `build_ipa_from_nsp.py` does:
+
+- The stages are `extract`, `Vulkan shaders` (or `GL shaders`), `app build` and `IPA pack`. The plan finds the API from the extract, else from the `graphics` key of the profile.
+  If the plan finds NVN but the extract shows Vulkan or OpenGL, the stage `shader split` says "not needed", and the stage `iOS shaders` runs `nxb-layer`.
+- The shader stage runs `nxb-layer` with the iOS output. It writes the Mac library and `<work>/shader/ios/vk` (or `gl`).
+- The app build gets `GFXAPI=vulkan` (or `gl`) and `MSL_IOS=<work>/shader/ios`. It copies `shader_map.tsv` and `pso_manifest.tsv` of the profile, and not `c1_full.tsv` or `cb_extent.tsv`. It makes no pipeline archive.
+- The IPA has `Payload/DmIOS.app/msl/vk/vk_shaders.metallib` and `vk_shaders.tsv` (or `msl/gl/gl_shaders.*`). The app sets `DM_MSL_DIR` to its `msl` folder, and the host layer reads the library from there.
+- If the iOS library is missing, the app build stops with "no iOS Vulkan shader library" (or "no iOS GL shader library").
 The capture boot (`capture_shaders` of the reference script) runs in the extract stage, before the Mac shader stage.
 
 Measured on Hades (`0100535012974000`): 74 of 74 SPIR-V modules translate, and `xcrun metal` compiles all of them (2 s). The app builds and ships `msl/vk`.
 The game was not started. The OpenGL path has unit tests only, no real game.
+The iOS app build of a Vulkan or OpenGL game has unit tests for the stage graph and the IPA entries only. No real game IPA was built, and there is no device test.
 
 ## Pipeline archive
 
