@@ -212,7 +212,14 @@ pub fn main(args: &[String]) -> i32 {
                     "nxb-extract: closing the images took {c:.1} s more (the disk taking the data)"
                 );
             }
-            0
+            match s.split_unsupported {
+                Some(why) => {
+                    let e = crate::ExtractError::Unsupported(why);
+                    println!("[RED] {e}");
+                    e.exit_code()
+                }
+                None => 0,
+            }
         }
         Err(e) => {
             if let crate::ExtractError::Damaged(p) = &e {
