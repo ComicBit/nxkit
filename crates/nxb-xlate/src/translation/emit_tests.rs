@@ -329,6 +329,31 @@ fn atomg_inc_is_a_compare_and_swap_loop() {
 }
 
 #[test]
+fn atoms_inc_and_dec_are_a_compare_and_swap_loop() {
+    // ATOMS.INC R6, [R19], R20 and ATOMS.DEC R6, [R19], R20
+    for hi in [0x000f_e200_0180_0000, 0x000f_e200_0200_0000] {
+        let t = ampere_cs_text(&[(0x0000_0014_1306_738c, hi)]).expect("emit");
+        let retry = t.find("op 53 0 0 0 d=L1,").expect(&t);
+        let load = t.find("op 4a 8 0 0 d=l").expect(&t);
+        let cas = t.find("op 5 8 0 0 d=l").expect(&t);
+        let back = t.find("op 19 0 0 0 d=L1,").expect(&t);
+        assert!(retry < load && load < cas && cas < back, "{t}");
+    }
+}
+
+#[test]
+fn atoms_cas_gives_the_old_value() {
+    // ATOMS.CAS R6, [R19], R20, R21 and ATOMS.CAST.SPIN R6, [R19], R20, R21
+    let cas = ampere_cs_text(&[(0x0000_0014_1306_738d, 0x000f_e200_0000_0015)]).expect("emit");
+    let spin = ampere_cs_text(&[(0x0000_0014_1306_738d, 0x000f_e200_0180_0015)]).expect("emit");
+    // The success test: the old value compared with the expected one, then 1 or 0
+    let success = |t: &str| t.contains("#1,#0,");
+    assert!(cas.contains("op 5 8 0 0 d=l"), "{cas}");
+    assert!(!success(&cas), "{cas}");
+    assert!(success(&spin), "{spin}");
+}
+
+#[test]
 fn f2ip_packs_two_saturated_bytes() {
     // F2IP.U8.TRUNC R0, R1, R2
     let f2ip = (0x243 | APT | 1 << 24 | 2 << 32, 0xff | 4 << 8);
