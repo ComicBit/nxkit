@@ -321,9 +321,6 @@ pub(crate) fn run(a: &Args, b: &Build, p: &Progress) -> Result<String, String> {
         _ => container(a, b, p)?,
     };
     let aoc = dlc(a, b, p)?;
-    if b.prov {
-        crate::provisional::runs_check(a, b, p)?;
-    }
     let note = crate::rewrite::ensure(&b.engine, &b.profile.0, &b.work, &b.package)?;
     // the rewrite is skipped when this engine is not the one the port was checked against: without rewritten modules
     // the app cannot be made, and saying so here is clearer than the app stage's missing file
@@ -343,9 +340,10 @@ pub(crate) fn run(a: &Args, b: &Build, p: &Progress) -> Result<String, String> {
     }
     if b.prov {
         crate::provisional::refine(b, p)?;
-        if b.src.source == Source::Packages {
-            crate::provisional::take_tables(b)?;
-        }
+    }
+    crate::boot::run::after_rewrite(a, b, p)?;
+    if b.prov && b.src.source == Source::Packages {
+        crate::provisional::take_tables(b)?;
     }
     let what = if b.src.source == Source::Packages {
         "images"

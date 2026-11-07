@@ -22,6 +22,7 @@
 //! lead's `shaderbuild build` as a process from here is not wired yet.
 
 mod app_stage;
+mod boot;
 mod args;
 pub mod events;
 mod extract_stage;
