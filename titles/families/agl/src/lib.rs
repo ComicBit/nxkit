@@ -1,12 +1,11 @@
 //! The engine family of Nintendo EPD games on sead, agl and gsys.
 //!
-//! What is here was seen in one game, The Legend of Zelda: Ocarina of Time for Nintendo Switch 2
-//! (`0400486024DEC000`), and is believed to hold for the whole engine. A second game of the family confirms each
-//! fact or moves it into its title module.
-
+//! A fact goes here when every game of the family shows it. A fact that one game of the family does not share
+//! stays in the title modules. Ocarina of Time (`0400486024DEC000`) and Tears of the Kingdom (`0100F2C0115B6000`)
+//! set `render_cond`, `tex_flush_upload` and `tex_dirty_upload`. Breath of the Wild (`01007EF00011E000`) sets none
+//! of them (`seedds/nxnative` `dm/games/*/game.tsv` at `f25fa956`). So they are title facts.
 use nxtitle::{
-    BuildHooks, Evidence, Fact, Family, Match, Need, RuntimeHooks, ShaderRole, ShaderView,
-    TitleFacts,
+    BuildHooks, Evidence, Fact, Family, Match, RuntimeHooks, ShaderRole, ShaderView, TitleFacts,
 };
 
 /// The family.
@@ -14,41 +13,6 @@ pub struct Agl;
 
 /// The one instance the registry lists.
 pub static AGL: Agl = Agl;
-
-const OOT_README: Evidence = Evidence::Recorded {
-    source: "seedds/nxnative dm/games/0400486024DEC000/README.md at c8bfa161",
-    read: "2026-11-07",
-};
-
-const NEEDS: &[Fact<Need>] = &[
-    Fact::new(
-        Need {
-            capability: "render_cond",
-            setting: "on",
-            why: "agl clears a copy of the prepass depth again under a render condition the console skips. Run \
-                  unconditionally, the opaque pass's EQUAL depth test fails everywhere.",
-        },
-        OOT_README,
-    ),
-    Fact::new(
-        Need {
-            capability: "tex_flush_upload",
-            setting: "on",
-            why: "the CPU writes terrain height, blend and hole maps into textures after creating them. Without \
-                  the upload they stay zero: blue holes in the ground. Also seen in Tears of the Kingdom.",
-        },
-        OOT_README,
-    ),
-    Fact::new(
-        Need {
-            capability: "tex_dirty_upload",
-            setting: "on",
-            why: "the terrain maps are rewritten from the CPU as tile slots are reused. Also seen in Tears of the \
-                  Kingdom.",
-        },
-        OOT_README,
-    ),
-];
 
 impl BuildHooks for Agl {
     fn shader_role(&self, shader: &ShaderView<'_>) -> Option<Fact<ShaderRole>> {
@@ -66,11 +30,7 @@ impl BuildHooks for Agl {
     }
 }
 
-impl RuntimeHooks for Agl {
-    fn needs(&self) -> &'static [Fact<Need>] {
-        NEEDS
-    }
-}
+impl RuntimeHooks for Agl {}
 
 impl Family for Agl {
     fn id(&self) -> &'static str {
@@ -123,6 +83,6 @@ mod tests {
             Some(ShaderRole::Upscaler { .. })
         ));
         assert!(r.is_some_and(|f| !f.evidence.is_checked()));
-        assert!(AGL.needs().iter().all(|n| n.evidence.is_checked()));
+        assert!(AGL.needs().is_empty());
     }
 }

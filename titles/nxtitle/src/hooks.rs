@@ -1,6 +1,6 @@
 //! The questions a family or title answers. Every method has a default of "no opinion".
 
-use crate::Fact;
+use crate::{Fact, Runtime, Service};
 
 /// A shader stage.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -117,6 +117,11 @@ pub trait RuntimeHooks: Sync {
     }
     /// Who paces the frames.
     fn pacing(&self) -> Option<Fact<Pacing>> {
+        None
+    }
+    /// The engine that runs a service for this game. `None` leaves it to the next layer, and the core default is
+    /// [`Runtime::Nxnative`].
+    fn runtime(&self, _service: Service) -> Option<Fact<Runtime>> {
         None
     }
 }

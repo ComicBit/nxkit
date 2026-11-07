@@ -1,7 +1,8 @@
 //! The title module of The Legend of Zelda: Ocarina of Time for Nintendo Switch 2 (`0400486024DEC000`).
 //!
 //! The game runs on Nintendo EPD's engine (family `agl`) on NVN2. What every game of that engine shares is in the
-//! family. This module holds only what is known to be true for this game.
+//! family. This module holds what is known to be true for this game. `render_cond`, `tex_flush_upload` and
+//! `tex_dirty_upload` come from agl code, but Breath of the Wild does not set them, so they are here.
 //!
 //! The upscaler choice and the frame pacing have no answer yet, so the core defaults apply. The seed list for the
 //! prepare step is `pso_manifest.tsv` in `seedds/nxnative` `dm/games/0400486024DEC000/`.
@@ -44,6 +45,33 @@ const NEEDS: &[Fact<Need>] = &[
             setting: "on",
             why: "the SDK allocator keeps freed pages mapped until a map fails, then gives them back. Without a \
                   failing map past the application pool the memory only grows.",
+        },
+        README,
+    ),
+    Fact::new(
+        Need {
+            capability: "render_cond",
+            setting: "on",
+            why: "agl clears a copy of the prepass depth again under a render condition the console skips. Run \
+                  unconditionally, the opaque pass's EQUAL depth test fails everywhere.",
+        },
+        README,
+    ),
+    Fact::new(
+        Need {
+            capability: "tex_flush_upload",
+            setting: "on",
+            why: "the CPU writes terrain height, blend and hole maps into textures after creating them. Without \
+                  the upload they stay zero: blue holes in the ground. Also seen in Tears of the Kingdom.",
+        },
+        README,
+    ),
+    Fact::new(
+        Need {
+            capability: "tex_dirty_upload",
+            setting: "on",
+            why: "the terrain maps are rewritten from the CPU as tile slots are reused. Also seen in Tears of the \
+                  Kingdom.",
         },
         README,
     ),

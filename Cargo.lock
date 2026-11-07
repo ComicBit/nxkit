@@ -645,6 +645,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "nxgame-botw"
+version = "0.9.0"
+dependencies = [
+ "nxb-profile",
+ "nxtitle",
+]
+
+[[package]]
 name = "nxgame-oot"
 version = "0.9.0"
 dependencies = [
@@ -664,6 +672,7 @@ name = "nxtitles"
 version = "0.9.0"
 dependencies = [
  "nxfamily-agl",
+ "nxgame-botw",
  "nxgame-oot",
  "nxtitle",
 ]
