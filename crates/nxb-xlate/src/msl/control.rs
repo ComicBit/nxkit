@@ -41,6 +41,9 @@ impl Em<'_> {
         if let Some(b) = super::hmma::body(self, i)? {
             return Ok(b);
         }
+        if let Some(b) = super::shared_store::body(self, i)? {
+            return Ok(b);
+        }
         self.func = i;
         self.may_return = false;
         self.hmma_caller = false;

@@ -148,10 +148,13 @@ fn a_mesh_shader_is_a_body_and_two_mesh_functions() {
     assert!(msl.contains(body), "{msl}");
     assert!(msl.contains("threadgroup uint (&sm0)["), "{msl}");
     assert!(!msl.contains("kernel void"), "{msl}");
-    // the byte stores of the primitive indices are a compare-and-swap loop on the stage memory
-    assert!(msl.contains("threadgroup atomic_uint*"), "{msl}");
+    // a byte store of a primitive index is one Metal store on the stage memory
     assert!(
-        msl.contains("atomic_compare_exchange_weak_explicit"),
+        msl.contains("((threadgroup uchar*)&sm0[0])[uint(a0)] = uchar(uint(a1));"),
+        "{msl}"
+    );
+    assert!(
+        !msl.contains("atomic_compare_exchange_weak_explicit"),
         "{msl}"
     );
     assert!(msl.contains("[[mesh]] void main0("), "{msl}");

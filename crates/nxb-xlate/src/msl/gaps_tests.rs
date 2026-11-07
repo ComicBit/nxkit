@@ -265,6 +265,66 @@ fn the_hmma_helper_touches_a_slot_only_for_a_chain() {
     );
 }
 
+/// The compute sample that calls the shared store helper `name` for `sm0` with a byte offset and a value.
+fn shared_store_sample(name: &str, big: bool) -> B {
+    let mut b = if big { big_shared() } else { compute() };
+    let helper = b.s.info.ast.new_block(BlockType::Main, None);
+    b.s.info.functions.push(crate::structured::StructFunction {
+        main_block: helper,
+        name: name.into(),
+        return_type: AggType::VOID,
+        in_arguments: vec![AggType::U32; 2],
+        out_arguments: vec![],
+        locals: vec![],
+    });
+    let src = vec![b.k(1), b.k(6), b.k(7)];
+    let call = b.op(Inst::Call, StorageKind::None, 0, src);
+    b.put(call);
+    b
+}
+
+#[test]
+fn a_byte_store_to_shared_memory_is_one_metal_store() {
+    let m = msl(&shared_store_sample("SharedStore8_0", false));
+    assert!(m.contains("fn1(t2, t3, "), "{m}");
+    let body = &m[m.find("void fn1(").expect("helper")..];
+    let body = &body[..body.find("\n}\n").expect("end")];
+    assert!(
+        body.contains("((threadgroup uchar*)&sm0[0])[uint(a0)] = uchar(uint(a1));"),
+        "{body}"
+    );
+    assert!(!body.contains("atomic"), "{body}");
+    assert!(!body.contains("while"), "{body}");
+}
+
+#[test]
+fn a_half_word_store_to_shared_memory_is_one_aligned_may_alias_store() {
+    let m = msl(&shared_store_sample("SharedStore16_0", false));
+    let body = &m[m.find("void fn1(").expect("helper")..];
+    let body = &body[..body.find("\n}\n").expect("end")];
+    assert!(
+        body.contains("typedef ushort __attribute__((may_alias)) dm_ushort_alias;"),
+        "{body}"
+    );
+    assert!(
+        body.contains(
+            "((threadgroup dm_ushort_alias*)&sm0[0])[uint(a0) >> 1u] = ushort(uint(a1));"
+        ),
+        "{body}"
+    );
+}
+
+#[test]
+fn a_shared_store_of_a_spilled_kernel_is_a_device_store() {
+    let m = msl(&shared_store_sample("SharedStore8_0", true));
+    let body = &m[m.find("void fn1(").expect("helper")..];
+    let body = &body[..body.find("\n}\n").expect("end")];
+    assert!(
+        body.contains("((device uchar*)&sm0[0])[uint(a0)] = uchar(uint(a1));"),
+        "{body}"
+    );
+}
+
 fn bind_1d_level() -> B {
     super::bind_tests::sample(SamplerType::TEXTURE_1D, 1 << 5, |_, u, v| vec![u, v])
 }
@@ -300,6 +360,9 @@ fn gaps_metal_compiles_the_samples() {
         ("cs_spill_wg", big_shared_with_workgroup_id()),
         ("cs_first_store", first_store_sample(false)),
         ("cs_hmma", hmma_sample()),
+        ("cs_sts8", shared_store_sample("SharedStore8_0", false)),
+        ("cs_sts16", shared_store_sample("SharedStore16_0", false)),
+        ("cs_sts8_spill", shared_store_sample("SharedStore8_0", true)),
         ("cs_wide", super::wide_tests::wide_sample(&[0, 1, 2, 5], 0)),
         (
             "ps_pool",

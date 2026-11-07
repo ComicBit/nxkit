@@ -9,7 +9,7 @@
 ///
 /// Bump the number whenever a change alters the MSL text or the reflection for an unchanged input: a new emitter
 /// choice, a new helper, a new reflection field or a changed ABI constant. A change that keeps the output equal needs no bump.
-pub const TRANSLATOR_ID: &str = "msl-2.15";
+pub const TRANSLATOR_ID: &str = "msl-2.16";
 
 pub mod abi;
 #[cfg(test)]
@@ -63,6 +63,7 @@ pub mod prelude;
 #[cfg(test)]
 mod raw_last_tests;
 pub mod refl;
+pub mod shared_store;
 pub mod spill;
 #[cfg(test)]
 mod tensor_tests;

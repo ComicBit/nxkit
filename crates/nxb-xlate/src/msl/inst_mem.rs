@@ -417,10 +417,26 @@ impl Em<'_> {
             .get(id as usize)
             .ok_or("call to an unknown function")?;
         let ret = f.return_type;
+        let inputs = f.in_arguments.clone();
         let mut args = Vec::new();
         for i in 1..o.sources.len() {
             let a = self.src(o, i)?;
-            args.push(self.eval(a)?.s);
+            match inputs.get(i - 1) {
+                // A parameter is a reference: a literal or an expression goes through a variable.
+                Some(ty) => {
+                    let v = self.get(*ty, a)?;
+                    args.push(
+                        if v.s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                            && !v.s.starts_with(|c: char| c.is_ascii_digit())
+                        {
+                            v.s
+                        } else {
+                            self.hoist_text(&v.s, &msl_type(*ty)?)
+                        },
+                    );
+                }
+                None => args.push(self.eval(a)?.s),
+            }
         }
         if super::hmma::is_helper(self, id as usize) {
             args.push(super::hmma::ARGS.to_string());

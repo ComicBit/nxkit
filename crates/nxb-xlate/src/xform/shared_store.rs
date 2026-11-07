@@ -1,6 +1,7 @@
 //! `SharedStoreSmallIntCas` and `HelperFunctionManager.GenerateSharedStore`: a store of a byte or a half word to shared
 //! memory becomes a call of a helper that inserts it into its word with a compare-and-swap loop, since neighbouring
-//! threads write neighbouring bytes.
+//! threads write neighbouring bytes. The MSL emitter replaces the body of the helper with one byte or half word store
+//! (`msl/shared_store.rs`).
 use super::XformCtx;
 use super::helper::{B, Function};
 use crate::ir::{Block, Inst, Ir, StorageKind};
