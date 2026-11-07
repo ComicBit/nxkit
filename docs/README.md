@@ -24,6 +24,7 @@ The own shader front end is not byte-identical either. Its raw path is on by def
 | 13 | [contributing-architecture.md](contributing-architecture.md) | rules for contributors |
 | 14 | [research/](research/README.md) | short notes on the studies behind the design |
 | 15 | [analysis/oot-open-issues.md](analysis/oot-open-issues.md) | the cause of three defects of one title on Apple GPUs |
+| 16 | [plans/runtime-hooks.md](plans/runtime-hooks.md) | the plan for runtime hooks and the nxkit runtime, with owners |
 
 ## Data
 
