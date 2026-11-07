@@ -11,7 +11,8 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
   A memory descriptor in the uniform register of `LDG`, `STG`, `ATOMG` and `RED` is no longer added to the address.
 - The Metal compiler takes up to 1,024 nested brackets (`-fbracket-depth=1024`). Before, a deep expression failed with "bracket nesting level exceeded maximum of 256".
 - The split no longer reads the words of an NVN2 control section in a `BAHS` file as a program entry.
-- `TRANSLATOR_ID` is `msl-2.5`.
+- A raw global access first checks the storage buffer it chose last. A loop over one buffer no longer searches all buffers on each access.
+- `TRANSLATOR_ID` is `msl-2.6`.
 
 ## 0.6.7
 

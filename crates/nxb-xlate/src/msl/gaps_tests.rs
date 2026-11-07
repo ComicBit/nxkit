@@ -34,6 +34,7 @@ fn big_shared() -> B {
         name: "big".into(),
         ty: AggType(AggType::U32.0 | AggType::ARRAY.0),
         array_length: 12288,
+        zero_init: false,
     });
     b
 }

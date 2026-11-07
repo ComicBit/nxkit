@@ -406,3 +406,23 @@ fn metal_compiles_the_task_and_mesh_functions() {
         );
     }
 }
+
+#[test]
+fn the_last_entry_of_a_raw_lookup_stays_in_the_body() {
+    // S2R R5, SR_TID.X, then LDG.E R6, [R5.64 + UR4] through an address traced to no storage buffer, kept by a store
+    // of R6
+    let ldg = (0x0000_0004_0506_7981, 0x000e_a200_081e_890f | 0x3f << 52);
+    let mut ops = ms_ops();
+    let s2r = (0x7919 | 5 << 16, 0x000e_2600_0000_2100);
+    let (lo, hi) = ast(0x80, 6);
+    ops.extend([s2r, ldg, (lo, hi | 0x3f << 52)]);
+    let t = run(&mesh("ms"), &ops).expect("translate");
+    let msl = &t.libraries[0].msl;
+    let body = &msl[msl.find("void dm_body_main0(").expect("body")..];
+    let (body, entries) = body.split_at(body.find("[[mesh]] void main0(").expect("entry"));
+    assert!(
+        body.lines().any(|l| l.starts_with("    uint lm") && l.ends_with(" = {};")),
+        "{msl}"
+    );
+    assert!(!entries.contains(" = {};"), "{msl}");
+}
