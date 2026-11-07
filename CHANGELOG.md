@@ -28,7 +28,9 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
   Swizzle value 1 is `.F32`, the 32-bit float in both lanes. `HSETP2` and `HSET2` with `.FTZ` compare a subnormal half as zero.
 - `I2F` from a 32-bit integer to a 32-bit float and `F2F.F16.F32` apply `.RM`, `.RP` and `.RZ` (upstream `645d3029`). Before, both rounded to nearest.
   The 32-bit integer division of the compiler starts with `I2F.U32.RP`. Rounded to nearest, a value above 2^24 came out one ulp off in about half the cases.
-- `TRANSLATOR_ID` is `msl-2.13`.
+- `MUFU.SIN` and `MUFU.COS` keep the fraction of a large number of turns (upstream `b5948342`). The lowering is sin or cos of (t - rint(t)) * 2pi.
+  Before, t * 2pi lost the fraction, and Metal's fast sin and cos gave 0 past 2^20 turns. Upstream saw the SSAO of Donkey Kong Bananza lose its ambient occlusion in the lower right.
+- `TRANSLATOR_ID` is `msl-2.14`.
 
 ## 0.6.7
 

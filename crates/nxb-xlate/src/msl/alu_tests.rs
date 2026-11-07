@@ -204,3 +204,43 @@ fn f2f_to_nearest_is_plain() {
     let m = kept_srcs(&[F2F_RN], &[19]);
     assert!(!m.contains("& 65535"), "{m}");
 }
+
+/// `MUFU.COS R6, R19`.
+const MUFU_COS: (u64, u64) = (0x0000_0013_0006_7308, 0x000f_e600_0000_0000);
+/// `MUFU.SIN R6, R19`.
+const MUFU_SIN: (u64, u64) = (0x0000_0013_0006_7308, 0x000f_e600_0000_0400);
+
+/// `f` of the turns through their fraction: `r = rint(t)`, `d = (t - r)`, `a = (d * 2pi)`, then `f(a)`.
+fn lowered(op: (u64, u64), f: &str) {
+    let m = kept_srcs(&[op], &[19]);
+    let lhs = |l: &str| l.trim().split(" = ").next().unwrap_or("").to_string();
+    let lines: Vec<&str> = m.lines().collect();
+    let at = lines
+        .iter()
+        .position(|l| l.contains(" = rint("))
+        .unwrap_or_else(|| panic!("no rint\n{m}"));
+    let r = lhs(lines[at]);
+    let t = &lines[at][lines[at].find("rint(").expect("rint") + 5..lines[at].len() - 2];
+    let d = lhs(lines[at + 1]);
+    let a = lhs(lines[at + 2]);
+    assert_eq!(lines[at + 1].trim(), format!("{d} = ({t} - {r});"), "{m}");
+    assert_eq!(
+        lines[at + 2].trim(),
+        format!("{a} = ({d} * 6.2831855f);"),
+        "{m}"
+    );
+    assert!(
+        lines[at + 3].trim().ends_with(&format!("= {f}({a});")),
+        "{m}"
+    );
+}
+
+#[test]
+fn mufu_cos_takes_the_fraction_of_the_turns() {
+    lowered(MUFU_COS, "cos");
+}
+
+#[test]
+fn mufu_sin_takes_the_fraction_of_the_turns() {
+    lowered(MUFU_SIN, "sin");
+}
