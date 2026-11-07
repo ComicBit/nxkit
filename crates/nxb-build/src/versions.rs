@@ -61,8 +61,8 @@ pub(crate) fn missing(src: &Inputs, work: &Path, needed: &[&str]) -> Vec<String>
 /// - `explicit`: the packed version came from `-p` / `--package`. The script refuses that with an error when the
 ///   folder lacks it, and so does this (exit code 1).
 /// - Any other missing version (the profile's `package`, or one of its `shader_versions`) is a case the script
-///   handles with a derived profile and `nxb build` does not do yet: exit code 4, "not supported yet", so that the
-///   NX2Apple launcher builds the game with the script.
+///   handles with a derived profile and `nxb build` does not do yet: exit code 4, "not supported yet", so that a caller
+///   that falls back to the script on that code builds the game with it.
 pub(crate) fn check(
     src: &Inputs,
     work: &Path,
