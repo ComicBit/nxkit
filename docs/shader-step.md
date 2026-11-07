@@ -58,7 +58,7 @@ The step does this for each key:
 3. For each `Library`, it writes `<key><suffix>.metal`, compiles it and writes `<key><suffix>.metallib`. A library with a `Reflection` also gets `<key><suffix>.json`. The step writes `_b.json` last.
 4. When the translation has a `Side`, the step compiles `_b` and cuts it into `_b` and `_bx` at the metallib level. The cut keeps the alpha test entries and the logic op entries in `_bx`.
 5. The variant libraries `_bf`, `_bp` and `_bv` are optional. If one does not compile, the step skips it and removes its field from `_b.json`.
-6. A geometry shader (`gs`) needs no `geometry_topology` in its job. The translator makes the kernels for all input topologies, so the step writes `_b`, `_bg0` to `_bg4` and `_bgv`, each with its own `.json`.
+6. A geometry shader (`gs`) needs no `geometry_topology` in its job. The translator makes the kernels for all input topologies, so the step writes `_b`, `_bg0` to `_bg4` and `_bgv`, each with its own `.json`. A passthrough geometry shader also gives `_bl0`, `_bl1` and `_bl3`.
 7. The job of an NVN2 task or mesh shader (`ts`, `ms`) has stage `cs`, the code without its 0x80 byte SPH, `mesh_stage`, `stage_memory`, `local` and `shared`. It has no answer-table members. A job whose shader has shared memory of its own, or whose stage memory is past Metal's limit, carries `refused` in `mesh_stage`.
 
 The reasons of a failure are the reason strings of the reference build scripts (`translation failed`, `metal failed` and the reasons that the translator names).
@@ -66,7 +66,7 @@ A panic and a job that the step cannot read are `translation failed`. The step c
 A key that the translator does not do is a `ShaderError` of that key. The build continues.
 
 The translation store key has the translator identity, the job, the code, V, the source, the paired shader, the answer-table flag, the dual-source and fetch-outputs-only flags and the partner varyings.
-The translator identity is a hash of the label `nxb-xlate msl`, V, `nxb_xlate::msl::TRANSLATOR_ID` (now `msl-2.14`) and `NXB_TEST_XLATE_SALT`.
+The translator identity is a hash of the label `nxb-xlate msl`, V, `nxb_xlate::msl::TRANSLATOR_ID` (now `msl-2.15`) and `NXB_TEST_XLATE_SALT`.
 No Rust source goes into V. A change of the translator translates again only when someone increases `TRANSLATOR_ID` by hand. Without the increase, the store gives the old MSL. A failure is not stored.
 
 The output is not byte-identical to the output of the former C# translator and `spirv-cross`. No game ran with it yet (D20). Unit tests and Metal compile tests on built samples cover it.

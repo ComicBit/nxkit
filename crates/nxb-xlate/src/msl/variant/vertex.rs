@@ -16,7 +16,7 @@ use std::fmt::Write;
 /// The capture buffer binding.
 const CAPTURE_SLOT: u32 = 13;
 /// Words of the Maxwell attribute map: 16 fixed and 32 locations of 4 components.
-const CAPTURE_WORDS: u32 = 144;
+pub const CAPTURE_WORDS: u32 = 144;
 
 /// The layer entries.
 pub struct Layer {
