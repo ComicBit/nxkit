@@ -122,7 +122,9 @@ pub fn build(mut cfg: BuildConfig) -> Result<BuildReport, Fatal> {
     let total = crate::build_partial::prepare(&mut cfg, &out, &inputs.loc)?;
     let pairs = crate::build_shared::pairs(&cfg);
     let keys: Vec<String> = if cfg.keys.is_empty() {
-        inputs.loc.keys().cloned().collect()
+        // The keys the split did not find are reported as failed, so `_b_build.json` names every profile key.
+        let all: BTreeSet<&String> = inputs.loc.keys().chain(&inputs.unsplit).collect();
+        all.into_iter().cloned().collect()
     } else {
         let want: BTreeSet<String> = cfg.keys.iter().cloned().collect();
         let mut k: BTreeSet<String> = want.clone();

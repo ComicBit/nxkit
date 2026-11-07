@@ -140,13 +140,16 @@ pub fn ndsr_shaders(d: &[u8], label: &str, var: &mut BahsVar) -> Result<Vec<Foun
     let mut prog: Option<String> = None;
     while o + 16 <= d.len() {
         let (c, cl, k) = (rd(d, o)?, rd(d, o + 4)?, rd(d, o + 8)?);
-        if c == 0 && cl == 0 {
+        if c == 0 && cl == 0 && k == 0 && rd(d, o + 12)? == 0 {
             break;
         }
-        o += 16;
+        // Entries are 8 bytes, a shader's control section and code area two of them, so a data entry can shift
+        // the next shader by 8 (the second network of an NDVE file: u32 offset, u32 length << 4 | type).
         if !nvn2_at(d, c) {
+            o += 8;
             continue;
         }
+        o += 16;
         let ctl = cut(d, c, (cl >> 4).max(0x48));
         let code = cut(d, k, u32le(&ctl, 0x44).unwrap_or(0) as usize);
         let Some(st) = nvn2_stage(&ctl, &code) else {
@@ -174,6 +177,41 @@ pub fn ndsr_shaders(d: &[u8], label: &str, var: &mut BahsVar) -> Result<Vec<Foun
             ctl,
             code,
         });
+    }
+    Ok(out)
+}
+
+/// `ndve_shaders`: nn::ndve's movie enhancement file, the compute networks that upscale a game's movies. `NDVE`,
+/// +0xc the length of its NDSR pack, +0x14 the count of 8-byte model records, then the NDSR pack (offsets from its own
+/// start), then the networks. Each network control section names its own length (+0x30) and its code area's
+/// (+0x44), and the code area follows it.
+pub fn ndve_shaders(d: &[u8], label: &str, var: &mut BahsVar) -> Result<Vec<Found>, SplitError> {
+    if d.len() < 0x18 {
+        return Ok(Vec::new());
+    }
+    let pack = 0x18 + 8 * rd(d, 0x14)?;
+    let nets = pack + rd(d, 0xc)?;
+    let mut out = ndsr_shaders(d.get(pack..nets.min(d.len())).unwrap_or(&[]), label, var)?;
+    let mut c = nets;
+    while let Some(i) = d.get(c..).and_then(|s| memfind(s, &CTL_MAGIC)) {
+        c += i;
+        if c & 3 == 0 && nvn2_at(d, c) {
+            let (own, n) = (rd(d, c + 0x30)?, rd(d, c + 0x44)?);
+            let ctl = cut(d, c, own);
+            let code = cut(d, c + own, n);
+            if let Some(st) = nvn2_stage(&ctl, &code)
+                && code.len() == n
+                && check(st, &ctl, &code).is_none()
+            {
+                out.push(Found {
+                    place: format!("{label}#NDVE@{c:#x}"),
+                    stage: st,
+                    ctl,
+                    code,
+                });
+            }
+        }
+        c += 4;
     }
     Ok(out)
 }

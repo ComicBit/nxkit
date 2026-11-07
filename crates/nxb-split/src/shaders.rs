@@ -280,6 +280,52 @@ pub fn bnsh_shaders(d: &[u8], base: usize, label: &str) -> Result<Vec<Found>, Sp
                 code: code.to_vec(),
             });
         }
+        out.extend(task_mesh(d, base, prog, label, v)?);
+    }
+    Ok(out)
+}
+
+/// NVN2's task and mesh stages, at +0x40 and +0x48 of a BNSH program. An older BNSH's program ends before them,
+/// so only a pointer to a control section of that stage counts.
+fn task_mesh(
+    d: &[u8],
+    base: usize,
+    prog: usize,
+    label: &str,
+    v: usize,
+) -> Result<Vec<Found>, SplitError> {
+    let mut out = Vec::new();
+    for (off, st, stage) in [(0x40, "ts", 6u8), (0x48, "ms", 7u8)] {
+        let Some(sc) = u64le(d, base + prog + off).map(|x| x as usize) else {
+            continue;
+        };
+        if sc == 0 || base + sc + 0x20 > d.len() {
+            continue;
+        }
+        let at = |o: usize| u64le(d, base + sc + o).unwrap_or(0) as usize;
+        let (pctl, pcode) = (at(8), at(16));
+        let ncode = u32le(d, base + sc + 24).unwrap_or(0) as usize;
+        let nctl = u32le(d, base + sc + 28).unwrap_or(0) as usize;
+        let (Some(ctl), Some(code)) = (
+            d.get(base + pctl..base + pctl + nctl),
+            d.get(base + pcode..base + pcode + ncode),
+        ) else {
+            continue;
+        };
+        if !(0x48..0x10000).contains(&nctl) || !nvn2_ctl(ctl) || ctl.get(0x56) != Some(&stage) {
+            continue;
+        }
+        if let Some(why) = check(st, ctl, code) {
+            return Err(SplitError::Red(format!(
+                "{label} BNSH @{base:#x} variation {v} {st}: {why}"
+            )));
+        }
+        out.push(Found {
+            place: format!("{label}#BNSH@{base:#x}#var{v}"),
+            stage: st,
+            ctl: ctl.to_vec(),
+            code: code.to_vec(),
+        });
     }
     Ok(out)
 }
@@ -456,6 +502,10 @@ fn scan_blob_in(
     }
     if head == b"NDSR" {
         out.extend(crate::engines::ndsr_shaders(d, label, var)?);
+        return Ok(());
+    }
+    if head == b"NDVE" {
+        out.extend(crate::engines::ndve_shaders(d, label, var)?);
         return Ok(());
     }
     let prim = crate::engines::sead_prim_shaders(d, label);

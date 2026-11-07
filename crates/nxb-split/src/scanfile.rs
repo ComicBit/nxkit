@@ -278,6 +278,8 @@ fn scan_whole(
     ];
     let wanted = any_of(d, &MARKERS)
         || head == b"MSHD"
+        || head == b"NDSR"
+        || head == b"NDVE"
         || head == b"NARC"
         || (head == b"SARC" && memfind(d, b"Yaz0").is_some())
         || d.get(..8) == Some(b"MuxFDMR\x02");

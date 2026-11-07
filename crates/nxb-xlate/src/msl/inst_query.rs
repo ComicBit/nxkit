@@ -67,9 +67,16 @@ impl Em<'_> {
         if ty.0 & SamplerType::ARRAY != 0 {
             names.push("get_array_size");
         }
-        let f = *names
-            .get(o.index as usize)
-            .ok_or("size component out of range")?;
+        // A single size answers every component, as the SPIR-V back end has no vector to pick from. A component the
+        // texture does not have (the depth of a 2D texture) is 1.
+        let at = if names.len() == 1 {
+            0
+        } else {
+            o.index as usize
+        };
+        let Some(&f) = names.get(at) else {
+            return Ok(Val::new("1", AggType::S32));
+        };
         if f == "get_array_size" && ty.0 & SamplerType::MASK == 4 {
             return Ok(Val::new("1", AggType::S32));
         }

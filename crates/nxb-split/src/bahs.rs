@@ -55,7 +55,7 @@ pub fn bahs_shaders(d: &[u8], label: &str, var: &mut BahsVar) -> Result<Vec<Foun
         let code = &d[region + off..region + off + n];
         let ctl = &d[c..c + csz];
         let st = if nvn2 {
-            None // NVN2 stage bytes: not needed for NVN1 games yet
+            crate::glslc::nvn2_stage(ctl, code)
         } else if code.get(..4) == Some(&CS_MAGIC[..]) {
             Some("cs")
         } else if code.get(..4) == Some(&GFX_MAGIC[..]) {

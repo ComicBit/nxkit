@@ -326,7 +326,7 @@ impl Em<'_> {
         };
         let color = gather || !shadow;
         let mut s = if gather && offsets.len() == 4 {
-            coord = self.once(Val::new(coord, AggType::FP32))?.s;
+            coord = self.once(Val::new(coord, float_ty(coords.len())))?.s;
             let parts: Vec<String> = offsets
                 .iter()
                 .map(|x| format!("{}.w", call(&coord, Some(x))))
@@ -358,20 +358,22 @@ impl Em<'_> {
     /// Coordinates with NaNs replaced by zero.
     fn finite_coords(&mut self, coords: &[String]) -> R<String> {
         let c = vec_of("float", coords);
-        let v = self.once(Val::new(
-            c,
-            if coords.len() == 1 {
-                AggType::FP32
-            } else {
-                scalar(AggType::FP32) | vec_flag(coords.len())
-            },
-        ))?;
+        let v = self.once(Val::new(c, float_ty(coords.len())))?;
         let zero = if coords.len() == 1 {
             "0.0f".to_string()
         } else {
             format!("float{}(0.0f)", coords.len())
         };
         Ok(format!("select({0}, {zero}, isnan({0}))", v.s))
+    }
+}
+
+/// The type of `n` float coordinates.
+fn float_ty(n: usize) -> AggType {
+    if n == 1 {
+        AggType::FP32
+    } else {
+        scalar(AggType::FP32) | vec_flag(n)
     }
 }
 
