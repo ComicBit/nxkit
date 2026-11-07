@@ -26,7 +26,9 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
   `LEA` with a negated B adds ~B with `.X` and ~B + 1 without it. The + 1 counts in the carry out.
 - Half pairs read their operands as the hardware does (upstream `9dc81953`). A constant operand applies its swizzle. Before, `HMUL2 R6, R19.H0_H0, c[0x0][0x168].H0_H0` gave the high lane the other half of the constant.
   Swizzle value 1 is `.F32`, the 32-bit float in both lanes. `HSETP2` and `HSET2` with `.FTZ` compare a subnormal half as zero.
-- `TRANSLATOR_ID` is `msl-2.12`.
+- `I2F` from a 32-bit integer to a 32-bit float and `F2F.F16.F32` apply `.RM`, `.RP` and `.RZ` (upstream `645d3029`). Before, both rounded to nearest.
+  The 32-bit integer division of the compiler starts with `I2F.U32.RP`. Rounded to nearest, a value above 2^24 came out one ulp off in about half the cases.
+- `TRANSLATOR_ID` is `msl-2.13`.
 
 ## 0.6.7
 
