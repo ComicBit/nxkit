@@ -8,10 +8,13 @@
 //! byte-identical to another. "Equal" is what the host relies on: every base of the script is found in the archive by
 //! `-[MTL4Archive newRenderPipelineStateWithDescriptor:]` (`tools/archive_probe.m`).
 //!
-//! The planning half of `pso_offline.py` (pairs to bases, the script, `prebuilt.tsv`) is not ported yet: the stage
-//! takes the script it writes.
+//! The script may also hold compute pipelines (`compute_pipeline_descriptors`). They are compiled in their own small
+//! batches ([`mod@compute`]), apart from the render bases.
+//!
+//! The planning half of `pso_offline.py` (pairs to bases, the script, `prebuilt.tsv`) is in [`mod@plan`].
 
 pub mod cli;
+pub mod compute;
 pub mod cut;
 pub mod plan;
 pub mod script;
@@ -349,7 +352,8 @@ pub fn build(c: &Config) -> Result<Report, String> {
     let digests = hash_libraries(&libs, 8)?;
     // about four batches per run slot (cut_for_slots), the largest first (task priority = size)
     let slots = (c.tokens / c.cost.max(1)).max(1) as usize;
-    let batches = cut_for_slots(script.bases(&digests)?, slots, c.target);
+    let mut batches = cut_for_slots(script.bases(&digests)?, slots, c.target);
+    batches.extend(compute::chunks(script.compute_bases(&digests)?));
     let keys: Vec<ContentKey> = batches.iter().map(|b| batch_key(c, b)).collect();
     fs::create_dir_all(&c.work).map_err(|e| format!("{}: {e}", c.work.display()))?;
     let store = Arc::new(Store::open(&c.store).map_err(|e| e.to_string())?);

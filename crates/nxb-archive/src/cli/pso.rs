@@ -1,8 +1,11 @@
 //! `nxb-pso --msl <b-<chain>> --out <dir> --work <dir> --store <dir> --pairs <tsv> [--pairs <tsv>] [--depth gl|zero]
-//! [--gpu g18p[,g17p]|none] [--platform ios|macos] [--os-min 27.0] [--script-only] [--target 1000] [--tokens N]`
+//! [--gpu g18p[,g17p]|none] [--platform ios|macos] [--os-min 27.0] [--script-only] [--target 1000] [--tokens N]
+//! [--shader-map <tsv>] [--manifest <tsv>] [--no-compute]`
 //!
 //! `pso_offline.py` in Rust: the plan (pairs to bases), the script, `prebuilt.tsv`, `rest_pairs.tsv`, `archive.tsv`, and
 //! one archive per architecture through [`crate::build`] (content-cut batches, store, merge cache).
+//! Every `--shader-map` and `--manifest` adds compute shaders: the `C` rows of the manifests first, then the compute
+//! rows of the shader maps. Each gets a compute pipeline in the archive. `--no-compute` builds the bases alone.
 //! `--gpu none` writes the stamp and tables but no archive (the Mac's "no offline archive" mode).
 
 use std::path::PathBuf;
@@ -20,12 +23,13 @@ pub fn main(args: &[String]) -> i32 {
 
 fn run(a: &[String]) -> Result<(), String> {
     let mut pairs = Vec::new();
+    let (mut maps, mut manifests) = (Vec::new(), Vec::new());
     let mut o = std::collections::BTreeMap::new();
     let mut flags = std::collections::BTreeSet::new();
     let mut i = 0;
     while i < a.len() {
         let k = a[i].trim_start_matches('-').to_string();
-        if k == "script-only" {
+        if k == "script-only" || k == "no-compute" {
             flags.insert(k);
             i += 1;
             continue;
@@ -36,6 +40,10 @@ fn run(a: &[String]) -> Result<(), String> {
             .ok_or_else(|| format!("{k} needs a value"))?;
         if k == "pairs" {
             pairs.push(PathBuf::from(v));
+        } else if k == "shader-map" {
+            maps.push(PathBuf::from(v));
+        } else if k == "manifest" {
+            manifests.push(PathBuf::from(v));
         } else {
             o.insert(k, v);
         }
@@ -73,10 +81,16 @@ fn run(a: &[String]) -> Result<(), String> {
     let t0 = std::time::Instant::now();
     let ps = crate::plan::read_pairs(&text);
     let p = crate::plan::plan(&lib_dir, &chain, &ps, zero);
+    let shaders = if flags.contains("no-compute") {
+        Vec::new()
+    } else {
+        crate::compute::read_computes(&maps, &manifests)
+    };
+    let (computes, cleft) = crate::compute::plan_compute(&lib_dir, &chain, &shaders);
     std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
     let js = work.join("bases.mtl4-json");
-    let script = crate::plan::script_text(&lib_dir, &p.bases);
+    let script = crate::plan::script_text_with(&lib_dir, &p.bases, &computes);
     if std::fs::read(&js).ok().as_deref() != Some(script.as_bytes()) {
         std::fs::write(&js, &script).map_err(|e| e.to_string())?;
     }
@@ -96,6 +110,12 @@ fn run(a: &[String]) -> Result<(), String> {
         l[6],
         t0.elapsed().as_secs_f64()
     );
+    if !shaders.is_empty() {
+        println!(
+            "pso_offline: {}",
+            crate::compute::summary(shaders.len(), computes.len(), cleft)
+        );
+    }
     let write = |name: &str, t: &str| std::fs::write(out.join(name), t).map_err(|e| e.to_string());
     if flags.contains("script-only") {
         return write("prebuilt.tsv", &st);
@@ -103,7 +123,7 @@ fn run(a: &[String]) -> Result<(), String> {
     if !ps.is_empty() && p.bases.is_empty() && p.rest.is_empty() {
         return Err("no base to build".into());
     }
-    if p.bases.is_empty() {
+    if p.bases.is_empty() && computes.is_empty() {
         archs.clear();
     }
     let platform = o.get("platform").cloned().unwrap_or_else(|| "ios".into());
@@ -129,6 +149,11 @@ fn run(a: &[String]) -> Result<(), String> {
             c.tokens = t;
         }
         toolchain = c.toolchain.clone();
+        println!(
+            "pso_offline: {arch}: {} bases, {} compute pipelines (minutes) ...",
+            p.bases.len(),
+            computes.len()
+        );
         let r = crate::build(&c)?;
         println!(
             "pso_offline: {arch}: {} MB, {} batches ({} from the store), merged {}",
@@ -168,6 +193,7 @@ fn run(a: &[String]) -> Result<(), String> {
             &toolchain,
             p.bases.len(),
             p.rest.len(),
+            computes.len(),
         ),
     )
 }

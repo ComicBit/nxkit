@@ -60,6 +60,15 @@ pub(crate) fn guard_tables(a: &Args, b: &Build) -> Option<PathBuf> {
         .then(|| b.work.join("shader/work/tables"))
 }
 
+/// The compute shaders that get compute pipelines in the archive: the profile's prewarm list (`pso_manifest.tsv`, `C`
+/// rows first) and the compute rows of its `shader_map.tsv`, as `pso_offline.py --game` reads them.
+fn compute_shaders(b: &Build) -> Vec<String> {
+    nxb_archive::compute::read_computes(
+        &[b.profile.0.join("shader_map.tsv")],
+        &[b.profile.0.join("pso_manifest.tsv")],
+    )
+}
+
 /// The archive's inputs for one architecture over the library folder the shader step writes.
 fn archive_config(b: &Build, lib: &Path, arch: &str) -> Result<nxb_archive::Config, String> {
     let (out, work) = (b.work.join("pso/mac"), b.work.join("pso/mac-work"));
@@ -141,6 +150,7 @@ pub fn shaders_and_archive(a: &Args, b: &Build, p: &Arc<Progress>) -> Result<Out
         lib_dir: std::path::absolute(&lib).map_err(|e| e.to_string())?,
         chain: cfg.chain.clone(),
         pairs: nxb_archive::plan::read_pairs(&text),
+        computes: compute_shaders(b),
         zero,
         group_target: GROUP_TARGET,
         limits: acfg.as_ref().map_or_else(
@@ -250,7 +260,7 @@ pub fn shaders_and_archive(a: &Args, b: &Build, p: &Arc<Progress>) -> Result<Out
                                 .filter(|_| a.partial)
                                 .map_or(String::new(), |st| format!("; {}", st.note()));
                             Some(Ok(format!(
-                                "{bases} bases, {} MB, {} batches ({} reused, up to {} compiler runs at once), streamed beside the shader step{tail}",
+                                "{bases} pipelines, {} MB, {} batches ({} reused, up to {} compiler runs at once), streamed beside the shader step{tail}",
                                 rep.size >> 20,
                                 rep.batches.len(),
                                 rep.batches.iter().filter(|x| x.reused).count(),
@@ -323,15 +333,18 @@ pub(crate) fn write_archive_stamps(
         .and_then(|n| n.strip_prefix("b-"))
         .ok_or("library folder is not b-<chain>")?;
     let p = plan::plan(lib, chain, &plan::read_pairs(text), zero);
-    if p.bases.len() != bases {
+    let (pipes, _) = nxb_archive::compute::plan_compute(lib, chain, &compute_shaders(b));
+    if p.bases.len() + pipes.len() != bases {
         return Err(format!(
-            "streamed archive: {bases} bases compiled, the plan has {}",
-            p.bases.len()
+            "streamed archive: {bases} pipelines compiled, the plan has {} bases and {} compute pipelines",
+            p.bases.len(),
+            pipes.len()
         ));
     }
     let out = b.work.join("pso/mac");
     let js = b.work.join("pso/mac-work/bases.mtl4-json");
-    std::fs::write(&js, plan::script_text(lib, &p.bases)).map_err(|e| e.to_string())?;
+    std::fs::write(&js, plan::script_text_with(lib, &p.bases, &pipes))
+        .map_err(|e| e.to_string())?;
     std::fs::write(out.join("prebuilt.tsv"), plan::stamp(chain, zero, text))
         .map_err(|e| e.to_string())?;
     let tsv = plan::archive_tsv(
@@ -339,8 +352,9 @@ pub(crate) fn write_archive_stamps(
         "macos",
         &c.osmin,
         &c.toolchain,
-        bases,
+        p.bases.len(),
         p.rest.len(),
+        pipes.len(),
     );
     std::fs::write(out.join("archive.tsv"), tsv).map_err(|e| e.to_string())
 }
@@ -365,8 +379,10 @@ pub(crate) fn stage_pso(b: &Build, arch: &str) -> Result<String, String> {
     let (out, work) = (b.work.join("pso/mac"), b.work.join("pso/mac-work"));
     std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
+    let (pipes, _) = nxb_archive::compute::plan_compute(&b.shaders, chain, &compute_shaders(b));
     let js = work.join("bases.mtl4-json");
-    std::fs::write(&js, plan::script_text(&b.shaders, &p.bases)).map_err(|e| e.to_string())?;
+    std::fs::write(&js, plan::script_text_with(&b.shaders, &p.bases, &pipes))
+        .map_err(|e| e.to_string())?;
     let osmin = osmin()?;
     let c = nxb_archive::Config::for_tools(
         "macos",
@@ -388,14 +404,15 @@ pub(crate) fn stage_pso(b: &Build, arch: &str) -> Result<String, String> {
             &c.toolchain,
             p.bases.len(),
             p.rest.len(),
+            pipes.len(),
         ),
     )
     .map_err(|e| e.to_string())?;
     let tail =
         nxb_sched::Partial::read(&b.shaders).map_or(String::new(), |st| format!("; {}", st.note()));
     Ok(format!(
-        "{} bases, {} MB, {} batches{tail}",
-        p.bases.len(),
+        "{} pipelines, {} MB, {} batches{tail}",
+        p.bases.len() + pipes.len(),
         r.size >> 20,
         r.batches.len()
     ))

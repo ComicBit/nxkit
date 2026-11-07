@@ -28,10 +28,29 @@ use crate::plan::{self, PlannedBase};
 use crate::script::Script;
 use crate::{BatchReport, Config, Report};
 
-/// The pairs of one group and how many of its shaders are still running.
+/// The pairs (or the compute libraries) of one group and how many of its shaders are still running.
 struct Group {
     pairs: Vec<(String, String)>,
+    computes: Vec<String>,
     waiting: usize,
+}
+
+/// The shader step's key of a compute library (`<key>_b`).
+fn compute_key(lib: &str) -> &str {
+    lib.strip_suffix("_b").unwrap_or(lib)
+}
+
+impl Group {
+    /// The keys of the shaders this group needs.
+    fn keys(&self) -> HashSet<&str> {
+        let pairs = self
+            .pairs
+            .iter()
+            .flat_map(|(v, f)| [v.as_str(), f.as_str()]);
+        pairs
+            .chain(self.computes.iter().map(|c| compute_key(c)))
+            .collect()
+    }
 }
 
 /// What a streamed archive needs besides [`Config`] (whose `script` is not used).
@@ -43,6 +62,8 @@ pub struct StreamInputs {
     pub chain: String,
     /// The pairs, in `pso_offline.py` order (profile pairs, then the split's `pso_pairs.tsv`).
     pub pairs: Vec<(String, String)>,
+    /// The compute libraries (`<key>_b`) that get compute pipelines, in [`crate::compute::read_computes`] order.
+    pub computes: Vec<String>,
     /// `depth_mode zero`.
     pub zero: bool,
     /// Pairs per group (about, a group's identity hash cuts it, at most 4x).
@@ -92,6 +113,7 @@ impl Stream {
                 // pairs of one vertex shader stay in one group (its functions compile once per batch)
                 group: sha256(v.as_bytes()).0,
                 index,
+                compute: false,
             })
             .collect();
         let mut groups = Vec::new();
@@ -102,13 +124,34 @@ impl Stream {
                 g.iter().map(|b| inp.pairs[b.index].clone()).collect();
             // keep the pairs in their file order inside the group (plan order)
             pairs.sort_by_key(|p| inp.pairs.iter().position(|q| q == p));
-            let keys: HashSet<&String> = pairs.iter().flat_map(|(v, f)| [v, f]).collect();
+            let grp = Group {
+                waiting: 0,
+                computes: Vec::new(),
+                pairs,
+            };
+            let keys = grp.keys();
             for k in &keys {
-                by_key.entry((*k).clone()).or_default().push(gi);
+                by_key.entry((*k).to_string()).or_default().push(gi);
             }
             groups.push(Group {
                 waiting: keys.len(),
-                pairs,
+                ..grp
+            });
+        }
+        for chunk in inp.computes.chunks(crate::compute::COMPUTE_BATCH) {
+            let gi = groups.len();
+            let grp = Group {
+                waiting: 0,
+                computes: chunk.to_vec(),
+                pairs: Vec::new(),
+            };
+            let keys = grp.keys();
+            for k in &keys {
+                by_key.entry((*k).to_string()).or_default().push(gi);
+            }
+            groups.push(Group {
+                waiting: keys.len(),
+                ..grp
             });
         }
         let (tx, rx) = channel();
@@ -141,6 +184,11 @@ impl Stream {
                     }
                 }
             }
+            for c in &grp.computes {
+                if seen.insert(compute_key(c).to_string()) {
+                    out.push(compute_key(c).to_string());
+                }
+            }
         }
         out
     }
@@ -151,19 +199,8 @@ impl Stream {
         let mut groups = self.groups.lock().unwrap_or_else(PoisonError::into_inner);
         let tx = self.tx.lock().unwrap_or_else(PoisonError::into_inner);
         for (g, grp) in groups.iter_mut().enumerate() {
-            let need: HashSet<&String> = grp
-                .pairs
-                .iter()
-                .flat_map(|(v, f)| [v, f])
-                .filter(|k| keys.contains(*k))
-                .collect();
-            let absent = grp
-                .pairs
-                .iter()
-                .flat_map(|(v, f)| [v, f])
-                .collect::<HashSet<_>>()
-                .len()
-                - need.len();
+            let all = grp.keys();
+            let absent = all.iter().filter(|k| !keys.contains(**k)).count();
             grp.waiting = grp.waiting.saturating_sub(absent);
             if grp.waiting == 0
                 && let Some(tx) = tx.as_ref()
@@ -231,10 +268,11 @@ impl Stream {
         let groups = &self.groups;
         let headroom = Headroom::new(inp.limits);
         let work = |g: usize| {
-            let pairs = groups.lock().unwrap_or_else(PoisonError::into_inner)[g]
-                .pairs
-                .clone();
-            match group(c, inp, &pairs, &seen, &store, &reg, &headroom) {
+            let (pairs, computes) = {
+                let grp = &groups.lock().unwrap_or_else(PoisonError::into_inner)[g];
+                (grp.pairs.clone(), grp.computes.clone())
+            };
+            match group(c, inp, (&pairs, &computes), &seen, &store, &reg, &headroom) {
                 Ok(mut p) => pieces
                     .lock()
                     .unwrap_or_else(PoisonError::into_inner)
@@ -278,31 +316,41 @@ impl Stream {
 fn group(
     c: &Config,
     inp: &StreamInputs,
-    pairs: &[(String, String)],
+    (pairs, computes): (&[(String, String)], &[String]),
     seen: &Mutex<HashSet<PlannedBase>>,
     store: &Store,
     reg: &ProcessRegistry,
     headroom: &Headroom,
 ) -> Result<Vec<(ContentKey, PathBuf, BatchReport)>, String> {
     let p = plan::plan(&inp.lib_dir, &inp.chain, pairs, inp.zero);
-    let bases: Vec<PlannedBase> = {
+    let (pipes, _) = crate::compute::plan_compute(&inp.lib_dir, &inp.chain, computes);
+    let (bases, pipes): (Vec<PlannedBase>, Vec<crate::compute::ComputePipe>) = {
         let mut s = seen.lock().unwrap_or_else(PoisonError::into_inner);
-        p.bases
+        // a compute pipeline is counted as a base with no vertex function
+        let b = p
+            .bases
             .into_iter()
             .filter(|b| s.insert(b.clone()))
-            .collect()
+            .collect();
+        let c = pipes
+            .into_iter()
+            .filter(|(l, e)| s.insert((String::new(), String::new(), l.clone(), e.clone())))
+            .collect();
+        (b, c)
     };
-    if bases.is_empty() {
+    if bases.is_empty() && pipes.is_empty() {
         return Ok(Vec::new());
     }
-    let script = Script::parse(&plan::script_text(&inp.lib_dir, &bases))?;
+    let script = Script::parse(&plan::script_text_with(&inp.lib_dir, &bases, &pipes))?;
     let mut digests = HashMap::new();
     for (label, path) in script.library_paths()? {
         let b = fs::read(Path::new(&path)).map_err(|e| format!("{path}: {e}"))?;
         digests.insert(label, sha256(&b));
     }
     let mut out = Vec::new();
-    for batch in cut(script.bases(&digests)?, c.target) {
+    let mut batches = cut(script.bases(&digests)?, c.target);
+    batches.extend(crate::compute::chunks(script.compute_bases(&digests)?));
+    for batch in batches {
         let key = crate::batch_key(c, &batch);
         let (piece, rep) = crate::compile(c, &script, &batch, &key, store, reg, Some(headroom))?;
         out.push((key, piece, rep));
@@ -321,6 +369,7 @@ mod tests {
             pairs: (0..n)
                 .map(|i| (format!("v{i}"), format!("f{}", i % 7)))
                 .collect(),
+            computes: Vec::new(),
             zero: false,
             group_target: 8,
             limits: Limits::new(1, 1, 0),
@@ -352,6 +401,34 @@ mod tests {
         let rest: Vec<usize> = rx.try_iter().collect();
         assert!(!rest.contains(&0));
         assert!(rest.len() + 1 >= s.groups() - 1);
+    }
+
+    #[test]
+    fn a_compute_group_opens_when_its_shaders_are_done() {
+        let mut inp = inputs(0);
+        inp.computes = (0..20).map(|i| format!("k{i}_b")).collect();
+        let s = Stream::new(&inp);
+        assert_eq!(s.groups(), 2);
+        let rx = s.rx.lock().unwrap_or_else(PoisonError::into_inner).take();
+        let Some(rx) = rx else { panic!("receiver") };
+        // the shader step's keys have no `_b`. It does not build k15: that group counts it as done
+        let built: HashSet<String> = (0..20)
+            .filter(|i| *i != 15)
+            .map(|i| format!("k{i}"))
+            .collect();
+        s.building(&built);
+        for i in 16..19 {
+            s.done(&format!("k{i}"));
+        }
+        assert!(rx.try_recv().is_err());
+        s.done("k19");
+        assert_eq!(rx.try_recv().ok(), Some(1));
+        for i in 0..14 {
+            s.done(&format!("k{i}"));
+        }
+        assert!(rx.try_recv().is_err());
+        s.done("k14");
+        assert_eq!(rx.try_recv().ok(), Some(0));
     }
 
     #[test]

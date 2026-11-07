@@ -6,7 +6,7 @@
 //! bases that share vertex functions costs less (the reference title, 1000 bases: 291 vertex functions in pair order, 639 when
 //! drawn at random, 10 % more CPU at random).
 
-/// One base: its content hash, its vertex function's hash and its index in the script.
+/// One base: its content hash, its vertex function's hash and its index in the script's render or compute list.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Base {
     /// SHA-256 of what identifies the base (libraries' bytes, entries, descriptor).
@@ -15,6 +15,8 @@ pub struct Base {
     pub group: [u8; 32],
     /// Index in the script's pipeline list.
     pub index: usize,
+    /// A compute pipeline: `index` is in the compute list.
+    pub compute: bool,
 }
 
 fn u64_of(h: &[u8; 32]) -> u64 {
@@ -91,6 +93,7 @@ mod tests {
                     hash: nxb_model::sha256(&v).0,
                     group: g,
                     index: i,
+                    compute: false,
                 }
             })
             .collect()
@@ -150,6 +153,7 @@ mod tests {
                     hash: nxb_model::sha256(&v).0,
                     group,
                     index: out.len(),
+                    compute: false,
                 });
             }
             g += 1;

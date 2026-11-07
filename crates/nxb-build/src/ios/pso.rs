@@ -12,6 +12,8 @@ use std::time::Instant;
 pub struct Args<'a> {
     /// The profile's pair lists (`shader_pairs.tsv`, then `pso_pairs.tsv`).
     pub pairs: [PathBuf; 2],
+    /// The profile's `shader_map.tsv` and `pso_manifest.tsv`: the compute shaders that get compute pipelines.
+    pub compute_tables: [PathBuf; 2],
     /// The profile's `depth_mode`.
     pub depth: &'a str,
     /// `b-<chain>`: the libraries and their reflections.
@@ -76,11 +78,17 @@ pub fn run(a: &Args, say: &mut dyn FnMut(&str)) -> Result<(), String> {
     let t0 = Instant::now();
     let pairs = plan::read_pairs(&text);
     let p = plan::plan(a.msl, chain, &pairs, zero);
+    let [map, manifest] = &a.compute_tables;
+    let shaders = nxb_archive::compute::read_computes(
+        std::slice::from_ref(map),
+        std::slice::from_ref(manifest),
+    );
+    let (computes, cleft) = nxb_archive::compute::plan_compute(a.msl, chain, &shaders);
     let mk = |d: &Path| std::fs::create_dir_all(d).map_err(|e| format!("{}: {e}", d.display()));
     mk(a.work)?;
     mk(a.out)?;
     let js = a.work.join("bases.mtl4-json");
-    let script = plan::script_text(a.msl, &p.bases);
+    let script = plan::script_text_with(a.msl, &p.bases, &computes);
     if std::fs::read_to_string(&js).ok().as_deref() != Some(&script) {
         std::fs::write(&js, &script).map_err(|e| e.to_string())?;
     }
@@ -106,13 +114,19 @@ pub fn run(a: &Args, say: &mut dyn FnMut(&str)) -> Result<(), String> {
         left.join(", "),
         t0.elapsed().as_secs_f64()
     ));
+    if !shaders.is_empty() {
+        say(&format!(
+            "pso_offline: {}",
+            nxb_archive::compute::summary(shaders.len(), computes.len(), cleft)
+        ));
+    }
     if !pairs.is_empty() && p.bases.is_empty() && p.rest.is_empty() {
         return Err(red("no base to build".into()));
     }
     if pairs.is_empty() {
         say("pso_offline: no pairs (only a header): nothing to build, no archive");
     }
-    if p.bases.is_empty() {
+    if p.bases.is_empty() && computes.is_empty() {
         archs.clear();
     }
     let osmin = match a.os_min {
@@ -126,8 +140,9 @@ pub fn run(a: &Args, say: &mut dyn FnMut(&str)) -> Result<(), String> {
         toolchain = c.toolchain.clone();
         let t1 = Instant::now();
         say(&format!(
-            "pso_offline: {arch}: metal-tt, {} bases (minutes) ...",
-            p.bases.len()
+            "pso_offline: {arch}: metal-tt, {} bases, {} compute pipelines (minutes) ...",
+            p.bases.len(),
+            computes.len()
         ));
         let r = nxb_archive::build(&c).map_err(|e| red(format!("{arch}: {e}")))?;
         say(&format!(
@@ -164,6 +179,7 @@ pub fn run(a: &Args, say: &mut dyn FnMut(&str)) -> Result<(), String> {
             &toolchain,
             p.bases.len(),
             p.rest.len(),
+            computes.len(),
         ),
     )
 }
@@ -200,6 +216,7 @@ pub(crate) fn stage(
         );
         let args = Args {
             pairs: [g.table("shader_pairs.tsv"), g.table("pso_pairs.tsv")],
+            compute_tables: [g.table("shader_map.tsv"), g.table("pso_manifest.tsv")],
             depth: &depth,
             msl: &msl_dir,
             out: &out_dir,
@@ -271,6 +288,7 @@ mod tests {
         assert!(o.status.success());
         let a = Args {
             pairs: [PathBuf::from(&pairs), PathBuf::from("/nonexistent")],
+            compute_tables: [PathBuf::from("/nonexistent"), PathBuf::from("/nonexistent")],
             depth: "gl",
             msl: Path::new(&msl),
             out: &d.join("rs/out"),

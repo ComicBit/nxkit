@@ -256,6 +256,16 @@ pub fn plan(lib_dir: &Path, chain: &str, pairs: &[(String, String)], zero: bool)
 
 /// `script`: the Metal 4 pipelines script of the bases, written as `json.dump(indent=1)` does.
 pub fn script_text(lib_dir: &Path, bases: &[PlannedBase]) -> String {
+    script_text_with(lib_dir, bases, &[])
+}
+
+/// `script` with compute pipelines: one compute descriptor per (library, entry), naming the function alone. The
+/// `compute_pipeline_descriptors` key is written only when there are compute pipelines.
+pub fn script_text_with(
+    lib_dir: &Path,
+    bases: &[PlannedBase],
+    computes: &[crate::compute::ComputePipe],
+) -> String {
     let dir = fs::canonicalize(lib_dir).unwrap_or_else(|_| lib_dir.to_path_buf());
     let (mut libs, mut fns, mut pipes) = (Vec::new(), Vec::new(), Vec::new());
     let (mut seen_l, mut seen_f) = (HashSet::new(), HashSet::new());
@@ -301,6 +311,17 @@ pub fn script_text(lib_dir: &Path, bases: &[PlannedBase]) -> String {
             ),
         ]));
     }
+    let mut descriptors = vec![("render_pipeline_descriptors".into(), Value::List(pipes))];
+    if !computes.is_empty() {
+        let list = computes
+            .iter()
+            .map(|(lib, entry)| {
+                let f = fd(lib, entry, &mut libs, &mut fns);
+                Value::Object(vec![("compute_function_descriptor".into(), f)])
+            })
+            .collect();
+        descriptors.push(("compute_pipeline_descriptors".into(), Value::List(list)));
+    }
     let v = Value::Object(vec![
         ("libraries".into(), Value::List(libs)),
         (
@@ -310,13 +331,7 @@ pub fn script_text(lib_dir: &Path, bases: &[PlannedBase]) -> String {
                 Value::List(fns),
             )]),
         ),
-        (
-            "pipeline_descriptors".into(),
-            Value::Object(vec![(
-                "render_pipeline_descriptors".into(),
-                Value::List(pipes),
-            )]),
-        ),
+        ("pipeline_descriptors".into(), Value::Object(descriptors)),
     ]);
     nxb_pyjson::dumps_indent(&v, 1)
 }
@@ -329,9 +344,10 @@ pub fn archive_tsv(
     toolchain: &str,
     bases: usize,
     rest: usize,
+    computes: usize,
 ) -> String {
     format!(
-        "# the pipeline archive made offline (dm/gfx/tools/pso_offline.py); the host reads prebuilt.tsv, not this file\narch\t{}\nplatform\t{platform}\t{osmin}\ntoolchain\t{toolchain}\nbases\t{bases}\nrest\t{rest}\n",
+        "# the pipeline archive made offline (dm/gfx/tools/pso_offline.py); the host reads prebuilt.tsv, not this file\narch\t{}\nplatform\t{platform}\t{osmin}\ntoolchain\t{toolchain}\nbases\t{bases}\nrest\t{rest}\ncompute\t{computes}\n",
         archs.join(" ")
     )
 }

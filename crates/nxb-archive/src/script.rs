@@ -16,6 +16,8 @@ pub struct Script {
     pub functions: Vec<Value>,
     /// `render_pipeline_descriptors`.
     pub pipelines: Vec<Value>,
+    /// `compute_pipeline_descriptors` (none in a script of render bases alone).
+    pub computes: Vec<Value>,
 }
 
 fn list<'a>(v: &'a Value, path: &[&str]) -> Result<&'a [Value], String> {
@@ -45,6 +47,17 @@ impl Script {
             )?
             .to_vec(),
             pipelines: list(&v, &["pipeline_descriptors", "render_pipeline_descriptors"])?.to_vec(),
+            computes: match v
+                .get("pipeline_descriptors")
+                .and_then(|d| d.get("compute_pipeline_descriptors"))
+            {
+                Some(_) => list(
+                    &v,
+                    &["pipeline_descriptors", "compute_pipeline_descriptors"],
+                )?
+                .to_vec(),
+                None => Vec::new(),
+            },
         })
     }
 
@@ -96,6 +109,46 @@ impl Script {
                 hash: h.finalize().0,
                 group,
                 index,
+                compute: false,
+            });
+        }
+        Ok(out)
+    }
+
+    /// The content hash of every compute base: its function (library bytes by digest, entry name) and the rest of
+    /// the descriptor text. A compute base never hashes as a render base.
+    pub fn compute_bases(&self, lib_digest: &HashMap<String, Digest>) -> Result<Vec<Base>, String> {
+        let fns: HashMap<&str, &Value> = self
+            .functions
+            .iter()
+            .filter_map(|f| Some((text(f, "label").ok()?, f)))
+            .collect();
+        let mut out = Vec::with_capacity(self.computes.len());
+        for (index, p) in self.computes.iter().enumerate() {
+            let r = text(p, "compute_function_descriptor")?;
+            let f = fns
+                .get(r.trim_start_matches("fnd:"))
+                .ok_or_else(|| format!("script: no function {r}"))?;
+            let lib = text(f, "library")?.trim_start_matches("lib:");
+            let d = lib_digest
+                .get(lib)
+                .ok_or_else(|| format!("script: no digest of library {lib}"))?;
+            let mut h = Sha256::new();
+            h.update(b"compute\0");
+            h.update(&d.0);
+            h.update(text(f, "name")?.as_bytes());
+            h.update(&[0]);
+            let mut rest = p.clone();
+            if let Value::Object(m) = &mut rest {
+                m.retain(|(k, _)| !k.ends_with("_function_descriptor"));
+            }
+            h.update(nxb_pyjson::dumps(&rest).as_bytes());
+            let hash = h.finalize().0;
+            out.push(Base {
+                hash,
+                group: hash,
+                index,
+                compute: true,
             });
         }
         Ok(out)
@@ -113,14 +166,23 @@ impl Script {
             .iter()
             .filter_map(|l| Some((text(l, "label").ok()?, l)))
             .collect();
-        let (mut lo, mut fo, mut po) = (Vec::new(), Vec::new(), Vec::new());
+        let (mut lo, mut fo, mut po, mut co) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
         let (mut seen_l, mut seen_f) = (
             std::collections::HashSet::new(),
             std::collections::HashSet::new(),
         );
         for b in batch {
-            let p = &self.pipelines[b.index];
-            for k in ["vertex_function_descriptor", "fragment_function_descriptor"] {
+            let p = if b.compute {
+                &self.computes[b.index]
+            } else {
+                &self.pipelines[b.index]
+            };
+            let keys: &[&str] = if b.compute {
+                &["compute_function_descriptor"]
+            } else {
+                &["vertex_function_descriptor", "fragment_function_descriptor"]
+            };
+            for k in keys.iter().copied() {
                 let label = text(p, k)?.trim_start_matches("fnd:");
                 let f = *fns
                     .get(label)
@@ -138,7 +200,15 @@ impl Script {
                     fo.push(f.clone());
                 }
             }
-            po.push(p.clone());
+            if b.compute {
+                co.push(p.clone());
+            } else {
+                po.push(p.clone());
+            }
+        }
+        let mut descriptors = vec![("render_pipeline_descriptors".into(), Value::List(po))];
+        if !co.is_empty() {
+            descriptors.push(("compute_pipeline_descriptors".into(), Value::List(co)));
         }
         let v = Value::Object(vec![
             ("libraries".into(), Value::List(lo)),
@@ -149,13 +219,7 @@ impl Script {
                     Value::List(fo),
                 )]),
             ),
-            (
-                "pipeline_descriptors".into(),
-                Value::Object(vec![(
-                    "render_pipeline_descriptors".into(),
-                    Value::List(po),
-                )]),
-            ),
+            ("pipeline_descriptors".into(), Value::Object(descriptors)),
         ]);
         Ok(nxb_pyjson::dumps_indent(&v, 1))
     }
