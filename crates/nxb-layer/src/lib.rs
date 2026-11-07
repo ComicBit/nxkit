@@ -51,10 +51,19 @@ pub(crate) fn to_ir(
     name: &str,
     pass: impl FnOnce(&mut naga::Module) -> Result<(), String>,
 ) -> Result<(naga::Module, ModuleInfo), String> {
-    let o = naga::front::spv::Options { adjust_coordinate_space: flip_y, strict_capabilities: false, block_ctx_dump_prefix: None };
-    let mut m = naga::front::spv::Frontend::new(words.iter().copied(), &o).parse().map_err(|e| format!("SPIR-V reader: {e}"))?;
+    let o = naga::front::spv::Options {
+        adjust_coordinate_space: flip_y,
+        strict_capabilities: false,
+        block_ctx_dump_prefix: None,
+    };
+    let mut m = naga::front::spv::Frontend::new(words.iter().copied(), &o)
+        .parse()
+        .map_err(|e| format!("SPIR-V reader: {e}"))?;
     if m.entry_points.len() != 1 {
-        return Err(format!("{} entry points (one expected)", m.entry_points.len()));
+        return Err(format!(
+            "{} entry points (one expected)",
+            m.entry_points.len()
+        ));
     }
     io::flatten_varyings(&mut m)?;
     pass(&mut m)?;
@@ -63,18 +72,21 @@ pub(crate) fn to_ir(
     }
     // a split combined image sampler keeps one binding for its image and its sampler, which the MSL binding map serves as
     // one texture and one sampler slot, so the binding collision check is off
-    let info = Validator::new(ValidationFlags::all() - ValidationFlags::BINDINGS, Capabilities::all())
-        .validate(&m)
-        .map_err(|e| {
-            let e = e.into_inner();
-            let mut t = format!("validation: {e}");
-            let mut src = std::error::Error::source(&e);
-            while let Some(c) = src {
-                t += &format!(": {c}");
-                src = c.source();
-            }
-            t
-        })?;
+    let info = Validator::new(
+        ValidationFlags::all() - ValidationFlags::BINDINGS,
+        Capabilities::all(),
+    )
+    .validate(&m)
+    .map_err(|e| {
+        let e = e.into_inner();
+        let mut t = format!("validation: {e}");
+        let mut src = std::error::Error::source(&e);
+        while let Some(c) = src {
+            t += &format!(": {c}");
+            src = c.source();
+        }
+        t
+    })?;
     Ok((m, info))
 }
 

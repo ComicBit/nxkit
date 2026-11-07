@@ -58,7 +58,11 @@ pub(crate) fn version_line(t: &str) -> Option<(u32, std::ops::Range<usize>)> {
         let s = line.trim_start_matches([' ', '\t']);
         if let Some(r) = s.strip_prefix("#version") {
             if r.starts_with([' ', '\t']) {
-                let digits: String = r.trim_start_matches([' ', '\t']).chars().take_while(char::is_ascii_digit).collect();
+                let digits: String = r
+                    .trim_start_matches([' ', '\t'])
+                    .chars()
+                    .take_while(char::is_ascii_digit)
+                    .collect();
                 if let Ok(v) = digits.parse() {
                     return Some((v, at..at + line.len()));
                 }
@@ -74,8 +78,12 @@ pub(crate) fn version_line(t: &str) -> Option<(u32, std::ops::Range<usize>)> {
 pub(crate) fn es100(t: &str, stage: &str) -> String {
     let mut s = String::new();
     for line in t.split_inclusive('\n') {
-        let w: Vec<&str> = line.split([' ', '\t', '\r', '\n']).filter(|x| !x.is_empty()).collect();
-        let word = |x: &str| !x.is_empty() && x.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+        let w: Vec<&str> = line
+            .split([' ', '\t', '\r', '\n'])
+            .filter(|x| !x.is_empty())
+            .collect();
+        let word =
+            |x: &str| !x.is_empty() && x.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
         let precision = match w.as_slice() {
             ["precision", q, last] => word(q) && last.strip_suffix(';').is_some_and(word),
             ["precision", q, t, ";"] => word(q) && word(t),
@@ -86,12 +94,20 @@ pub(crate) fn es100(t: &str, stage: &str) -> String {
         }
     }
     let s = replace_idents(&s, |w, rest| {
-        matches!(w, "lowp" | "mediump" | "highp").then(|| (String::new(), rest.len() - rest.trim_start_matches([' ', '\t']).len()))
+        matches!(w, "lowp" | "mediump" | "highp").then(|| {
+            (
+                String::new(),
+                rest.len() - rest.trim_start_matches([' ', '\t']).len(),
+            )
+        })
     });
     let s = replace_word(&s, "attribute", "in");
     let mut s = replace_word(&s, "varying", if stage == "vert" { "out" } else { "in" });
     if stage == "frag" && s.contains("gl_FragColor") {
-        s = format!("out vec4 gm_FragColor;\n{}", s.replace("gl_FragColor", "gm_FragColor"));
+        s = format!(
+            "out vec4 gm_FragColor;\n{}",
+            s.replace("gl_FragColor", "gm_FragColor")
+        );
     }
     let s = replace_word(&s, "sample", "gm_sample");
     format!("#version 310 es\nprecision highp float;\nprecision highp int;\n{s}")
@@ -126,7 +142,10 @@ fn call_args(t: &str, open: usize) -> Option<(Vec<&str>, usize)> {
 fn has_variable(o: &str) -> bool {
     idents(o).iter().any(|&(s, e)| {
         let w = &o[s..e];
-        !matches!(w, "vec2" | "vec3" | "vec4" | "ivec2" | "ivec3" | "ivec4" | "uvec2" | "uvec3" | "uvec4")
+        !matches!(
+            w,
+            "vec2" | "vec3" | "vec4" | "ivec2" | "ivec3" | "ivec4" | "uvec2" | "uvec3" | "uvec4"
+        )
     })
 }
 
@@ -169,12 +188,15 @@ pub(crate) fn fixups(t: &str) -> Result<String, String> {
         if !s[e + ws..].starts_with('(') {
             continue;
         }
-        let (args, end) = call_args(&s, e + ws).ok_or("textureOffset without its closing parenthesis")?;
+        let (args, end) =
+            call_args(&s, e + ws).ok_or("textureOffset without its closing parenthesis")?;
         if let [smp, p, o] = args.as_slice() {
             if has_variable(o) {
                 let (smp, p, o) = (smp.trim(), p.trim(), o.trim());
                 out.push_str(&s[at..st]);
-                out.push_str(&format!("texture({smp}, ({p}) + vec2({o}) / vec2(textureSize({smp}, 0)))"));
+                out.push_str(&format!(
+                    "texture({smp}, ({p}) + vec2({o}) / vec2(textureSize({smp}, 0)))"
+                ));
                 at = end;
             }
         }
@@ -186,14 +208,20 @@ pub(crate) fn fixups(t: &str) -> Result<String, String> {
 /// The names of the uniforms declared `uniform [precision] bool name;`. glslang makes them `uint` members of the default
 /// block, the table names them `bool` as the game declared them.
 pub(crate) fn bool_uniforms(t: &str) -> Vec<String> {
-    let w: Vec<&str> = t.split(|c: char| c.is_whitespace()).filter(|x| !x.is_empty()).flat_map(split_semi).collect();
+    let w: Vec<&str> = t
+        .split(|c: char| c.is_whitespace())
+        .filter(|x| !x.is_empty())
+        .flat_map(split_semi)
+        .collect();
     let mut out = Vec::new();
     for k in 0..w.len() {
         if w[k] != "uniform" {
             continue;
         }
         let mut j = k + 1;
-        if w.get(j).is_some_and(|p| matches!(*p, "lowp" | "mediump" | "highp")) {
+        if w.get(j)
+            .is_some_and(|p| matches!(*p, "lowp" | "mediump" | "highp"))
+        {
             j += 1;
         }
         if let (Some(&"bool"), Some(n), Some(&";")) = (w.get(j), w.get(j + 1), w.get(j + 2)) {

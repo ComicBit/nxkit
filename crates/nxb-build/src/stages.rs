@@ -54,8 +54,16 @@ pub(crate) fn run_nodes(
             (Some(r), _, _) => Work::Reused(format!("reused: {r}")),
             (_, 0, _) => Work::Turn(Box::new(move || crate::extract_stage::run(a, b, p))),
             (_, 1, _) if b.split_fused() => Work::Reused("in the extract's pass".into()),
-            (_, 1, _) => Work::Turn(Box::new(move || crate::extract_stage::split(a, b, p))),
+            (_, 1, _) => Work::Turn(Box::new(move || {
+                if crate::layer::gfx(b)? != crate::layer::Gfx::Nvn {
+                    return Ok("not needed: the game does not draw with NVN".into());
+                }
+                crate::extract_stage::split(a, b, p)
+            })),
             (_, 2, _) => Work::Turn(Box::new(move || {
+                if crate::layer::gfx(b)? != crate::layer::Gfx::Nvn {
+                    return crate::layer::stage(a, b, p);
+                }
                 crate::provisional::take_tables(b)?;
                 // the shader step and the first architecture's archive together (crate::pipeline)
                 let o = crate::pipeline::shaders_and_archive(a, b, p)?;
@@ -66,6 +74,10 @@ pub(crate) fn run_nodes(
             (_, _, name) if name.starts_with("Pipeline archive") => {
                 let arch = name.trim_start_matches("Pipeline archive ");
                 Work::Turn(Box::new(move || {
+                    if crate::layer::gfx(b)? != crate::layer::Gfx::Nvn {
+                        no_archive.store(true, std::sync::atomic::Ordering::SeqCst);
+                        return Ok("not needed: the game does not draw with NVN".into());
+                    }
                     let made = streamed.lock().map_err(|_| "lock")?.take();
                     let failed = archive_error.lock().map_err(|_| "lock")?.take();
                     match (made, failed) {

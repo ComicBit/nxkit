@@ -75,7 +75,10 @@ impl Spv {
         if !is_spirv(bytes) || bytes.len() < 20 || !bytes.len().is_multiple_of(4) {
             return Err("not a SPIR-V module".into());
         }
-        let words: Vec<u32> = bytes.chunks_exact(4).map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect();
+        let words: Vec<u32> = bytes
+            .chunks_exact(4)
+            .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+            .collect();
         let mut header = [0u32; 5];
         header.copy_from_slice(&words[..5]);
         let mut insts = Vec::new();
@@ -85,7 +88,10 @@ impl Spv {
             if n == 0 || i + n > words.len() {
                 return Err(format!("a truncated instruction at word {i}"));
             }
-            insts.push(Inst::new((words[i] & 0xffff) as u16, words[i + 1..i + n].to_vec()));
+            insts.push(Inst::new(
+                (words[i] & 0xffff) as u16,
+                words[i + 1..i + n].to_vec(),
+            ));
             i += n;
         }
         Ok(Spv { header, insts })
@@ -108,9 +114,17 @@ impl Spv {
 
     /// The execution model of the single entry point, or an error when the module has none or several.
     pub(crate) fn execution_model(&self) -> Result<u32, String> {
-        let eps: Vec<&Inst> = self.insts.iter().filter(|i| i.op == OP_ENTRY_POINT).collect();
+        let eps: Vec<&Inst> = self
+            .insts
+            .iter()
+            .filter(|i| i.op == OP_ENTRY_POINT)
+            .collect();
         match eps[..] {
-            [ep] => ep.w.first().copied().ok_or_else(|| "an empty OpEntryPoint".into()),
+            [ep] => {
+                ep.w.first()
+                    .copied()
+                    .ok_or_else(|| "an empty OpEntryPoint".into())
+            }
             _ => Err(format!("{} entry points (one expected)", eps.len())),
         }
     }
@@ -120,11 +134,15 @@ impl Spv {
     }
 
     fn decorations(&self, id: u32) -> impl Iterator<Item = &Inst> {
-        self.insts.iter().filter(move |i| i.op == OP_DECORATE && i.w.first() == Some(&id))
+        self.insts
+            .iter()
+            .filter(move |i| i.op == OP_DECORATE && i.w.first() == Some(&id))
     }
 
     pub(crate) fn decoration(&self, id: u32, dec: u32) -> Option<u32> {
-        self.decorations(id).find(|i| i.w.get(1) == Some(&dec)).map(|i| i.w.get(2).copied().unwrap_or(0))
+        self.decorations(id)
+            .find(|i| i.w.get(1) == Some(&dec))
+            .map(|i| i.w.get(2).copied().unwrap_or(0))
     }
 
     /// The name of an id (OpName), or an empty string.
@@ -142,14 +160,20 @@ fn result_id(i: &Inst) -> Option<u32> {
     match i.op {
         19..=38 => i.w.first().copied(),
         41..=46 => i.w.get(1).copied(),
-        OP_FUNCTION | OP_FUNCTION_PARAMETER | OP_FUNCTION_CALL | OP_VARIABLE | OP_LOAD => i.w.get(1).copied(),
+        OP_FUNCTION | OP_FUNCTION_PARAMETER | OP_FUNCTION_CALL | OP_VARIABLE | OP_LOAD => {
+            i.w.get(1).copied()
+        }
         _ => None,
     }
 }
 
 /// A literal string operand: UTF-8 bytes up to the first NUL.
 pub(crate) fn string_of(w: &[u32]) -> String {
-    let bytes: Vec<u8> = w.iter().flat_map(|x| x.to_le_bytes()).take_while(|&b| b != 0).collect();
+    let bytes: Vec<u8> = w
+        .iter()
+        .flat_map(|x| x.to_le_bytes())
+        .take_while(|&b| b != 0)
+        .collect();
     String::from_utf8_lossy(&bytes).into_owned()
 }
 
@@ -164,9 +188,15 @@ pub(crate) fn fix_strides(s: &mut Spv) {
             continue;
         }
         last = Some(k);
-        let Some(st) = s.def(i.w[0]).filter(|d| d.op == OP_TYPE_STRUCT) else { continue };
-        let Some(&ty) = st.w.get(1 + i.w[1] as usize) else { continue };
-        let is_array = s.def(ty).is_some_and(|d| d.op == OP_TYPE_ARRAY || d.op == OP_TYPE_RUNTIME_ARRAY);
+        let Some(st) = s.def(i.w[0]).filter(|d| d.op == OP_TYPE_STRUCT) else {
+            continue;
+        };
+        let Some(&ty) = st.w.get(1 + i.w[1] as usize) else {
+            continue;
+        };
+        let is_array = s
+            .def(ty)
+            .is_some_and(|d| d.op == OP_TYPE_ARRAY || d.op == OP_TYPE_RUNTIME_ARRAY);
         if is_array && s.decoration(ty, DEC_ARRAY_STRIDE).is_none() && done.insert(ty) {
             add.push(Inst::new(OP_DECORATE, vec![ty, DEC_ARRAY_STRIDE, i.w[3]]));
         }
@@ -180,7 +210,11 @@ pub(crate) fn fix_strides(s: &mut Spv) {
 pub(crate) type Twins = BTreeMap<u32, u32>;
 
 fn find_or_add(s: &mut Spv, at: &mut usize, op: u16, tail: &[u32]) -> u32 {
-    if let Some(i) = s.insts.iter().find(|i| i.op == op && i.w.get(1..) == Some(tail)) {
+    if let Some(i) = s
+        .insts
+        .iter()
+        .find(|i| i.op == op && i.w.get(1..) == Some(tail))
+    {
         return i.w[0];
     }
     let id = s.fresh();
@@ -196,8 +230,12 @@ fn find_or_add(s: &mut Spv, at: &mut usize, op: u16, tail: &[u32]) -> u32 {
 /// samplers are an error.
 pub(crate) fn split_combined(s: &mut Spv) -> Result<Twins, String> {
     let mut twins = Twins::new();
-    let sampled: BTreeMap<u32, u32> =
-        s.insts.iter().filter(|i| i.op == OP_TYPE_SAMPLED_IMAGE && i.w.len() >= 2).map(|i| (i.w[0], i.w[1])).collect();
+    let sampled: BTreeMap<u32, u32> = s
+        .insts
+        .iter()
+        .filter(|i| i.op == OP_TYPE_SAMPLED_IMAGE && i.w.len() >= 2)
+        .map(|i| (i.w[0], i.w[1]))
+        .collect();
     if sampled.is_empty() {
         return Ok(twins);
     }
@@ -215,7 +253,11 @@ pub(crate) fn split_combined(s: &mut Spv) -> Result<Twins, String> {
         .map(|i| (i.w[0], i.w[2]))
         .collect();
     for (ptr, si) in ptr_list {
-        let mut at = s.insts.iter().position(|i| i.op == OP_TYPE_POINTER && i.w[0] == ptr).map_or(0, |k| k + 1);
+        let mut at = s
+            .insts
+            .iter()
+            .position(|i| i.op == OP_TYPE_POINTER && i.w[0] == ptr)
+            .map_or(0, |k| k + 1);
         let img = sampled[&si];
         let sampler = find_or_add(s, &mut at, OP_TYPE_SAMPLER, &[]);
         let p_img = find_or_add(s, &mut at, OP_TYPE_POINTER, &[SC_UNIFORM_CONSTANT, img]);
@@ -253,7 +295,9 @@ pub(crate) fn split_combined(s: &mut Spv) -> Result<Twins, String> {
                 }
             }
             OP_VARIABLE | OP_FUNCTION_PARAMETER if ptr_twin(i.w[0]).is_some() => {
-                let Some((p_img, p_smp)) = ptr_twin(i.w[0]) else { continue };
+                let Some((p_img, p_smp)) = ptr_twin(i.w[0]) else {
+                    continue;
+                };
                 let twin = s.fresh();
                 twins.insert(i.w[1], twin);
                 let mut v = i.clone();
@@ -272,7 +316,10 @@ pub(crate) fn split_combined(s: &mut Spv) -> Result<Twins, String> {
             OP_LOAD if i.w.len() >= 3 && twins.contains_key(&i.w[2]) => {
                 let (img, smp) = (s.fresh(), s.fresh());
                 let si = i.w[0];
-                let image_ty = sampled.get(&si).copied().ok_or("a load of a combined image sampler without its type")?;
+                let image_ty = sampled
+                    .get(&si)
+                    .copied()
+                    .ok_or("a load of a combined image sampler without its type")?;
                 let sampler_ty = sampler_of(&out).ok_or("no sampler type")?;
                 out.push(Inst::new(OP_LOAD, vec![image_ty, img, i.w[2]]));
                 out.push(Inst::new(OP_LOAD, vec![sampler_ty, smp, twins[&i.w[2]]]));
@@ -293,7 +340,8 @@ pub(crate) fn split_combined(s: &mut Spv) -> Result<Twins, String> {
     }
     // the twins share the set and binding of their image; the entry point lists them where it lists the image
     for i in &out {
-        if i.op == OP_DECORATE && (i.w.get(1) == Some(&DEC_BINDING) || i.w.get(1) == Some(&DEC_SET)) {
+        if i.op == OP_DECORATE && (i.w.get(1) == Some(&DEC_BINDING) || i.w.get(1) == Some(&DEC_SET))
+        {
             if let Some(&t) = twins.get(&i.w[0]) {
                 extra_decs.push(Inst::new(OP_DECORATE, vec![t, i.w[1], i.w[2]]));
             }
@@ -301,7 +349,10 @@ pub(crate) fn split_combined(s: &mut Spv) -> Result<Twins, String> {
     }
     for i in &mut out {
         if i.op == OP_ENTRY_POINT {
-            let name_end = 2 + i.w[2..].iter().position(|w| w.to_le_bytes().contains(&0)).map_or(0, |p| p + 1);
+            let name_end = 2 + i.w[2..]
+                .iter()
+                .position(|w| w.to_le_bytes().contains(&0))
+                .map_or(0, |p| p + 1);
             let mut w = i.w[..name_end].to_vec();
             for v in &i.w[name_end..] {
                 w.push(*v);
@@ -312,7 +363,10 @@ pub(crate) fn split_combined(s: &mut Spv) -> Result<Twins, String> {
             i.w = w;
         }
     }
-    if let Some(k) = out.iter().rposition(|i| i.op == OP_DECORATE || i.op == OP_MEMBER_DECORATE) {
+    if let Some(k) = out
+        .iter()
+        .rposition(|i| i.op == OP_DECORATE || i.op == OP_MEMBER_DECORATE)
+    {
         out.splice(k + 1..k + 1, extra_decs);
     }
     s.insts = out;
@@ -320,7 +374,10 @@ pub(crate) fn split_combined(s: &mut Spv) -> Result<Twins, String> {
 }
 
 fn sampler_of(insts: &[Inst]) -> Option<u32> {
-    insts.iter().find(|i| i.op == OP_TYPE_SAMPLER).map(|i| i.w[0])
+    insts
+        .iter()
+        .find(|i| i.op == OP_TYPE_SAMPLER)
+        .map(|i| i.w[0])
 }
 
 /// The number of locations a varying of type `ty` takes: a matrix one per column, an array one per element.
@@ -328,7 +385,12 @@ fn locations_of(s: &Spv, ty: u32) -> u32 {
     match s.def(ty) {
         Some(d) if d.op == OP_TYPE_MATRIX => d.w.get(2).copied().unwrap_or(1),
         Some(d) if d.op == OP_TYPE_ARRAY => {
-            let n = d.w.get(2).and_then(|&c| s.def(c)).filter(|c| c.op == OP_CONSTANT).and_then(|c| c.w.get(2)).copied();
+            let n =
+                d.w.get(2)
+                    .and_then(|&c| s.def(c))
+                    .filter(|c| c.op == OP_CONSTANT)
+                    .and_then(|c| c.w.get(2))
+                    .copied();
             n.unwrap_or(1) * locations_of(s, d.w[1])
         }
         _ => 1,
@@ -373,7 +435,10 @@ pub(crate) fn auto_map(s: &mut Spv) {
         .iter()
         .filter(|i| {
             i.op == OP_VARIABLE
-                && matches!(i.w.get(2), Some(&SC_UNIFORM_CONSTANT | &SC_UNIFORM | &SC_STORAGE_BUFFER))
+                && matches!(
+                    i.w.get(2),
+                    Some(&SC_UNIFORM_CONSTANT | &SC_UNIFORM | &SC_STORAGE_BUFFER)
+                )
         })
         .map(|i| i.w[1])
         .collect();
@@ -386,24 +451,41 @@ pub(crate) fn auto_map(s: &mut Spv) {
         add.push(Inst::new(OP_DECORATE, vec![v, DEC_BINDING, n as u32]));
         add.push(Inst::new(OP_DECORATE, vec![v, DEC_SET, 0]));
     }
-    let at = s.insts.iter().rposition(|i| i.op == OP_DECORATE || i.op == OP_MEMBER_DECORATE).map_or_else(
-        || s.insts.iter().position(|i| (19..=39).contains(&i.op)).unwrap_or(0),
-        |k| k + 1,
-    );
+    let at = s
+        .insts
+        .iter()
+        .rposition(|i| i.op == OP_DECORATE || i.op == OP_MEMBER_DECORATE)
+        .map_or_else(
+            || {
+                s.insts
+                    .iter()
+                    .position(|i| (19..=39).contains(&i.op))
+                    .unwrap_or(0)
+            },
+            |k| k + 1,
+        );
     s.insts.splice(at..at, add);
 }
 
 fn has_member_builtin(s: &Spv, ty: u32) -> bool {
-    s.insts.iter().any(|i| i.op == OP_MEMBER_DECORATE && i.w.first() == Some(&ty) && i.w.get(2) == Some(&DEC_BUILT_IN))
+    s.insts.iter().any(|i| {
+        i.op == OP_MEMBER_DECORATE && i.w.first() == Some(&ty) && i.w.get(2) == Some(&DEC_BUILT_IN)
+    })
 }
 
 /// The name of each input or output variable by its location, for one storage class. An array of `n` varyings gives `name_0`
 /// to `name_{n-1}` at consecutive locations, as `crate::io::flatten_varyings` splits it.
 pub(crate) fn varying_names(s: &Spv, class: u32) -> BTreeMap<u32, String> {
     let mut out = BTreeMap::new();
-    for i in s.insts.iter().filter(|i| i.op == OP_VARIABLE && i.w.get(2) == Some(&class)) {
+    for i in s
+        .insts
+        .iter()
+        .filter(|i| i.op == OP_VARIABLE && i.w.get(2) == Some(&class))
+    {
         let v = i.w[1];
-        let Some(l) = s.decoration(v, DEC_LOCATION) else { continue };
+        let Some(l) = s.decoration(v, DEC_LOCATION) else {
+            continue;
+        };
         let name = s.name(v);
         let ty = s.def(i.w[0]).and_then(|p| p.w.get(2)).copied().unwrap_or(0);
         match s.def(ty) {

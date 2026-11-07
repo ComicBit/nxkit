@@ -79,7 +79,9 @@ fn tokens(s: &str) -> Vec<String> {
             while i < c.len() && (c[i].is_ascii_alphanumeric() || c[i] == '_') {
                 i += 1;
             }
-        } else if c[i].is_ascii_digit() || (c[i] == '.' && c.get(i + 1).is_some_and(char::is_ascii_digit)) {
+        } else if c[i].is_ascii_digit()
+            || (c[i] == '.' && c.get(i + 1).is_some_and(char::is_ascii_digit))
+        {
             i += 1;
             while i < c.len() {
                 let sign = (c[i] == '+' || c[i] == '-') && matches!(c[i - 1], 'e' | 'E');
@@ -138,11 +140,22 @@ struct Pp {
 
 impl Pp {
     fn define(&mut self, name: &str, value: &str) {
-        self.macros.insert(name.to_string(), Macro { params: None, body: tokens(value) });
+        self.macros.insert(
+            name.to_string(),
+            Macro {
+                params: None,
+                body: tokens(value),
+            },
+        );
     }
 
     /// Expands the macros in `t`. A macro is not expanded again inside its own expansion.
-    fn expand(&self, t: &[String], hide: &mut Vec<String>, depth: usize) -> Result<Vec<String>, String> {
+    fn expand(
+        &self,
+        t: &[String],
+        hide: &mut Vec<String>,
+        depth: usize,
+    ) -> Result<Vec<String>, String> {
         if depth > 64 {
             return Err("macro expansion too deep".into());
         }
@@ -150,7 +163,11 @@ impl Pp {
         let mut i = 0;
         while i < t.len() {
             let name = &t[i];
-            let Some(m) = self.macros.get(name).filter(|_| is_ident(name) && !hide.contains(name)) else {
+            let Some(m) = self
+                .macros
+                .get(name)
+                .filter(|_| is_ident(name) && !hide.contains(name))
+            else {
                 out.push(name.clone());
                 i += 1;
                 continue;
@@ -172,13 +189,20 @@ impl Pp {
                     }
                     let (args, end) = call_args(t, j)?;
                     i = end;
-                    let args: Vec<Vec<String>> = if params.is_empty() && args.len() == 1 && args[0].iter().all(|x| is_space(x)) {
+                    let args: Vec<Vec<String>> = if params.is_empty()
+                        && args.len() == 1
+                        && args[0].iter().all(|x| is_space(x))
+                    {
                         Vec::new()
                     } else {
                         args
                     };
                     if args.len() != params.len() {
-                        return Err(format!("macro {name} takes {} arguments, not {}", params.len(), args.len()));
+                        return Err(format!(
+                            "macro {name} takes {} arguments, not {}",
+                            params.len(),
+                            args.len()
+                        ));
                     }
                     let mut expanded = Vec::new();
                     for a in &args {
@@ -192,12 +216,19 @@ impl Pp {
                         };
                         let near = |d: isize| {
                             let mut x = k as isize + d;
-                            while x >= 0 && (x as usize) < m.body.len() && is_space(&m.body[x as usize]) {
+                            while x >= 0
+                                && (x as usize) < m.body.len()
+                                && is_space(&m.body[x as usize])
+                            {
                                 x += d;
                             }
                             x >= 0 && m.body.get(x as usize).is_some_and(|y| y == "##")
                         };
-                        let arg = if near(-1) || near(1) { &args[p] } else { &expanded[p] };
+                        let arg = if near(-1) || near(1) {
+                            &args[p]
+                        } else {
+                            &expanded[p]
+                        };
                         body.extend(trim(arg).iter().cloned());
                     }
                     paste(body)
@@ -279,7 +310,11 @@ fn call_args(t: &[String], open: usize) -> Result<(Vec<Vec<String>>, usize), Str
 /// Evaluates a `#if` expression whose macros are expanded: integers, unary `! ~ - +`, the binary operators of C and
 /// parentheses. An identifier left over is 0.
 fn eval(t: &[String]) -> Result<i64, String> {
-    let t: Vec<&str> = t.iter().map(String::as_str).filter(|x| !is_space(x)).collect();
+    let t: Vec<&str> = t
+        .iter()
+        .map(String::as_str)
+        .filter(|x| !is_space(x))
+        .collect();
     // two-character operators come as two tokens
     let mut v: Vec<String> = Vec::new();
     for x in t {
@@ -296,7 +331,10 @@ fn eval(t: &[String]) -> Result<i64, String> {
     let mut p = 0;
     let r = expr(&v, &mut p, 0)?;
     if p != v.len() {
-        return Err(format!("an expression with `{}` left over", v[p..].join(" ")));
+        return Err(format!(
+            "an expression with `{}` left over",
+            v[p..].join(" ")
+        ));
     }
     Ok(r)
 }
@@ -351,7 +389,9 @@ fn unary(v: &[String], p: &mut usize) -> Result<i64, String> {
 fn expr(v: &[String], p: &mut usize, min: u8) -> Result<i64, String> {
     let mut l = unary(v, p)?;
     while let Some(op) = v.get(*p).map(String::as_str) {
-        let Some(pr) = prec(op).filter(|&pr| pr > min) else { break };
+        let Some(pr) = prec(op).filter(|&pr| pr > min) else {
+            break;
+        };
         *p += 1;
         let r = expr(v, p, pr)?;
         l = match op {
@@ -389,13 +429,28 @@ fn resolve_defined(pp: &Pp, t: &[String]) -> Vec<String> {
             i += 1;
             continue;
         }
-        let rest: Vec<(usize, &String)> = t.iter().enumerate().skip(i + 1).filter(|(_, x)| !is_space(x)).take(3).collect();
+        let rest: Vec<(usize, &String)> = t
+            .iter()
+            .enumerate()
+            .skip(i + 1)
+            .filter(|(_, x)| !is_space(x))
+            .take(3)
+            .collect();
         let (name, end) = match rest.as_slice() {
-            [(_, o), (_, n), (k, c), ..] if o.as_str() == "(" && c.as_str() == ")" => (n.as_str(), k + 1),
+            [(_, o), (_, n), (k, c), ..] if o.as_str() == "(" && c.as_str() == ")" => {
+                (n.as_str(), k + 1)
+            }
             [(k, n), ..] => (n.as_str(), k + 1),
             [] => ("", t.len()),
         };
-        out.push(if pp.macros.contains_key(name) { "1" } else { "0" }.to_string());
+        out.push(
+            if pp.macros.contains_key(name) {
+                "1"
+            } else {
+                "0"
+            }
+            .to_string(),
+        );
         i = end;
     }
     out
@@ -404,7 +459,9 @@ fn resolve_defined(pp: &Pp, t: &[String]) -> Vec<String> {
 /// Preprocesses GLSL `src` as glslang does for an ES or desktop profile, the profile and version taken from its `#version`.
 pub(crate) fn preprocess(src: &str) -> Result<String, String> {
     let text = strip(src);
-    let mut pp = Pp { macros: BTreeMap::new() };
+    let mut pp = Pp {
+        macros: BTreeMap::new(),
+    };
     let mut version = 100;
     let mut out = String::new();
     // per open conditional: is its current branch on, has one of its branches been taken, is its parent on
@@ -424,11 +481,17 @@ pub(crate) fn preprocess(src: &str) -> Result<String, String> {
             continue;
         };
         if !chunk.is_empty() {
-            out.push_str(&pp.expand(&tokens(&chunk.concat()), &mut Vec::new(), 0)?.concat());
+            out.push_str(
+                &pp.expand(&tokens(&chunk.concat()), &mut Vec::new(), 0)?
+                    .concat(),
+            );
             chunk.clear();
         }
         let dir = dir.trim_start();
-        let word: String = dir.chars().take_while(|&c| c.is_ascii_alphanumeric() || c == '_').collect();
+        let word: String = dir
+            .chars()
+            .take_while(|&c| c.is_ascii_alphanumeric() || c == '_')
+            .collect();
         let rest = dir[word.len()..].trim();
         let active = on(&stack);
         pp.define("__LINE__", &(n + 1).to_string());
@@ -464,21 +527,35 @@ pub(crate) fn preprocess(src: &str) -> Result<String, String> {
             }
             _ if !active => {}
             "define" => {
-                let name: String = rest.chars().take_while(|&c| c.is_ascii_alphanumeric() || c == '_').collect();
+                let name: String = rest
+                    .chars()
+                    .take_while(|&c| c.is_ascii_alphanumeric() || c == '_')
+                    .collect();
                 if name.is_empty() {
                     return Err(format!("line {}: #define without a name", n + 1));
                 }
                 let after = &rest[name.len()..];
                 let (params, body) = match after.strip_prefix('(') {
                     Some(a) => {
-                        let close = a.find(')').ok_or_else(|| format!("line {}: #define {name}( without )", n + 1))?;
-                        let ps: Vec<String> =
-                            a[..close].split(',').map(|p| p.trim().to_string()).filter(|p| !p.is_empty()).collect();
+                        let close = a
+                            .find(')')
+                            .ok_or_else(|| format!("line {}: #define {name}( without )", n + 1))?;
+                        let ps: Vec<String> = a[..close]
+                            .split(',')
+                            .map(|p| p.trim().to_string())
+                            .filter(|p| !p.is_empty())
+                            .collect();
                         (Some(ps), &a[close + 1..])
                     }
                     None => (None, after),
                 };
-                pp.macros.insert(name, Macro { params, body: tokens(body.trim()) });
+                pp.macros.insert(
+                    name,
+                    Macro {
+                        params,
+                        body: tokens(body.trim()),
+                    },
+                );
             }
             "undef" => {
                 pp.macros.remove(rest);
@@ -488,7 +565,11 @@ pub(crate) fn preprocess(src: &str) -> Result<String, String> {
             "version" => {
                 let mut w = rest.split_whitespace();
                 version = w.next().and_then(|v| v.parse().ok()).unwrap_or(100);
-                let es = version == 100 || version == 300 || version == 310 || version == 320 || w.next() == Some("es");
+                let es = version == 100
+                    || version == 300
+                    || version == 310
+                    || version == 320
+                    || w.next() == Some("es");
                 pp.define("__VERSION__", &version.to_string());
                 if es {
                     for m in ["GL_ES", "GL_FRAGMENT_PRECISION_HIGH"].iter().chain(ES_EXT) {
@@ -505,7 +586,10 @@ pub(crate) fn preprocess(src: &str) -> Result<String, String> {
         return Err("#if without #endif".into());
     }
     if !chunk.is_empty() {
-        out.push_str(&pp.expand(&tokens(&chunk.concat()), &mut Vec::new(), 0)?.concat());
+        out.push_str(
+            &pp.expand(&tokens(&chunk.concat()), &mut Vec::new(), 0)?
+                .concat(),
+        );
     }
     let _ = version;
     Ok(out)
