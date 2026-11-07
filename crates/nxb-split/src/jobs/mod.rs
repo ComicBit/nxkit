@@ -165,3 +165,26 @@ pub fn plan_with(files: &[File], nros: &NroSet) -> R<Plan> {
     frostbite::plan(files, &mut p)?;
     Ok(p)
 }
+
+/// Bytes owned in memory, for the planners' tests.
+#[cfg(test)]
+pub(crate) struct Owned(pub Vec<u8>);
+
+#[cfg(test)]
+impl Src for Owned {
+    fn bytes(&self) -> Option<&[u8]> {
+        Some(&self.0)
+    }
+    fn len(&self) -> u64 {
+        self.0.len() as u64
+    }
+    fn read_at(&self, off: u64, buf: &mut [u8]) -> R<()> {
+        crate::src::Mem(&self.0).read_at(off, buf)
+    }
+}
+
+/// A test file's source.
+#[cfg(test)]
+pub(crate) fn own(b: Vec<u8>) -> Arc<dyn Src> {
+    Arc::new(Owned(b))
+}

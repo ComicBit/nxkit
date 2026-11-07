@@ -119,10 +119,16 @@ pub(crate) fn after_rewrite(a: &Args, b: &Build, p: &Progress) -> Result<(), Str
         inputs.split_again = true;
     }
     if pl.vkcap {
-        inputs.capture = Some(super::captures::capture_shaders(&c, super::captures::Api::Vk)?);
+        inputs.capture = Some(super::captures::capture_shaders(
+            &c,
+            super::captures::Api::Vk,
+        )?);
     }
     if pl.glcap {
-        inputs.capture = Some(super::captures::capture_shaders(&c, super::captures::Api::Gl)?);
+        inputs.capture = Some(super::captures::capture_shaders(
+            &c,
+            super::captures::Api::Gl,
+        )?);
     }
     if pl.oodle {
         inputs.oodle = Some((c.host()?, c.patched()));
@@ -192,6 +198,12 @@ mod tests {
         assert!(p.glcap && !p.vkcap);
         let p = plan(&src("nvn", [false, false, false, false, false, true]));
         assert!(p.oodle && p.say == ["legacy reason"]);
-        assert_eq!(plan(&src("nvn", [false; 6])), Plan { gfx: "nvn".into(), ..Plan::default() });
+        assert_eq!(
+            plan(&src("nvn", [false; 6])),
+            Plan {
+                gfx: "nvn".into(),
+                ..Plan::default()
+            }
+        );
     }
 }

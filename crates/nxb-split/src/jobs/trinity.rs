@@ -95,7 +95,13 @@ fn shaders(s: &dyn Src, rel: &str, packs: &[Pack]) -> R<JobOut> {
                 ));
             };
             let h = d.u64(hs.0 + 8 * k as u64)?;
-            scan_blob(&data, &format!("/{rel}#{name}#{h:016x}"), &mut out, &mut var, 0)?;
+            scan_blob(
+                &data,
+                &format!("/{rel}#{name}#{h:016x}"),
+                &mut out,
+                &mut var,
+                0,
+            )?;
         }
     }
     Ok(JobOut { found: out, var })
@@ -146,7 +152,11 @@ fn packs(fs: &dyn Src, fd: &[u8], rel: &str) -> R<Vec<(u64, String, u64)>> {
         let i = i as usize;
         match (names.get(i), sizes.get(i)) {
             (Some(nm), Some(&sz)) => out.push((off, nm.clone(), sz)),
-            _ => return red(format!("{rel}: pack index {i} is past the descriptor's lists")),
+            _ => {
+                return red(format!(
+                    "{rel}: pack index {i} is past the descriptor's lists"
+                ));
+            }
         }
     }
     out.sort();

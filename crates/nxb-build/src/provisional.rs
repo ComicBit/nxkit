@@ -17,9 +17,7 @@ use crate::events::Progress;
 use crate::graph::Build;
 use crate::host::survey::{Survey, SurveyInput, survey};
 use crate::host::survey_extract::manifest_of_image;
-use crate::host::survey_profile::{
-    EMPTY_TABLES, has_va, refine_after_rewrite, write_profile,
-};
+use crate::host::survey_profile::{EMPTY_TABLES, has_va, refine_after_rewrite, write_profile};
 use crate::inputs::Source;
 
 fn survey_dir(b: &Build) -> PathBuf {

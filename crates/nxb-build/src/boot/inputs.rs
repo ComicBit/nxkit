@@ -36,7 +36,11 @@ impl HostInputs {
             s += &format!("capture\t{}\n", d.display());
         }
         if let Some((h, m)) = &self.oodle {
-            s += &format!("oodle_host\t{}\noodle_modules\t{}\n", h.display(), m.display());
+            s += &format!(
+                "oodle_host\t{}\noodle_modules\t{}\n",
+                h.display(),
+                m.display()
+            );
         }
         if self.split_again {
             s += "split_again\t1\n";
@@ -63,7 +67,11 @@ impl HostInputs {
                 "oodle_modules" => om = Some(PathBuf::from(v)),
                 "split_again" => h.split_again = v == "1",
                 "glslc_observed" => {
-                    h.glslc_observed = v.split(' ').filter(|k| !k.is_empty()).map(str::to_string).collect();
+                    h.glslc_observed = v
+                        .split(' ')
+                        .filter(|k| !k.is_empty())
+                        .map(str::to_string)
+                        .collect();
                 }
                 _ => {}
             }
@@ -102,7 +110,11 @@ mod tests {
             capture: Some("/w/extract/v0/vk_capture".into()),
             oodle: Some(("/w/tools/dmhost".into(), "/w/patched_v0".into())),
             split_again: true,
-            glslc_observed: ["0123456789abcdef".to_string(), "fedcba9876543210".to_string()].into(),
+            glslc_observed: [
+                "0123456789abcdef".to_string(),
+                "fedcba9876543210".to_string(),
+            ]
+            .into(),
         };
         let t = h.to_text();
         assert_eq!(
