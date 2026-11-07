@@ -26,6 +26,7 @@ pub mod smash;
 pub mod trinity;
 pub mod ue;
 pub mod uejob;
+mod uelib;
 mod uepak;
 mod uerec;
 pub use uerec::ue_shaders;
