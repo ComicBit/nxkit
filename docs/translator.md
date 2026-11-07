@@ -78,7 +78,7 @@ A pixel shader gets extra entries around one static body function `dm_body_main0
 
 `Translated.side` names the alpha and logic entries. The step cuts them from `_b` into `_bx` with `nxb_shader::side::cut`.
 
-The library `_bf` is a second build of the pixel shader for framebuffer fetch. A sample of a 2D colour texture is replaced by the attachment `fbK` when its function constant `FX_i` selects it.
+The library `_bf` is a second build of the pixel shader for framebuffer fetch. Its entry is `main0_f` and its result struct is `main0_out_f`. The host specializes `main0_f` by name. A sample of a 2D colour texture is replaced by the attachment `fbK` when its function constant `FX_i` selects it.
 The coordinate must be a varying (optionally divided by `w`) or a pixel position times uniforms.
 `_b.json` gets the field `fetch` with `calls` (`fc`, `tex_reg`, `varying_locn`, `proj` or `frag_pos`), `mixed_regs` and `outputs`.
 Only samples in the main function are replaced. A shader without such a sample gets `_bf` only when `Context.fetch_outputs_only` is set. The step sets it for the keys in the profile list `bf_want.tsv`.

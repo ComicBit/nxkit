@@ -125,9 +125,9 @@ fn a_varying_sample_is_rewritten() {
         "constant bool OM_0_7 [[function_constant(71)]];",
         "FX_0 == 0 ? fb0 : FX_0 == 1 ? fb1 :",
         "static main0_out dm_body_main0(main0_in in, constant spvDescriptorSetBuffer0& spvDescriptorSet0, float4 fb0,",
-        "struct main0_outf",
+        "struct main0_out_f",
         "float4 c1_at3 [[color(3), function_constant(OM_0_3)]];",
-        "fragment main0_outf main0(main0_in in [[stage_in]], constant spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], float4 fb0 [[color(0), function_constant(FB_0)]],",
+        "fragment main0_out_f main0_f(main0_in in [[stage_in]], constant spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], float4 fb0 [[color(0), function_constant(FB_0)]],",
         "dm_body_main0(in, spvDescriptorSet0, (FB_0 ? fb0 : float4(0.0)),",
         "if (OM_0_3) out.c1_at3 = dm_r.c1;",
     ] {
@@ -151,7 +151,7 @@ fn a_varying_sample_is_rewritten() {
 fn the_base_library_keeps_the_plain_sample() {
     let t = translated(&fragment(), &Options::default());
     assert!(!t.libraries[0].msl.contains("FX_0"));
-    assert!(!t.libraries[0].msl.contains("main0_outf"));
+    assert!(!t.libraries[0].msl.contains("main0_out_f"));
 }
 
 #[test]
@@ -343,7 +343,7 @@ fn a_shader_without_a_sample_gets_a_variant_only_when_listed() {
     let t = translated(&b, &opt);
     assert_eq!(t.libraries.len(), 2);
     assert!(calls(&t).is_empty());
-    assert!(t.libraries[1].msl.contains("struct main0_outf"));
+    assert!(t.libraries[1].msl.contains("struct main0_out_f"));
 }
 
 #[test]
