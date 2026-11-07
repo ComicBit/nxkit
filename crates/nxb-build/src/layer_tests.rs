@@ -78,6 +78,25 @@ fn the_dlc_images_follow_the_packed_romfs() {
 }
 
 #[test]
+fn the_capture_folders_follow_the_romfs() {
+    let b = build("captures");
+    let ex = b.work.join("extract/v0");
+    std::fs::create_dir_all(ex.join("gl_capture")).unwrap();
+    std::fs::create_dir_all(b.work.join("aoc/2")).unwrap();
+    assert_eq!(
+        images(&b),
+        vec![
+            ex.join("RomFS.img"),
+            ex.join("gl_capture"),
+            b.work.join("aoc/2")
+        ]
+    );
+    std::fs::create_dir_all(ex.join("vk_capture")).unwrap();
+    assert_eq!(images(&b)[1], ex.join("vk_capture"));
+    let _ = std::fs::remove_dir_all(&b.work);
+}
+
+#[test]
 fn msl_files_are_written_once_per_key_and_stage() {
     let b = build("msl");
     let s = |key: &str, stage, dual: bool| Shader {

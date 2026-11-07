@@ -329,7 +329,7 @@ A step whose output is complete is skipped, so a build with unchanged inputs boo
   A boot that captures no output but observes shader keys passes only if the split covers every observed key.
 - The Unreal decode writes the decoded shader code archives to `<version>/ue_shaders`. The split reads them.
 - The game's own Oodle and LZ5 decoder serves the split (see the family table).
-- The Vulkan and GL captures write `<version>/vk_capture` and `gl_capture`. nxb has no port of `vk_shaders.py` and `gl_shaders.py`, so nothing translates these shaders. The build writes a `[RED]` line, and the shader library has to come from `--shaders`.
+- The Vulkan and GL captures write `<version>/vk_capture` and `gl_capture`. The Mac shader stage reads these folders like the RomFS (see [Vulkan and OpenGL games](#vulkan-and-opengl-games)).
 - The JIT capture is not ported. `nxb build --platform ios` stops for a game whose main imports `nn::jit` unless `<version>/jit/jit.img` exists.
 
 These boots were not run against real games in nxb. The tests use synthetic data.
@@ -423,7 +423,8 @@ A game without an extract uses the `graphics` key of the profile. Without the ke
 For a Vulkan or OpenGL game, the build changes these stages:
 
 - The shader split and the pipeline archive are not needed. Their lines say "not needed: the game does not draw with NVN".
-- The Mac shader stage runs `nxb-layer` in place of the NVN shader chain. It reads the SPIR-V files (Vulkan) or the GLSL sources (OpenGL) of the base, the update and the DLC images.
+- The Mac shader stage runs `nxb-layer` in place of the NVN shader chain. It reads the SPIR-V files (Vulkan) or the GLSL sources (OpenGL) of the base, the update and the DLC images,
+  and the `vk_capture` or `gl_capture` folder of the capture boot.
   OpenGL sources are `.mvgl` packs, `.vert` and `.frag` files and the GLSL strings in `main`.
 - naga translates each shader to MSL. `xcrun metal` and `metallib` link all of them into one library. The output is `<work>/shader/vk/vk_shaders.metallib` and `vk_shaders.tsv`, or `<work>/shader/gl/gl_shaders.*`.
   The format is the format of `dm/gfx/tools/vk_shaders.py` and `gl_shaders.py`.
@@ -432,7 +433,7 @@ For a Vulkan or OpenGL game, the build changes these stages:
 - The reuse key is `<work>/shader/vk.key` (or `gl.key`). It hashes the translator id, the images and `main`.
 
 With `--also-ios`, the stage also writes `<work>/shader/ios/vk` (or `gl`) for the iPhone SDK. The iOS app build refuses a Vulkan or OpenGL game.
-The run-time captures of the reference script (`capture_shaders`) are not ported.
+The capture boot (`capture_shaders` of the reference script) runs in the extract stage, before the Mac shader stage.
 
 Measured on Hades (`0100535012974000`): 74 of 74 SPIR-V modules translate, and `xcrun metal` compiles all of them (2 s). The app builds and ships `msl/vk`.
 The game was not started. The OpenGL path has unit tests only, no real game.

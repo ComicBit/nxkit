@@ -131,12 +131,11 @@ pub(crate) fn after_rewrite(a: &Args, b: &Build, p: &Progress) -> Result<(), Str
         )?);
     }
     if let Some(d) = &inputs.capture {
-        // vk_shaders.py and gl_shaders.py turn the capture into the app's Metal library: not ported to nxb
+        // the Mac shader stage (crate::layer) reads the capture folder with the RomFS
         p.say(&format!(
-            "[RED] the {} shaders captured in {} are not translated: nxb has no port of vk_shaders.py and gl_shaders.py, the app's {} shader library has to come from the script's build (--shaders)",
+            "the {} shaders captured in {} go into the Mac shader stage",
             if pl.vkcap { "Vulkan" } else { "GL" },
-            d.display(),
-            if pl.vkcap { "Vulkan" } else { "GL" }
+            d.display()
         ));
     }
     if pl.oodle {
