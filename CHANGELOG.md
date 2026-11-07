@@ -2,6 +2,12 @@
 
 All notable changes are in this file. The format follows Keep a Changelog. Versions follow Semantic Versioning.
 
+## Unreleased
+
+### Added
+
+- The JIT capture is ported. An iOS build of a game whose main imports `nn::jit` boots the game in the Mac host and builds `jit/jit.img` with `nxb_rewrite::jit`, the port of `jit_capture.py`. The build no longer stops when `jit.img` is missing. `--platform mac` sets `DM_JIT_CAPTURE` for such a game.
+
 ## 0.7.0
 
 ### Added
