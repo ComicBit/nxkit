@@ -2,6 +2,12 @@
 
 All notable changes are in this file. The format follows Keep a Changelog. Versions follow Semantic Versioning.
 
+## Unreleased
+
+### Added
+
+- `nxb build --platform ios` builds the iPhone app of a Vulkan or OpenGL game. The stage `Vulkan shaders` (or `GL shaders`) writes `<work>/shader/ios/vk` (or `gl`), and the IPA has it in `msl/vk` (or `msl/gl`). The NVN split and chain do not run. Unit tests only, no real game IPA and no device test.
+
 ## 0.7.0
 
 ### Added

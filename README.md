@@ -33,7 +33,7 @@ Version 0.6.6 is the fourteenth public release. It is early software. Read this 
   220 gave a different output. Nobody tested the other shaders. If you need Apple's output, set `NXB_OWN_RAW=0`.
 - The shader step for iOS is not part of the verified path. Only a sample was compared.
 - Unity readers, large text segments (100 MB and more), frame step builds without a local sample and framework and multi-program builds are checked with synthetic files only.
-- Vulkan and OpenGL games build for the Mac. `nxb-layer` translates their shaders with naga and glslang. The iOS app build refuses them.
+- Vulkan and OpenGL games build for the Mac and for iOS. `nxb-layer` translates their shaders with naga and glslang. The iOS app build of these games has unit tests only. No real game IPA was built.
 - Oodle and LZ5 formats decode with the game's own decoder in the Mac host. Only `nxb build` starts the host. `nxb extract` and `nxb split` alone stop with exit code 4 for them.
 - The reference scripts remain the fallback. If a stage fails or does not support an input, run the reference script for that stage.
   The tools return exit code 4 for an unsupported input. The caller then runs the reference script. Exit code 3 means damaged data.
