@@ -166,3 +166,41 @@ fn hsetp2_without_ftz_compares_as_is() {
     let m = kept_srcs(&[HSETP2, FSEL_P0], &[19, 20]);
     assert!(!m.contains(BOUND), "{m}");
 }
+
+/// `I2F.U32.RP R6, R19`.
+const I2F_RP: (u64, u64) = (0x0000_0013_0006_7306, 0x000f_e200_0020_9000);
+/// `I2F.U32 R6, R19`.
+const I2F_RN: (u64, u64) = (0x0000_0013_0006_7306, 0x000f_e200_0020_1000);
+/// `F2F.F16.F32.RP R6, R19`.
+const F2F_RP: (u64, u64) = (0x0000_0013_0006_7304, 0x000f_e200_0020_8800);
+/// `F2F.F16.F32 R6, R19`.
+const F2F_RN: (u64, u64) = (0x0000_0013_0006_7304, 0x000f_e200_0020_0800);
+/// 2^32 as the MSL prints the float: the bound above which the rounded float is above every u32.
+const U32_END: &str = "4294967300.0f";
+
+#[test]
+fn i2f_rp_checks_against_the_integer() {
+    let m = kept_srcs(&[I2F_RP], &[19]);
+    assert!(m.contains(U32_END), "{m}");
+    // The float's bits stepped up
+    assert!(m.contains(") + 1)"), "{m}");
+}
+
+#[test]
+fn i2f_to_nearest_is_plain() {
+    let m = kept_srcs(&[I2F_RN], &[19]);
+    assert!(!m.contains(U32_END), "{m}");
+}
+
+#[test]
+fn f2f_rp_reads_the_half_back() {
+    // Through a mask: an unpack of the pack would be folded into the float itself
+    let m = kept_srcs(&[F2F_RP], &[19]);
+    assert!(m.contains("& 65535"), "{m}");
+}
+
+#[test]
+fn f2f_to_nearest_is_plain() {
+    let m = kept_srcs(&[F2F_RN], &[19]);
+    assert!(!m.contains("& 65535"), "{m}");
+}

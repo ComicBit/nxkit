@@ -263,9 +263,103 @@ pub(super) fn i2f(ctx: &mut Ctx) -> R {
     let src = ISrcFmt((if x.bit(74) { 4 } else { 0 }) | src_size);
     let s = one(ctx, &x, false, false, false)?;
     let v = get(ctx, &s)?;
+    let rnd = x.bits(78, 80);
+    // A 32-bit integer to a float with .RM / .RP / .RZ (78..79). The compiler's 32-bit division starts with I2F.U32.RP
+    // so that its reciprocal estimate stays on the side its correction step expects.
+    if src_size == 2 && dst_size == 2 && rnd != 0 {
+        let signed = x.bit(74);
+        let f = if signed {
+            ctx.i_convert_s32_to_fp32(v)
+        } else {
+            ctx.i_convert_u32_to_fp32(v)
+        };
+        // f is an integer value. It is exact back in 32 bits unless it rounded up to 2^31 (signed) or 2^32, where it
+        // is above v anyway.
+        let limit = cf(ctx, if signed { 2147483648.0 } else { 4294967296.0 });
+        let below = ctx.fp_compare_less(f, limit);
+        let big = ctx.bitwise_not(below);
+        let back = if signed {
+            ctx.fp32_convert_to_s32(f)
+        } else {
+            ctx.fp32_convert_to_u32(f)
+        };
+        let above = if signed {
+            ctx.i_compare_greater(back, v)
+        } else {
+            ctx.i_compare_greater_unsigned(back, v)
+        };
+        let gt = ctx.bitwise_or(big, above);
+        let under = if signed {
+            ctx.i_compare_less(back, v)
+        } else {
+            ctx.i_compare_less_unsigned(back, v)
+        };
+        let lt = ctx.bitwise_and(below, under);
+        let neg = if signed {
+            let z = c(ctx, 0);
+            Some(ctx.i_compare_less(v, z))
+        } else {
+            None
+        };
+        let r = directed(ctx, rnd, f, gt, lt, neg);
+        set(ctx, &x, r, false);
+        return Ok(());
+    }
     let sel = ByteSel(select * if src_size == 1 { 2 } else { 1 });
     emit_i2f(ctx, src, DstFmt(dst_size), v, sel, x.rd(), false, false);
     Ok(())
+}
+
+/// `ADirected`: a result r rounded to nearest, moved to the directed rounding .RM (1), .RP (2) or .RZ (3) asks for.
+/// `gt` is r above the exact value, `lt` r below it, `neg` the value negative (`None`: never). One step of a float's
+/// bits moves it to its neighbour of the same sign: + 1 away from zero, - 1 toward it. An overflow rounded to infinity
+/// steps back to the largest finite value.
+fn directed(ctx: &mut Ctx, rnd: i32, r: Opd, gt: Opd, lt: Opd, neg: Option<Opd>) -> Opd {
+    let pos = neg.map(|n| ctx.bitwise_not(n));
+    let mut and = |a: Option<Opd>, b: Option<Opd>| match (a, b) {
+        (Some(a), Some(b)) => Some(ctx.bitwise_and(a, b)),
+        _ => None,
+    };
+    let (away, toward) = match rnd {
+        // RP: below the value, step up
+        2 => (
+            if neg.is_none() {
+                Some(lt)
+            } else {
+                and(Some(lt), pos)
+            },
+            and(Some(lt), neg),
+        ),
+        // RM: above the value, step down
+        1 => (
+            and(Some(gt), neg),
+            if neg.is_none() {
+                Some(gt)
+            } else {
+                and(Some(gt), pos)
+            },
+        ),
+        // RZ: larger in magnitude, step toward zero
+        _ => {
+            let t = match (and(Some(gt), pos), and(Some(lt), neg)) {
+                (Some(a), Some(b)) => ctx.bitwise_or(a, b),
+                _ => gt,
+            };
+            (None, Some(t))
+        }
+    };
+    let mut r = r;
+    if let Some(a) = away {
+        let one = c(ctx, 1);
+        let up = ctx.i_add(r, one);
+        r = ctx.conditional_select(a, up, r);
+    }
+    if let Some(t) = toward {
+        let one = c(ctx, -1);
+        let down = ctx.i_add(r, one);
+        r = ctx.conditional_select(t, down, r);
+    }
+    r
 }
 
 pub(super) fn f2i64(ctx: &mut Ctx) -> R {
@@ -389,6 +483,24 @@ pub(super) fn f2f(ctx: &mut Ctx) -> R {
         s.neg,
         false,
     );
+    // F2F.F16.F32 .RM / .RP / .RZ (78..79): the pack rounds to nearest. The half read back (exact in 32 bits) tells
+    // which side of the float it fell. The read goes through a mask, because the optimizer takes an unpack of a pack
+    // for the packed float itself, which would skip the rounding.
+    let rnd = x.bits(78, 80);
+    if src_size == 2 && dst_size == 1 && rnd != 0 && x.rd() != RZ {
+        let f = ctx.fp_abs_neg(src, s.abs, s.neg);
+        let rd = gpr(ctx, x.rd());
+        let mask = c(ctx, 0xffff);
+        let low = ctx.bitwise_and(rd, mask);
+        let back = ctx.unpack_half2x16_low(low);
+        let gt = ctx.fp_compare_less(f, back);
+        let lt = ctx.fp_compare_less(back, f);
+        let z = cf(ctx, 0.0);
+        let neg = ctx.fp_compare_less(f, z);
+        let res = directed(ctx, rnd, rd, gt, lt, Some(neg));
+        let d = gpr(ctx, x.rd());
+        ctx.copy_to(d, res);
+    }
     Ok(())
 }
 
