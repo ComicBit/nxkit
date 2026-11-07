@@ -24,7 +24,9 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
   `POPC` and `FLO` take bit 63 as a bitwise not only in the register, uniform register and constant forms. In the immediate form it is the immediate's top bit.
   `LEA.HI.SX32` takes the sign extension of A as the high word.
   `LEA` with a negated B adds ~B with `.X` and ~B + 1 without it. The + 1 counts in the carry out.
-- `TRANSLATOR_ID` is `msl-2.11`.
+- Half pairs read their operands as the hardware does (upstream `9dc81953`). A constant operand applies its swizzle. Before, `HMUL2 R6, R19.H0_H0, c[0x0][0x168].H0_H0` gave the high lane the other half of the constant.
+  Swizzle value 1 is `.F32`, the 32-bit float in both lanes. `HSETP2` and `HSET2` with `.FTZ` compare a subnormal half as zero.
+- `TRANSLATOR_ID` is `msl-2.12`.
 
 ## 0.6.7
 

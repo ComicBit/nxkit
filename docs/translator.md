@@ -102,13 +102,16 @@ A raw global access whose buffer is not known at translation time looks up the b
 Each lookup keeps the entry it chose last in a zeroed local word `gmem_last_N`. The next access first checks that entry.
 When the address is outside it, the lookup tries the hint and then searches all entries. The end of the chosen entry is checked once more after the search.
 
-## Ampere integer and predicate details
+## Ampere ALU details
 
 `IADD3` sets its first carry predicate when the 64-bit sum is at least 2^32 and its second when it is at least 2 * 2^32. The `IADD3.X` of the high word adds both.
 `PLOP3` computes both truth tables from the sources before it writes a destination. The first destination may be a source.
 `POPC` and `FLO` take bit 63 as a bitwise not only in forms 1, 5 and 6. In the immediate form it is the immediate's top bit.
 `LEA.HI` with `.SX32` (bit 73) takes the sign extension of A as the high word instead of C.
 `LEA` with a negated B (bit 63, forms 1, 5 and 6) adds ~B with `.X` and ~B + 1 without it. The + 1 counts in the carry predicate.
+A half-pair operand has a swizzle in A (bits 74 to 75), in the 32-bit slot (bits 60 to 61) and in the 64-bit slot (bits 81 to 82). A constant has one too. Only an immediate has none.
+The values are 0 as is, 1 `.F32` (the 32-bit float in both lanes), 2 the low half twice and 3 the high half twice. `MUFU.F16` reads bits 60 to 61 as a half select, where an odd value picks the high half.
+`HSETP2` and `HSET2` with `.FTZ` (bit 80) set a lane below 2^-14 in magnitude to zero before they compare.
 
 ## Tensor cores
 
@@ -131,7 +134,7 @@ Each function that calls the helper declares `dm_acc[16]` and `dm_am[4]` and pas
 
 The step stores each translation in the store. The key `nxb.xlate.v2` has the translator identity, the job, the code, the chain version V, the source, the paired shader,
 the answer-table flag, the dual-source and fetch-outputs-only flags and the varyings of the partners.
-The translator identity is a hash of the label `nxb-xlate msl`, V, `nxb_xlate::msl::TRANSLATOR_ID` (now `msl-2.11`) and `NXB_TEST_XLATE_SALT`.
+The translator identity is a hash of the label `nxb-xlate msl`, V, `nxb_xlate::msl::TRANSLATOR_ID` (now `msl-2.12`) and `NXB_TEST_XLATE_SALT`.
 V is a hash of the engine files that `dm/gfx/tools/dmsh_chain.py` lists in `FILES`, and the options string `debug=True reduced=True`. No Rust source goes into V.
 A change of the translator translates again only when someone increases `TRANSLATOR_ID` by hand. Without the increase, the store gives the old MSL. A failure is not stored.
 

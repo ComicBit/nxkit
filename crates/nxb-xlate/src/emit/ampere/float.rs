@@ -150,7 +150,9 @@ pub(super) fn mufu(ctx: &mut Ctx) -> R {
     let half = x.bit(73);
     let s = one(ctx, &x, false, true, true)?;
     let mut res = if half {
-        half_lanes(ctx, &s, x.bits(60, 62))?[0]
+        // MUFU.F16's bits 60..61 pick one half (0 .H0, 1 .H1), not a pair's swizzle where 1 is .F32
+        let sel = if x.bits(60, 62) & 1 != 0 { 3 } else { 2 };
+        half_lanes(ctx, &s, sel)?[0]
     } else {
         float(ctx, &s)?
     };
