@@ -2,6 +2,27 @@
 
 All notable changes are in this file. The format follows Keep a Changelog. Versions follow Semantic Versioning.
 
+## Unreleased
+
+### Added
+
+- The Unreal decode of `nxb build` reads the shader libraries of Unreal Engine 5.6 IoStore containers (`.utoc` and `.ucas`).
+  Each library becomes a version 2 shader code archive in `<version>/ue_shaders`. The archive name comes from the `Manifest_*.txt` files.
+  Stored, zlib and LZ4 blocks decode in nxb. Oodle blocks and shader groups decode with the game's own decoder in the Mac host (`DM_OODLE_SERVE`).
+  An encrypted container opens with the AES-256 key that main holds for the paks. The reference script has no key for these containers.
+  The tests use synthetic containers and a fake decoder. No real IoStore game was run.
+
+### Fixed
+
+- The split reads the export chunks of IoStore containers of TOC version 4 and later. Before, it found none in these containers.
+- A patch container `<name>_P.utoc` mounts after the game's containers, like `<name>_0_P.utoc`.
+- The split skips the global shader cache of a pak only when the IoStore containers in its folder hold the cooked packages. This is the rule of the reference.
+- A damaged IoStore TOC gives an error. Before, a TOC of 16 bytes made the split panic, and a directory index with a loop did not end.
+
+### Known gaps
+
+- The known gaps of 0.7.0 apply, except the IoStore shader libraries.
+
 ## 0.7.0
 
 ### Added

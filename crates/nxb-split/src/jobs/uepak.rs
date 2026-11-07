@@ -438,8 +438,9 @@ impl Pak {
     }
 }
 
-/// `inline_shaders`: whether a pak keeps its shaders inline in its cooked packages.
-pub(super) fn inline_shaders(s: &dyn Src, rel: &str) -> bool {
+/// `inline_shaders`: whether a pak keeps its shaders inline in its cooked packages. `beside` tells whether the
+/// containers in its folder hold them (`inline_in_containers`), for a pak that names only the global shader cache.
+pub(super) fn inline_shaders(s: &dyn Src, rel: &str, beside: &dyn Fn() -> bool) -> bool {
     let f = || -> R<bool> {
         let (enc, ioff, isz, _, ver) = footer(s, rel)?;
         if ver == 4 || ver == 8 {
@@ -462,7 +463,8 @@ pub(super) fn inline_shaders(s: &dyn Src, rel: &str) -> bool {
         let (doff, dsz) = (r.le(8)?, r.le(8)?);
         let d = range(s, doff, dsz, rel)?;
         let has = |p: &[u8]| crate::shaders::memfind(&d, p).is_some();
-        Ok(!has(b".ushaderbytecode\0") && (has(b".uexp\0") || has(b"GlobalShaderCache-")))
+        Ok(!has(b".ushaderbytecode\0")
+            && (has(b".uexp\0") || (has(b"GlobalShaderCache-") && beside())))
     };
     f().unwrap_or(false)
 }

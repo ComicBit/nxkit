@@ -2,7 +2,10 @@
 //! compressed. LZ4 ones (Unreal Engine 4.26 and later by default) are decoded in nxb. Oodle ones (Octopath Traveler
 //! 0) only the game's own Oodle decodes: nxb writes one job of them, the game's code decodes it in the Mac host
 //! (`DM_OODLE_JOB`, `dm/host/hle_oodle.c`: right before nnMain, then the host exits) and the decoded archives go to
-//! `<version dir>/ue_shaders`, where the split reads them. A folder whose stamp matches its paks is reused.
+//! `<version dir>/ue_shaders`, where the split reads them. Unreal Engine 5.6 keeps the shader libraries in the IoStore
+//! containers instead, with two layers of Oodle (the container blocks, then each shader group). nxb reads them through
+//! the game's Oodle in the host's tool mode (`DM_OODLE_SERVE`, no boot). A folder whose stamp matches its paks and
+//! containers is reused.
 
 use std::path::Path;
 use std::time::Instant;
@@ -50,11 +53,38 @@ pub(crate) fn decode_ue_shaders(c: &Ctx<'_>, versions: &[String]) -> Result<(), 
         let jd = c.work.join("tmp").join(format!("ue_job_{v}"));
         rmtree(&jd)?;
         std::fs::create_dir_all(&jd).map_err(|e| format!("{}: {e}", jd.display()))?;
+        let io = nxb_extract::ue_decode::has_shader_libraries(d).map_err(|e| e.to_string())?;
+        let serve = if io {
+            if host.is_none() {
+                c.p.set(Update {
+                    step: Some("building the Mac host"),
+                    ..Update::default()
+                });
+                host = Some(c.host()?);
+            }
+            let (cwd, env) = c.run_dir("oodle_serve", false)?;
+            Some(nxb_extract::oodle_host::Installed::new(
+                nxb_extract::oodle_host::HostSpec {
+                    host: host.clone().unwrap_or_default(),
+                    modules: c.patched(),
+                    env,
+                    cwd,
+                    logs: c.logs(),
+                },
+            ))
+        } else {
+            None
+        };
         c.p.set(Update {
-            step: Some(&format!("{v}: shader archives out of the paks")),
+            step: Some(&format!(
+                "{v}: shader archives out of the paks{}",
+                if io { " and IoStore containers" } else { "" }
+            )),
             ..Update::default()
         });
-        let job = nxb_extract::ue_decode::job(d).map_err(|e| e.to_string())?;
+        let job = nxb_extract::ue_decode::job(d).map_err(|e| e.to_string());
+        drop(serve);
+        let job = job?;
         if job.archives.is_empty() {
             return Err(format!(
                 "the RomFS has Unreal paks, but none in {} holds a shader code archive: where the shaders are has to be found first",
@@ -141,7 +171,12 @@ pub(crate) fn decode_ue_shaders(c: &Ctx<'_>, versions: &[String]) -> Result<(), 
             .map_err(|e| format!("{}: {e}", part.display()))?;
         swap_in(&part, &d.join("ue_shaders"))?;
         rmtree(&jd)?;
-        total += n;
+        total += n + job
+            .archives
+            .iter()
+            .filter(|x| x.compression == "IoStore, decoded")
+            .map(|x| x.shaders)
+            .sum::<usize>();
     }
     c.p.say(&format!(
         "UE shader decode: {total} shaders in {}",

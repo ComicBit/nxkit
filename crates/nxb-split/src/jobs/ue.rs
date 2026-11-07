@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use super::uepak::{Pak, inline_shaders, normpath};
 use super::uerec::inline_records;
-use super::uetoc::Toc;
+use super::uetoc::{Toc, dirname, inline_in_containers, mount_order};
 use super::{Ctx, File, Job, JobOut, Plan, R};
 use crate::SplitError;
 use crate::bahs::BahsVar;
@@ -26,38 +26,25 @@ fn legacy_shaders(pk: &Pak, rel: &str, names: &[String]) -> R<JobOut> {
     })
 }
 
-fn mount_order(rel: &str) -> (u8, u64, String) {
-    let base = rel.rsplit('/').next().unwrap_or(rel);
-    let l = base.to_lowercase();
-    if let Some(stem) = l.strip_suffix("_p.utoc") {
-        let digits: String = stem
-            .chars()
-            .rev()
-            .take_while(char::is_ascii_digit)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect();
-        let pre = &stem[..stem.len() - digits.len()];
-        if digits.is_empty() || pre.ends_with('_') {
-            return (1, digits.parse().unwrap_or(0), rel.to_string());
-        }
-    }
-    (0, 0, rel.to_string())
-}
-
-fn dirname(rel: &str) -> &str {
-    rel.rsplit_once('/').map_or("", |x| x.0)
-}
-
 /// A container with its `.ucas` partitions.
-type Opened = (Toc, Vec<Arc<dyn Src>>);
+type Opened = (Toc, Vec<Option<Arc<dyn Src>>>);
 
 /// `ue_legacy_jobs`.
 pub fn plan(files: &[File], p: &mut Plan) -> R<()> {
+    let beside = |rel: &str| {
+        inline_in_containers(
+            files
+                .iter()
+                .filter(|x| x.rel.ends_with(".utoc") && dirname(&x.rel) == dirname(rel))
+                .map(|x| (x.rel.as_str(), x.src.as_ref())),
+        )
+    };
     let paks: Vec<usize> = (0..files.len())
         .filter(|&i| {
-            files[i].rel.ends_with(".pak") && inline_shaders(files[i].src.as_ref(), &files[i].rel)
+            files[i].rel.ends_with(".pak")
+                && inline_shaders(files[i].src.as_ref(), &files[i].rel, &|| {
+                    beside(&files[i].rel)
+                })
         })
         .collect();
     if paks.is_empty() {
@@ -111,7 +98,7 @@ pub fn plan(files: &[File], p: &mut Plan) -> R<()> {
     let mut tocs_open: HashMap<usize, Arc<Opened>> = HashMap::new();
     for i in tocs {
         let f = &files[i];
-        let t = match Toc::open(&f.src.as_ref().all()?, &f.rel) {
+        let t = match Toc::load(f.src.as_ref(), &f.rel) {
             Ok(t) => t,
             Err(SplitError::Red(e)) => {
                 p.notes.push(format!(
@@ -133,10 +120,11 @@ pub fn plan(files: &[File], p: &mut Plan) -> R<()> {
         p.taken.insert(i);
         let mut ucas = Vec::new();
         for up in t.ucas_paths() {
-            if let Some(ui) = files.iter().position(|x| x.rel == up) {
+            let ui = files.iter().position(|x| x.rel == up);
+            if let Some(ui) = ui {
                 p.taken.insert(ui);
-                ucas.push(files[ui].src.clone());
             }
+            ucas.push(ui.map(|ui| files[ui].src.clone()));
         }
         for &b in &bundles {
             chunks.insert(
