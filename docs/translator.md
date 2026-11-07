@@ -189,6 +189,9 @@ The control section (+0x5f) gives the vertices of a primitive. 1 is a point, 2 i
 The stage memory ends with the primitive bytes. The count is at +3. The index bytes start at +4. The memory reserves 4 plus the vertices of a primitive times 32 bytes for each block of 32 primitives of `max_p`.
 The guest writes the index bytes of each lane in each primitive block, and a count of 0 makes every lane write. A mesh of 126 primitives has four blocks, so lanes 126 and 127 stay inside the array.
 
+A mesh shader has pixel shader partners, as a vertex shader has. The split pairs a mesh key with the pixel key of its variation. A pixel shader may read a location that the mesh shader does not write. Metal then refuses the pipeline. The mesh function declares such a location as an output `dm_pad<N>` with the value (0, 0, 0, 1). The hardware reads the same default.
+The pipeline archive leaves the pairs of a mesh shader out. The host builds mesh pipelines at the draw.
+
 ## Open points
 
 - The MSL back end is the part that fills `translate`. A shader that it does not translate gets `Failure` with the reason `not ported` until then.

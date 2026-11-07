@@ -2,12 +2,12 @@
 #![cfg(test)]
 
 use super::mesh::{memory, own_shared};
-use super::{Context, Failure, Translated, translate};
+use super::{Context, Failure, StageInputs, Translated, translate};
 use crate::job::{MeshStage, POINT_SIZE, parse_jobs};
 use crate::translation::emit_test_util::{AEXIT, APT};
 use nxb_pyjson::Value;
 
-fn mesh(kind: &str) -> MeshStage {
+pub(super) fn mesh(kind: &str) -> MeshStage {
     MeshStage {
         kind: kind.into(),
         threads: 32,
@@ -72,10 +72,19 @@ fn ast(mode: u64, rb: u64) -> (u64, u64) {
     (0x927 | APT | 2 << 24 | rb << 32 | 4 << 40, mode << 8)
 }
 
-fn run_with(
+pub(super) fn run_with(
     m: &MeshStage,
     ops: &[(u64, u64)],
     mutate: impl Fn(&mut Vec<u8>),
+) -> Result<Translated, Failure> {
+    run_paired(m, ops, mutate, &[])
+}
+
+pub(super) fn run_paired(
+    m: &MeshStage,
+    ops: &[(u64, u64)],
+    mutate: impl Fn(&mut Vec<u8>),
+    partners: &[StageInputs],
 ) -> Result<Translated, Failure> {
     let (lay, size) = memory(m);
     let json = format!(
@@ -94,14 +103,18 @@ fn run_with(
         code.extend(hi.to_le_bytes());
     }
     mutate(&mut code);
-    translate(&job, &code, &Context::default())
+    let ctx = Context {
+        partners,
+        ..Context::default()
+    };
+    translate(&job, &code, &ctx)
 }
 
-fn run(m: &MeshStage, ops: &[(u64, u64)]) -> Result<Translated, Failure> {
+pub(super) fn run(m: &MeshStage, ops: &[(u64, u64)]) -> Result<Translated, Failure> {
     run_with(m, ops, |_| {})
 }
 
-fn ms_ops() -> Vec<(u64, u64)> {
+pub(super) fn ms_ops() -> Vec<(u64, u64)> {
     vec![
         isberd(0x78),
         isberd(0x38),

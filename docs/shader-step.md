@@ -54,7 +54,7 @@ It needs no .NET runtime and no external translator program. The output is MSL. 
 The step does this for each key:
 
 1. It reads the code and the job. It calls the translator with the context: the chain version V, the source (`<package>#<index>`), the paired shader (`pc_paired`), the answer-table flag, the dual-source and fetch-outputs-only flags (from `dual_want.tsv` and `bf_want.tsv` of the profile) and the partners.
-2. A vertex shader waits for its pixel shaders. It gets their `StageInputs` (the user varyings) as the partners, in the order of the pairs table. A pixel shader that failed gives no inputs.
+2. A vertex shader or a mesh shader waits for its pixel shaders. It gets their `StageInputs` (the user varyings) as the partners, in the order of the pairs table. A pixel shader that failed gives no inputs.
 3. For each `Library`, it writes `<key><suffix>.metal`, compiles it and writes `<key><suffix>.metallib`. A library with a `Reflection` also gets `<key><suffix>.json`. The step writes `_b.json` last.
 4. When the translation has a `Side`, the step compiles `_b` and cuts it into `_b` and `_bx` at the metallib level. The cut keeps the alpha test entries and the logic op entries in `_bx`.
 5. The variant libraries `_bf`, `_bp` and `_bv` are optional. If one does not compile, the step skips it and removes its field from `_b.json`.

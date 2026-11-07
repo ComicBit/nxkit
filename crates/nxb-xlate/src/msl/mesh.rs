@@ -17,6 +17,7 @@
 //! - The primitive bytes of a mesh shader hold the count at +3 and the index bytes from +4. A primitive has 1, 2 or 3
 //!   index bytes, as the control section says.
 
+use super::StageInputs;
 use super::abi::MESH_FIRST_SLOT;
 use super::emit::R;
 use super::entry::Param;
@@ -141,6 +142,22 @@ pub fn reflect(m: &MeshStage, r: &mut Reflection) {
     );
 }
 
+/// The locations the paired pixel shaders read that neither the vertex nor the primitive attributes write.
+fn padded(vm: &Members, pm: &Members, partners: &[StageInputs]) -> Vec<u32> {
+    let written = |l: u32| {
+        let l = i32::try_from(l).ok();
+        vm.iter().chain(pm).any(|(n, _)| *n == l)
+    };
+    let mut out: Vec<u32> = partners
+        .iter()
+        .flat_map(|p| p.varyings.iter().map(|v| v.location))
+        .filter(|l| !written(*l))
+        .collect();
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
 /// The attributes of the components: the index of each component in the attribute area, `None` for a component the
 /// shader does not write.
 type Members = Vec<(Option<i32>, [Option<usize>; 4])>;
@@ -187,8 +204,15 @@ fn topology(verts: u32) -> &'static str {
 
 /// The wrapper functions around the body: the object function `main0` of a task shader, or the mesh functions `main0`
 /// and `main0_z` (the two depth conventions of a vertex shader) of a mesh shader. `shared` is the number of shared
-/// memories of the body and `words` the words of the stage memory.
-pub fn wrap(m: &MeshStage, params: &[Param], shared: usize, words: i64) -> R<String> {
+/// memories of the body and `words` the words of the stage memory. A location that a paired pixel shader reads and the
+/// mesh shader does not write becomes a vertex output of (0, 0, 0, 1), as for a vertex shader.
+pub fn wrap(
+    m: &MeshStage,
+    params: &[Param],
+    shared: usize,
+    words: i64,
+    partners: &[StageInputs],
+) -> R<String> {
     if shared > 1 {
         return Err(
             "mesh stage failed: the body has shared memory besides the stage memory".into(),
@@ -258,6 +282,7 @@ pub fn wrap(m: &MeshStage, params: &[Param], shared: usize, words: i64) -> R<Str
     let p_stride = m.primitive.len().max(1) as u32 * BLOCK;
     // The primitive blocks follow all the vertex blocks.
     let p_out = out + (v_blocks * m.vertex.len() as u32 * BLOCK) as i32;
+    let pads = padded(&vm, &pm, partners);
     let has_psiz = vm.iter().any(|(n, _)| *n == Some(POINT_SIZE));
     t.push_str("struct dm_vertex_t {\n    float4 position [[position]];\n");
     if has_psiz {
@@ -267,6 +292,9 @@ pub fn wrap(m: &MeshStage, params: &[Param], shared: usize, words: i64) -> R<Str
         if let Some(n) = n.filter(|n| *n >= 0) {
             let _ = writeln!(t, "    float4 a{n} [[user(locn{n})]];");
         }
+    }
+    for n in &pads {
+        let _ = writeln!(t, "    float4 dm_pad{n} [[user(locn{n})]];");
     }
     t.push_str("};\n");
     if !pm.is_empty() {
@@ -301,6 +329,9 @@ pub fn wrap(m: &MeshStage, params: &[Param], shared: usize, words: i64) -> R<Str
                 let _ = writeln!(sets, "        v.{member} = {};", vector(idx, "dm_mem"));
             }
         }
+    }
+    for n in &pads {
+        let _ = writeln!(sets, "        v.dm_pad{n} = float4(0.0, 0.0, 0.0, 1.0);");
     }
     let mut psets = String::new();
     for (n, idx) in &pm {
