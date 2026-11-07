@@ -4,6 +4,8 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ## Unreleased
 
+## 0.9.1 - 2026-11-07
+
 ### Added
 
 - The title module `nxgame-botw` for The Legend of Zelda: Breath of the Wild (`01007EF00011E000`), behind the `nxtitles` feature `botw`.
@@ -13,6 +15,13 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 ### Changed
 
 - `render_cond`, `tex_flush_upload` and `tex_dirty_upload` are needs of `nxgame-oot`, not of `nxfamily-agl`. Breath of the Wild runs on agl and sets none of them.
+
+### Fixed
+
+- The shell framework build links its own host and writes loader `FH` when the engine has the `DmShellGame` target (#11, @STRML). Before, it built the target `DmGame` and wrote loader `FR`, and the shell refused the framework. An engine without that target keeps `DmGame` and `FR`.
+- The framework keeps `dm/env.txt` in that case. The shell reads the build-time defaults of the player from it, for example `DM_PROF_TEX_BC_CPU=1` for older devices.
+- The check for the `DmShellGame` target no longer depends on the indent of `project-framework.yml`.
+- The manifest key is `launcher`, as the engine's script writes it. Before, it was `app binary`.
 
 ## 0.9.0
 
