@@ -237,8 +237,13 @@ fn a_damaged_entry_is_translated_again() {
 
 /// A Maxwell geometry shader that only returns: the 0x50 byte header and one `EXIT`.
 fn geometry_code() -> Vec<u8> {
+    geometry_code_with(0)
+}
+
+/// `geometry_code` with `word0` added to the first header word. Bit 24 is the passthrough flag.
+fn geometry_code_with(word0: u32) -> Vec<u8> {
     let mut h = [0u32; 20];
-    h[0] = 4 << 10;
+    h[0] = 4 << 10 | word0;
     h[2] = 1 << 24;
     h[3] = 7 << 24;
     h[4] = 6;
@@ -269,6 +274,24 @@ fn a_geometry_job_without_a_topology_keeps_all_its_libraries() {
             Some(&Value::str(format!("0123456789abcdef{}", l.suffix)))
         );
     }
+    let again = x.translate(&j, &ctx(&[])).unwrap();
+    assert_eq!(again, t);
+    assert_eq!(x.hits.load(Ordering::Relaxed), 1);
+}
+
+#[test]
+fn a_passthrough_geometry_job_keeps_its_lean_kernels() {
+    let x = Xlate::open(&dir(), "v1").unwrap();
+    let mut j = job(&geometry_code_with(1 << 24));
+    j.json.set("stage", Value::str("gs"));
+    let t = x.translate(&j, &ctx(&[])).unwrap();
+    let names: Vec<&str> = t.libs.iter().map(|l| l.suffix.as_str()).collect();
+    assert_eq!(
+        names,
+        [
+            "_b", "_bg0", "_bg1", "_bg2", "_bg3", "_bg4", "_bgv", "_bl0", "_bl1", "_bl3"
+        ]
+    );
     let again = x.translate(&j, &ctx(&[])).unwrap();
     assert_eq!(again, t);
     assert_eq!(x.hits.load(Ordering::Relaxed), 1);

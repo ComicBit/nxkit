@@ -9,7 +9,7 @@
 ///
 /// Bump the number whenever a change alters the MSL text or the reflection for an unchanged input: a new emitter
 /// choice, a new helper, a new reflection field or a changed ABI constant. A change that keeps the output equal needs no bump.
-pub const TRANSLATOR_ID: &str = "msl-2.14";
+pub const TRANSLATOR_ID: &str = "msl-2.15";
 
 pub mod abi;
 #[cfg(test)]
@@ -30,6 +30,9 @@ pub mod first_store;
 #[cfg(test)]
 mod gaps_tests;
 pub mod geom;
+pub mod geom_lean;
+#[cfg(test)]
+mod geom_lean_tests;
 pub mod geom_reader;
 #[cfg(test)]
 mod geom_tests;
