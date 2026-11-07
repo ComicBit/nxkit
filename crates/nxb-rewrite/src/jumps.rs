@@ -124,6 +124,23 @@ pub(crate) fn wr_named(p: &Insn, name: &str) -> bool {
     writes_reg(p, name)
 }
 
+/// Whether `p` sets a table base to a constant inside page zero, so that a load of `n` entries through it reads
+/// that page. Horizon never maps page zero, so the load would fault on the console too. No path of a working
+/// game carries such a write to the load, and the walk back for the base's writer chain goes past it.
+/// Cuphead 1.3.7 `main+0x59dc90` interleaves four dispatch loops that share registers: `x12` is the base of one
+/// (`adrp` + `add`) and the constant 1 of another (`mov w12,#1`), kept apart only by the value of `w8`.
+pub(crate) fn null_base(p: &Insn, n: usize) -> bool {
+    if p.mn != "mov" || !nops(p, 2) {
+        return false;
+    }
+    let v = match p.ops[1] {
+        Op::Reg(Reg::Wzr | Reg::Xzr, _) => 0,
+        Op::Imm(v, _) | Op::Hex(v) => v,
+        _ => return false,
+    };
+    v >= 0 && v + 4 * n as i64 <= 0x1000
+}
+
 impl An<'_> {
     pub(crate) fn i32_at(&self, o: i64) -> R<i64> {
         match self.img.get(o as usize..o as usize + 4) {
@@ -410,6 +427,10 @@ impl An<'_> {
         let mut broke = false;
         for p in insl[k.saturating_sub(256)..k].iter().rev() {
             if !wr_named(p, &rbt) {
+                continue;
+            }
+            // page zero as the base: it reaches no load of a working game
+            if lo.is_none() && null_base(p, n) {
                 continue;
             }
             if lo.is_none()
