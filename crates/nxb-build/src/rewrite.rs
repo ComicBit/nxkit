@@ -459,6 +459,14 @@ pub fn ensure(
     let nros = if romfs_has_nrr(&ex.join("RomFS.img")) {
         let dir = work.join(format!("nro_{package}"));
         if !dir.join("nro.tsv").is_file() {
+            let image = ex.join("RomFS.img");
+            if !image.is_file() {
+                // `romfs_has_nrr` answers yes for an image it cannot open: say what is missing, not an NRO failure
+                return Err(format!(
+                    "no RomFS image of {package}: {} is not there (the extract stage makes one image for each version that the input holds)",
+                    image.display()
+                ));
+            }
             // the first build: the collection of the script, in Rust (`nxb-nro`)
             match nxb_nro::collect(&ex.join("RomFS.img"), &dir, None, true) {
                 Ok(_) => {}
@@ -523,7 +531,7 @@ pub fn ensure(
 
 #[cfg(test)]
 mod tests {
-    use super::{PatchTable, collected_nros, read_rules, shipped_rules};
+    use super::{PatchTable, collected_nros, ensure, read_rules, shipped_rules};
 
     #[test]
     fn shipped_rules_are_found_and_equal_the_shipped_snapshot() {
@@ -562,6 +570,21 @@ mod tests {
             v.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(),
             ["nro0", "nro1"]
         );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_version_with_no_image_is_named_and_not_reported_as_an_nro_failure() {
+        let d = std::env::temp_dir().join(format!("nxb-rewrite-noimage-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let profile = d.join("0100000000000000");
+        let work = d.join("work");
+        std::fs::create_dir_all(&profile).expect("profile");
+        std::fs::create_dir_all(&work).expect("work");
+        std::fs::write(profile.join("game.tsv"), "modules\tmain\n").expect("game.tsv");
+        let e = ensure(&d, &profile, &work, "v720896").expect_err("no image");
+        assert!(e.contains("no RomFS image of v720896"), "{e}");
+        assert!(!e.contains("nro collection"), "{e}");
         let _ = std::fs::remove_dir_all(&d);
     }
 }
