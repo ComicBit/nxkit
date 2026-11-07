@@ -2,6 +2,14 @@
 
 All notable changes are in this file. The format follows Keep a Changelog. Versions follow Semantic Versioning.
 
+## Unreleased
+
+### Added
+
+- A passthrough geometry shader gets the lean geometry kernels `_bl0`, `_bl1` and `_bl3` (upstream `dmsh_geometry.lean`). They write only the viewport mask and the indices.
+  Their `.json` has `geometry` with `stride` 1, `lean` true and `capture_reads`. When the full kernel does not fit the transform, the shader has no `_bl` and `notes` gives the reason.
+- `TRANSLATOR_ID` is `msl-2.15`.
+
 ## 0.7.0
 
 ### Added
