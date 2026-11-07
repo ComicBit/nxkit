@@ -49,11 +49,41 @@ fn copy_tree(from: &Path, to: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Whether the engine's framework project has the `DmShellGame` target: a patched engine (NX2Apple patch 0077) links the
-/// host into each shell framework there and writes loader `FH`. Upstream's engine has `DmGame` only, loader `FR`.
+/// Whether the engine's framework project has the `DmShellGame` target: a patched engine links the host into each
+/// shell framework there and writes loader `FH`. Upstream's engine has `DmGame` only, loader `FR`.
 pub(crate) fn links_host(engine: &Path) -> bool {
     std::fs::read_to_string(engine.join("dm/ios/project-framework.yml"))
-        .is_ok_and(|t| t.lines().any(|l| l.trim_end() == "  DmShellGame:"))
+        .is_ok_and(|t| has_target(&t, "DmShellGame"))
+}
+
+/// Whether `name` is a key that is a direct child of the top-level `targets:` mapping of a project file. The indent
+/// width does not matter. A list item (`- name:`), a deeper key and a key outside `targets:` do not count.
+fn has_target(yml: &str, name: &str) -> bool {
+    let mut in_targets = false;
+    let mut child_indent = None;
+    for line in yml.lines() {
+        let text = line.trim();
+        if text.is_empty() || text.starts_with('#') {
+            continue;
+        }
+        let indent = line.len() - line.trim_start().len();
+        if indent == 0 {
+            in_targets = text == "targets:" || text.starts_with("targets: #");
+            child_indent = None;
+            continue;
+        }
+        if !in_targets {
+            continue;
+        }
+        // the first line under `targets:` sets the indent of its keys
+        if *child_indent.get_or_insert(indent) == indent
+            && let Some(rest) = text.strip_prefix(name).and_then(|r| r.strip_prefix(':'))
+            && (rest.is_empty() || rest.starts_with([' ', '\t']))
+        {
+            return true;
+        }
+    }
+    false
 }
 
 fn done<T>(c: Result<T, String>, what: &str) -> Result<(), String> {
@@ -347,6 +377,24 @@ mod tests {
         )
         .unwrap();
         assert!(!links_host(&d));
+        // a four-space indent and a comment after the key
+        std::fs::write(
+            &yml,
+            "name: x\ntargets:\n    DmGame:\n        type: framework\n    DmShellGame: # the host\n        type: framework\n",
+        )
+        .unwrap();
+        assert!(links_host(&d));
+        // a deeper key, a key outside targets, a longer name and a comment line do not count
+        for no in [
+            "targets:\n    DmGame:\n        DmShellGame:\n            type: framework\n",
+            "targets:\n  DmGame:\n    type: framework\nschemes:\n  DmShellGame:\n    build: x\n",
+            "targets:\n  DmGame:\n    type: framework\n  DmShellGameX:\n    type: framework\n",
+            "targets:\n  # DmShellGame:\n  DmGame:\n    type: framework\n",
+            "DmShellGame:\ntargets:\n  DmGame:\n",
+        ] {
+            std::fs::write(&yml, no).unwrap();
+            assert!(!links_host(&d), "{no}");
+        }
         let _ = std::fs::remove_dir_all(&d);
     }
 
