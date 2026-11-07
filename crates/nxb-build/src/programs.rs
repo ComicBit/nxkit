@@ -76,7 +76,7 @@ pub(crate) fn before_app(
             n: n.to_string(),
             patched: s.work.join(format!("patched_{}", s.package)),
             romfs: ex.join("RomFS.img"),
-            msl: s.shaders.clone(),
+            msl: crate::layer::msl_dir(&s)?,
             tables: s.profile.0.clone(),
             html: ex.join("html"),
         });

@@ -41,11 +41,22 @@ fn mvgl_lists_its_files() {
         a.extend_from_slice(&v.to_le_bytes());
     }
     let e = mvgl_entries(|o, n| Ok(a[o as usize..o as usize + n].to_vec())).unwrap();
-    assert_eq!(e, vec![MvglEntry { name: "x\\y_vp.shad".into(), offset: 0x110, len: 5, stored: 5 }]);
+    assert_eq!(
+        e,
+        vec![MvglEntry {
+            name: "x\\y_vp.shad".into(),
+            offset: 0x110,
+            len: 5,
+            stored: 5
+        }]
+    );
 }
 
 #[test]
 fn nso_glsl_finds_sources_at_string_starts() {
     let ro = b"\0#version 310 es\nvoid main(){}\0x#version 100\0#version: no\0";
-    assert_eq!(nso_glsl(ro), vec![b"#version 310 es\nvoid main(){}".to_vec()]);
+    assert_eq!(
+        nso_glsl(ro),
+        vec![b"#version 310 es\nvoid main(){}".to_vec()]
+    );
 }

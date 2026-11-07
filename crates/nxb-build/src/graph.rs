@@ -83,6 +83,8 @@ pub struct Build {
     /// The profile is a provisional one (`<work>/profile/<title>`, or `--profile-out`): the engine has none for the
     /// game or `--provisional` asked for one.
     pub prov: bool,
+    /// The graphics API and why, found in the extract once it is there (`crate::layer::gfx`).
+    pub gfx: std::sync::OnceLock<(crate::layer::Gfx, String)>,
 }
 
 impl Build {
@@ -115,6 +117,7 @@ impl Build {
                 notes: Vec::new(),
             },
             prov: true,
+            gfx: std::sync::OnceLock::new(),
         }
     }
 
@@ -331,6 +334,7 @@ pub fn plan(a: &Args) -> Result<Build, String> {
         nodes,
         src,
         prov,
+        gfx: std::sync::OnceLock::new(),
     };
     if a.platform == "ios" {
         // the IPA is named by the profile, beside the build folder, as the script names it

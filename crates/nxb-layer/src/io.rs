@@ -6,15 +6,22 @@
 //! can only refer to earlier ones.
 
 use naga::{
-    ArraySize, Binding, Block, BuiltIn, Expression, FunctionArgument, FunctionResult, Handle, Interpolation, Literal, Module,
-    Sampling, ScalarKind, ShaderStage, Statement, StructMember, Type, TypeInner, UniqueArena, proc::Alignment, proc::Layouter,
+    ArraySize, Binding, Block, BuiltIn, Expression, FunctionArgument, FunctionResult, Handle,
+    Interpolation, Literal, Module, Sampling, ScalarKind, ShaderStage, Statement, StructMember,
+    Type, TypeInner, UniqueArena, proc::Alignment, proc::Layouter,
 };
 
 /// The element type and the length of an array of scalars or vectors.
 fn array_varying(types: &UniqueArena<Type>, ty: Handle<Type>) -> Option<(Handle<Type>, u32)> {
     match types[ty].inner {
-        TypeInner::Array { base, size: ArraySize::Constant(n), .. }
-            if matches!(types[base].inner, TypeInner::Scalar(_) | TypeInner::Vector { .. }) =>
+        TypeInner::Array {
+            base,
+            size: ArraySize::Constant(n),
+            ..
+        } if matches!(
+            types[base].inner,
+            TypeInner::Scalar(_) | TypeInner::Vector { .. }
+        ) =>
         {
             Some((base, n.get()))
         }
@@ -27,12 +34,24 @@ fn array_varying(types: &UniqueArena<Type>, ty: Handle<Type>) -> Option<(Handle<
 /// the default of SPIR-V.
 fn at_location(b: &Binding, add: u32, elem: &TypeInner) -> Binding {
     match *b {
-        Binding::Location { location, mut interpolation, mut sampling, blend_src, per_primitive } => {
+        Binding::Location {
+            location,
+            mut interpolation,
+            mut sampling,
+            blend_src,
+            per_primitive,
+        } => {
             if interpolation.is_none() && elem.scalar_kind() == Some(ScalarKind::Float) {
                 interpolation = Some(Interpolation::Perspective);
                 sampling = Some(Sampling::Center);
             }
-            Binding::Location { location: location + add, interpolation, sampling, blend_src, per_primitive }
+            Binding::Location {
+                location: location + add,
+                interpolation,
+                sampling,
+                blend_src,
+                per_primitive,
+            }
         }
         ref other => other.clone(),
     }
@@ -68,7 +87,9 @@ fn finish_return(body: &mut Block, emit: naga::Range<Expression>, value: Handle<
 /// locations. Metal has no arrays in a stage's inputs or outputs. Element `i` of a varying `name` is named `name_i`.
 pub(crate) fn flatten_varyings(m: &mut Module) -> Result<(), String> {
     let mut layouter = Layouter::default();
-    layouter.update(m.to_ctx()).map_err(|e| format!("layout: {e}"))?;
+    layouter
+        .update(m.to_ctx())
+        .map_err(|e| format!("layout: {e}"))?;
     for ep in &mut m.entry_points {
         let f = &mut ep.function;
         // inputs
@@ -76,11 +97,17 @@ pub(crate) fn flatten_varyings(m: &mut Module) -> Result<(), String> {
         let mut splits: Vec<(u32, Vec<u32>)> = Vec::new();
         for k in 0..n0 {
             let a = f.arguments[k].clone();
-            let (Some(b @ Binding::Location { .. }), Some((base, n))) = (&a.binding, array_varying(&m.types, a.ty)) else {
+            let (Some(b @ Binding::Location { .. }), Some((base, n))) =
+                (&a.binding, array_varying(&m.types, a.ty))
+            else {
                 continue;
             };
             let elem = &m.types[base].inner;
-            f.arguments[k] = FunctionArgument { name: indexed(&a.name, 0), ty: base, binding: Some(at_location(b, 0, elem)) };
+            f.arguments[k] = FunctionArgument {
+                name: indexed(&a.name, 0),
+                ty: base,
+                binding: Some(at_location(b, 0, elem)),
+            };
             let mut idx = vec![k as u32];
             for i in 1..n {
                 idx.push(f.arguments.len() as u32);
@@ -98,7 +125,10 @@ pub(crate) fn flatten_varyings(m: &mut Module) -> Result<(), String> {
             for (stmt, span) in old.span_into_iter() {
                 let split = match stmt {
                     Statement::Store { pointer, value } => match f.expressions[value] {
-                        Expression::FunctionArgument(k) => splits.iter().find(|s| s.0 == k).map(|s| (pointer, value, s.1.clone())),
+                        Expression::FunctionArgument(k) => splits
+                            .iter()
+                            .find(|s| s.0 == k)
+                            .map(|s| (pointer, value, s.1.clone())),
                         _ => None,
                     },
                     _ => None,
@@ -111,15 +141,36 @@ pub(crate) fn flatten_varyings(m: &mut Module) -> Result<(), String> {
                 let values: Vec<_> = idx
                     .iter()
                     .enumerate()
-                    .map(|(i, &a)| if i == 0 { value } else { f.expressions.append(Expression::FunctionArgument(a), span) })
+                    .map(|(i, &a)| {
+                        if i == 0 {
+                            value
+                        } else {
+                            f.expressions.append(Expression::FunctionArgument(a), span)
+                        }
+                    })
                     .collect();
                 let start = f.expressions.len();
                 let ptrs: Vec<_> = (0..idx.len() as u32)
-                    .map(|index| f.expressions.append(Expression::AccessIndex { base: pointer, index }, span))
+                    .map(|index| {
+                        f.expressions.append(
+                            Expression::AccessIndex {
+                                base: pointer,
+                                index,
+                            },
+                            span,
+                        )
+                    })
                     .collect();
-                f.body.push(Statement::Emit(f.expressions.range_from(start)), span);
+                f.body
+                    .push(Statement::Emit(f.expressions.range_from(start)), span);
                 for (p, v) in ptrs.into_iter().zip(values) {
-                    f.body.push(Statement::Store { pointer: p, value: v }, span);
+                    f.body.push(
+                        Statement::Store {
+                            pointer: p,
+                            value: v,
+                        },
+                        span,
+                    );
                 }
             }
             if done != splits.len() {
@@ -127,18 +178,31 @@ pub(crate) fn flatten_varyings(m: &mut Module) -> Result<(), String> {
             }
         }
         // outputs
-        let Some(res) = f.result.clone() else { continue };
-        let Some(ret) = returned(&f.body) else { continue };
+        let Some(res) = f.result.clone() else {
+            continue;
+        };
+        let Some(ret) = returned(&f.body) else {
+            continue;
+        };
         let (members, comps) = match (&res.binding, &m.types[res.ty].inner) {
             (None, TypeInner::Struct { members, .. }) => match f.expressions[ret] {
                 Expression::Compose { ref components, .. } => (members.clone(), components.clone()),
                 _ => return Err("the entry point returns a struct that is not composed".into()),
             },
-            (Some(b), _) => (vec![StructMember { name: None, ty: res.ty, binding: Some(b.clone()), offset: 0 }], vec![ret]),
+            (Some(b), _) => (
+                vec![StructMember {
+                    name: None,
+                    ty: res.ty,
+                    binding: Some(b.clone()),
+                    offset: 0,
+                }],
+                vec![ret],
+            ),
             _ => continue,
         };
         let is_split = |mb: &StructMember| {
-            matches!(mb.binding, Some(Binding::Location { .. })) && array_varying(&m.types, mb.ty).is_some()
+            matches!(mb.binding, Some(Binding::Location { .. }))
+                && array_varying(&m.types, mb.ty).is_some()
         };
         if !members.iter().any(is_split) {
             continue;
@@ -151,8 +215,16 @@ pub(crate) fn flatten_varyings(m: &mut Module) -> Result<(), String> {
                 (true, Some(b), Some((base, n))) => {
                     for i in 0..n {
                         let binding = Some(at_location(b, i, &m.types[base].inner));
-                        nm.push(StructMember { name: indexed(&mb.name, i), ty: base, binding, offset: 0 });
-                        nc.push(f.expressions.append(Expression::AccessIndex { base: c, index: i }, span));
+                        nm.push(StructMember {
+                            name: indexed(&mb.name, i),
+                            ty: base,
+                            binding,
+                            offset: 0,
+                        });
+                        nc.push(
+                            f.expressions
+                                .append(Expression::AccessIndex { base: c, index: i }, span),
+                        );
                     }
                 }
                 _ => {
@@ -169,8 +241,19 @@ pub(crate) fn flatten_varyings(m: &mut Module) -> Result<(), String> {
             off += l.size;
             align = align.max(l.alignment);
         }
-        let ty = m.types.insert(Type { name: None, inner: TypeInner::Struct { members: nm, span: align.round_up(off) } }, span);
-        let value = f.expressions.append(Expression::Compose { ty, components: nc }, span);
+        let ty = m.types.insert(
+            Type {
+                name: None,
+                inner: TypeInner::Struct {
+                    members: nm,
+                    span: align.round_up(off),
+                },
+            },
+            span,
+        );
+        let value = f
+            .expressions
+            .append(Expression::Compose { ty, components: nc }, span);
         let emit = f.expressions.range_from(start);
         finish_return(&mut f.body, emit, value);
         f.result = Some(FunctionResult { ty, binding: None });
@@ -181,34 +264,75 @@ pub(crate) fn flatten_varyings(m: &mut Module) -> Result<(), String> {
 /// Maps the clip-space depth of every vertex entry point from OpenGL's range (−w to w) to Metal's (0 to w): z becomes
 /// (z + w) / 2, as spirv-cross `--fixup-clipspace` does.
 pub(crate) fn clip_z(m: &mut Module) -> Result<(), String> {
-    for ep in m.entry_points.iter_mut().filter(|e| e.stage == ShaderStage::Vertex) {
+    for ep in m
+        .entry_points
+        .iter_mut()
+        .filter(|e| e.stage == ShaderStage::Vertex)
+    {
         let f = &mut ep.function;
-        let (Some(res), Some(ret)) = (f.result.clone(), returned(&f.body)) else { continue };
-        let is_pos = |b: &Option<Binding>| matches!(b, Some(Binding::BuiltIn(BuiltIn::Position { .. })));
+        let (Some(res), Some(ret)) = (f.result.clone(), returned(&f.body)) else {
+            continue;
+        };
+        let is_pos =
+            |b: &Option<Binding>| matches!(b, Some(Binding::BuiltIn(BuiltIn::Position { .. })));
         let (pos, member, vec_ty) = if is_pos(&res.binding) {
             (ret, None, res.ty)
         } else {
-            let TypeInner::Struct { ref members, .. } = m.types[res.ty].inner else { continue };
-            let Some(j) = members.iter().position(|mb| is_pos(&mb.binding)) else { continue };
+            let TypeInner::Struct { ref members, .. } = m.types[res.ty].inner else {
+                continue;
+            };
+            let Some(j) = members.iter().position(|mb| is_pos(&mb.binding)) else {
+                continue;
+            };
             let Expression::Compose { ref components, .. } = f.expressions[ret] else {
                 return Err("the vertex entry point returns a struct that is not composed".into());
             };
             (components[j], Some(j), members[j].ty)
         };
         let span = f.expressions.get_span(ret);
-        let half = f.expressions.append(Expression::Literal(Literal::F32(0.5)), span);
+        let half = f
+            .expressions
+            .append(Expression::Literal(Literal::F32(0.5)), span);
         let start = f.expressions.len();
-        let c: Vec<_> = (0..4).map(|index| f.expressions.append(Expression::AccessIndex { base: pos, index }, span)).collect();
-        let sum = f.expressions.append(Expression::Binary { op: naga::BinaryOperator::Add, left: c[2], right: c[3] }, span);
-        let z = f.expressions.append(Expression::Binary { op: naga::BinaryOperator::Multiply, left: sum, right: half }, span);
-        let p = f.expressions.append(Expression::Compose { ty: vec_ty, components: vec![c[0], c[1], z, c[3]] }, span);
+        let c: Vec<_> = (0..4)
+            .map(|index| {
+                f.expressions
+                    .append(Expression::AccessIndex { base: pos, index }, span)
+            })
+            .collect();
+        let sum = f.expressions.append(
+            Expression::Binary {
+                op: naga::BinaryOperator::Add,
+                left: c[2],
+                right: c[3],
+            },
+            span,
+        );
+        let z = f.expressions.append(
+            Expression::Binary {
+                op: naga::BinaryOperator::Multiply,
+                left: sum,
+                right: half,
+            },
+            span,
+        );
+        let p = f.expressions.append(
+            Expression::Compose {
+                ty: vec_ty,
+                components: vec![c[0], c[1], z, c[3]],
+            },
+            span,
+        );
         let value = match member {
             None => p,
             Some(j) => {
-                let Expression::Compose { ty, ref components } = f.expressions[ret] else { continue };
+                let Expression::Compose { ty, ref components } = f.expressions[ret] else {
+                    continue;
+                };
                 let mut components = components.clone();
                 components[j] = p;
-                f.expressions.append(Expression::Compose { ty, components }, span)
+                f.expressions
+                    .append(Expression::Compose { ty, components }, span)
             }
         };
         let emit = f.expressions.range_from(start);

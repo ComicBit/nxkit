@@ -64,8 +64,9 @@ pub fn prepare(a: &Args, b: &Build, previous: Option<&Path>) -> Result<AppParts,
     };
     let (control, lang) = language(a, w, &b.package)?;
     let out = dir.join(nxb_pack::macapp::SETTINGS_JSON);
+    let gfx = crate::layer::gfx(b)?.name();
     let env = |k: &str| match k {
-        "GFXAPI" => Some("nvn".to_string()),
+        "GFXAPI" => Some(gfx.to_string()),
         "SETTINGS_PLATFORM" => Some("mac".to_string()),
         "DM_LANG" => Some(lang.clone()),
         _ => std::env::var(k).ok(),

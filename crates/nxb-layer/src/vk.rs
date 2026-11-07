@@ -52,15 +52,30 @@ pub fn translate(bytes: &[u8]) -> Result<Outcome, String> {
     let twins = spirv::split_combined(&mut s)?;
     let combined: BTreeSet<(u32, u32)> = twins
         .keys()
-        .filter_map(|&v| Some((s.decoration(v, DEC_SET).unwrap_or(0), s.decoration(v, DEC_BINDING)?)))
+        .filter_map(|&v| {
+            Some((
+                s.decoration(v, DEC_SET).unwrap_or(0),
+                s.decoration(v, DEC_BINDING)?,
+            ))
+        })
         .collect();
     let name = format!("vk_{key}");
     let (m, info) = crate::to_ir(&s.words(), stage == "vert", &name, |_| Ok(()))?;
     let slots = slots::assign(&m, &combined)?;
     let src = msl::write(&m, &info, &slots, &name)?;
-    let dual = if stage == "frag" { msl::dual_source(&src, &name) } else { None };
+    let dual = if stage == "frag" {
+        msl::dual_source(&src, &name)
+    } else {
+        None
+    };
     let res = slots.tokens(&info, 0).join(" ");
-    Ok(Outcome::Shader(Shader { key, stage, fields: res, msl: src, msl_dual: dual }))
+    Ok(Outcome::Shader(Shader {
+        key,
+        stage,
+        fields: res,
+        msl: src,
+        msl_dual: dual,
+    }))
 }
 
 /// Builds the tool's table from the translated shaders and their RomFS paths: two comment lines, then one row per key in key

@@ -7,13 +7,27 @@ use std::path::{Path, PathBuf};
 fn metal(src: &str, path: &Path) -> Result<(), String> {
     std::fs::write(path, src).unwrap();
     let r = std::process::Command::new("xcrun")
-        .args(["-sdk", "macosx", "metal", "-c", "-fpreserve-invariance", "-std=macos-metal2.3"])
+        .args([
+            "-sdk",
+            "macosx",
+            "metal",
+            "-c",
+            "-fpreserve-invariance",
+            "-std=macos-metal2.3",
+        ])
         .arg(path)
         .arg("-o")
         .arg(path.with_extension("air"))
         .output()
         .unwrap();
-    if r.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&r.stderr).chars().take(800).collect()) }
+    if r.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&r.stderr)
+            .chars()
+            .take(800)
+            .collect())
+    }
 }
 
 #[test]

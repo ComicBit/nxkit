@@ -19,7 +19,11 @@ void main() { c0 = texture(tex, v_uv[0]); c1 = vec4(min(v_uv[1].x, 0.5)); }
 ";
 
 pub(crate) fn spirv_of(src: &str, stage: &str) -> Vec<u8> {
-    gl::compile(src, stage).unwrap().iter().flat_map(|w| w.to_le_bytes()).collect()
+    gl::compile(src, stage)
+        .unwrap()
+        .iter()
+        .flat_map(|w| w.to_le_bytes())
+        .collect()
 }
 
 fn shader(src: &str, stage: &str) -> Shader {
@@ -65,5 +69,8 @@ fn table_sorts_rows_and_keeps_the_first_of_a_key() {
         (mk("bbbbbbbbbbbbbbbb", "frag"), "/dup".to_string()),
     ];
     let t = table("# head", "tool 1", &rows);
-    assert_eq!(t, "# head\n# tool 1\naaaaaaaaaaaaaaaa\tvert\tfaaaaaaaaaaaaaaaa\t/a\nbbbbbbbbbbbbbbbb\tfrag\tfbbbbbbbbbbbbbbbb\t/b\n");
+    assert_eq!(
+        t,
+        "# head\n# tool 1\naaaaaaaaaaaaaaaa\tvert\tfaaaaaaaaaaaaaaaa\t/a\nbbbbbbbbbbbbbbbb\tfrag\tfbbbbbbbbbbbbbbbb\t/b\n"
+    );
 }

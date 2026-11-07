@@ -26,12 +26,22 @@ NXB_PRECISE(metal::float4)
 
 /// Writes the single entry point of `m` as MSL 2.3 with the slots of `slots`, and names its Metal function `name`. The entry
 /// point of `m` must already carry `name`.
-pub(crate) fn write(m: &Module, info: &ModuleInfo, slots: &Slots, name: &str) -> Result<String, String> {
+pub(crate) fn write(
+    m: &Module,
+    info: &ModuleInfo,
+    slots: &Slots,
+    name: &str,
+) -> Result<String, String> {
     let mut map = EntryPointResourceMap::new();
     map.insert(name.to_string(), slots.binding_map());
-    let options = Options { lang_version: (2, 3), per_entry_point_map: map, fake_missing_bindings: false, ..Options::default() };
-    let (src, ti) =
-        msl::write_string(m, info, &options, &PipelineOptions::default()).map_err(|e| format!("MSL writer: {e}"))?;
+    let options = Options {
+        lang_version: (2, 3),
+        per_entry_point_map: map,
+        fake_missing_bindings: false,
+        ..Options::default()
+    };
+    let (src, ti) = msl::write_string(m, info, &options, &PipelineOptions::default())
+        .map_err(|e| format!("MSL writer: {e}"))?;
     let emitted = match ti.entry_point_names.first() {
         Some(Ok(n)) => n.clone(),
         Some(Err(e)) => return Err(format!("MSL writer: {e}")),
@@ -39,7 +49,9 @@ pub(crate) fn write(m: &Module, info: &ModuleInfo, slots: &Slots, name: &str) ->
     };
     let decl = format!(" {emitted}(");
     if src.matches(&decl).count() != 1 {
-        return Err(format!("the entry point {emitted} is not declared once in the MSL"));
+        return Err(format!(
+            "the entry point {emitted} is not declared once in the MSL"
+        ));
     }
     let src = src
         .replace(&decl, &format!(" {name}("))
@@ -69,6 +81,8 @@ fn with_helpers(src: &str) -> String {
 /// The dual-source variant of a fragment shader's MSL: function `name` becomes `name_d` and the output at location 1 becomes
 /// the second blend source of attachment 0. None when the shader has no output at location 1.
 pub(crate) fn dual_source(src: &str, name: &str) -> Option<String> {
-    src.contains("[[color(1)]]")
-        .then(|| src.replace(&format!(" {name}("), &format!(" {name}_d(")).replace("[[color(1)]]", "[[color(0), index(1)]]"))
+    src.contains("[[color(1)]]").then(|| {
+        src.replace(&format!(" {name}("), &format!(" {name}_d("))
+            .replace("[[color(1)]]", "[[color(0), index(1)]]")
+    })
 }

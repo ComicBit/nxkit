@@ -31,8 +31,14 @@ fn split_combined_adds_a_sampler_twin() {
 #[test]
 fn fix_strides_copies_a_member_stride_onto_the_array_type() {
     // struct { float a[4]; } with ArrayStride 16 on the member and none on the array type
-    let mut s = Spv { header: [MAGIC, 0x10000, 0, 10, 0], insts: Vec::new() };
-    s.insts.push(Inst::new(OP_MEMBER_DECORATE, vec![5, 0, DEC_ARRAY_STRIDE, 16]));
+    let mut s = Spv {
+        header: [MAGIC, 0x10000, 0, 10, 0],
+        insts: Vec::new(),
+    };
+    s.insts.push(Inst::new(
+        OP_MEMBER_DECORATE,
+        vec![5, 0, DEC_ARRAY_STRIDE, 16],
+    ));
     s.insts.push(Inst::new(OP_TYPE_FLOAT, vec![1, 32]));
     s.insts.push(Inst::new(OP_TYPE_INT, vec![2, 32, 0]));
     s.insts.push(Inst::new(OP_CONSTANT, vec![2, 3, 4]));

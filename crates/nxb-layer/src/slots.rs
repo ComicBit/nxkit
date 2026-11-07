@@ -8,7 +8,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use naga::back::msl::{BindSamplerTarget, BindTarget, EntryPointResources};
-use naga::{AddressSpace, ArraySize, GlobalVariable, Handle, Module, ResourceBinding, TypeInner, valid::ModuleInfo};
+use naga::{
+    AddressSpace, ArraySize, GlobalVariable, Handle, Module, ResourceBinding, TypeInner,
+    valid::ModuleInfo,
+};
 
 /// The highest slot count per class: 16 buffers, 31 textures and 16 samplers.
 pub(crate) const LIMITS: (u32, u32, u32) = (16, 31, 16);
@@ -30,8 +33,15 @@ pub(crate) struct Res {
 impl Res {
     /// The table token `kind:set.binding=slot[*count]`.
     pub(crate) fn token(&self) -> String {
-        let n = if self.count > 1 { format!("*{}", self.count) } else { String::new() };
-        format!("{}:{}.{}={}{n}", self.kind, self.set, self.binding, self.slot)
+        let n = if self.count > 1 {
+            format!("*{}", self.count)
+        } else {
+            String::new()
+        };
+        format!(
+            "{}:{}.{}={}{n}",
+            self.kind, self.set, self.binding, self.slot
+        )
     }
 }
 
@@ -42,7 +52,12 @@ pub(crate) struct Slots {
     pub push: Option<Res>,
 }
 
-fn kind_and_count(m: &Module, g: &GlobalVariable, combined: &BTreeSet<(u32, u32)>, rb: &ResourceBinding) -> Option<(char, u32)> {
+fn kind_and_count(
+    m: &Module,
+    g: &GlobalVariable,
+    combined: &BTreeSet<(u32, u32)>,
+    rb: &ResourceBinding,
+) -> Option<(char, u32)> {
     let (inner, count) = match m.types[g.ty].inner {
         TypeInner::BindingArray { base, size } => {
             let n = match size {
@@ -56,8 +71,16 @@ fn kind_and_count(m: &Module, g: &GlobalVariable, combined: &BTreeSet<(u32, u32)
     let kind = match (g.space, inner) {
         (AddressSpace::Uniform, _) => 'u',
         (AddressSpace::Storage { .. }, _) => 'b',
-        (AddressSpace::Handle, TypeInner::Image { .. }) if combined.contains(&(rb.group, rb.binding)) => 'c',
-        (AddressSpace::Handle, TypeInner::Sampler { .. }) if combined.contains(&(rb.group, rb.binding)) => 'c',
+        (AddressSpace::Handle, TypeInner::Image { .. })
+            if combined.contains(&(rb.group, rb.binding)) =>
+        {
+            'c'
+        }
+        (AddressSpace::Handle, TypeInner::Sampler { .. })
+            if combined.contains(&(rb.group, rb.binding)) =>
+        {
+            'c'
+        }
         (AddressSpace::Handle, TypeInner::Image { .. }) => 't',
         (AddressSpace::Handle, TypeInner::Sampler { .. }) => 's',
         _ => return None,
@@ -72,11 +95,20 @@ pub(crate) fn assign(m: &Module, combined: &BTreeSet<(u32, u32)>) -> Result<Slot
     let mut push = None;
     for (h, g) in m.global_variables.iter() {
         if g.space == AddressSpace::Immediate {
-            push = Some(Res { kind: 'p', set: 0, binding: 0, count: 1, slot: 0, globals: vec![h] });
+            push = Some(Res {
+                kind: 'p',
+                set: 0,
+                binding: 0,
+                count: 1,
+                slot: 0,
+                globals: vec![h],
+            });
             continue;
         }
         let Some(rb) = g.binding else { continue };
-        let Some((kind, count)) = kind_and_count(m, g, combined, &rb) else { continue };
+        let Some((kind, count)) = kind_and_count(m, g, combined, &rb) else {
+            continue;
+        };
         let e = by_pair.entry((rb.group, rb.binding)).or_insert(Res {
             kind,
             set: rb.group,
@@ -86,7 +118,10 @@ pub(crate) fn assign(m: &Module, combined: &BTreeSet<(u32, u32)>) -> Result<Slot
             globals: Vec::new(),
         });
         if e.kind != kind {
-            return Err(format!("set {} binding {} holds both a {} and a {}", rb.group, rb.binding, e.kind, kind));
+            return Err(format!(
+                "set {} binding {} holds both a {} and a {}",
+                rb.group, rb.binding, e.kind, kind
+            ));
         }
         e.globals.push(h);
     }
@@ -109,7 +144,9 @@ pub(crate) fn assign(m: &Module, combined: &BTreeSet<(u32, u32)>) -> Result<Slot
         buf += 1;
     }
     if buf > LIMITS.0 || tex > LIMITS.1 || smp > LIMITS.2 {
-        return Err(format!("resource slots exceeded: buffer {buf}, texture {tex}, sampler {smp}"));
+        return Err(format!(
+            "resource slots exceeded: buffer {buf}, texture {tex}, sampler {smp}"
+        ));
     }
     Ok(Slots { res, push })
 }
@@ -117,7 +154,8 @@ pub(crate) fn assign(m: &Module, combined: &BTreeSet<(u32, u32)>) -> Result<Slot
 /// OpenGL's numbering: each resource's Metal slot is its binding, as `--msl-decoration-binding` gives it. `combined` as for
 /// [`assign`]. A buffer or sampler slot above 15 is an error.
 pub(crate) fn by_binding(m: &Module, combined: &BTreeSet<(u32, u32)>) -> Result<Slots, String> {
-    let mut s = assign(m, combined).map_err(|e| e.replace("resource slots exceeded", "resources"))?;
+    let mut s =
+        assign(m, combined).map_err(|e| e.replace("resource slots exceeded", "resources"))?;
     for r in &mut s.res {
         r.slot = r.binding;
         if r.slot + r.count > 16 && r.kind != 't' {
@@ -143,7 +181,13 @@ impl Slots {
                 }
             }
             t.mutable = r.kind == 'b';
-            ep.resources.insert(ResourceBinding { group: r.set, binding: r.binding }, t);
+            ep.resources.insert(
+                ResourceBinding {
+                    group: r.set,
+                    binding: r.binding,
+                },
+                t,
+            );
         }
         ep.immediates_buffer = self.push.as_ref().map(|p| p.slot as u8);
         ep
@@ -153,7 +197,12 @@ impl Slots {
     pub(crate) fn tokens(&self, info: &ModuleInfo, ep: usize) -> Vec<String> {
         let fi = info.get_entry_point(ep);
         let used = |r: &Res| r.globals.iter().any(|&g| !fi[g].is_empty());
-        self.res.iter().chain(self.push.iter()).filter(|r| used(r)).map(Res::token).collect()
+        self.res
+            .iter()
+            .chain(self.push.iter())
+            .filter(|r| used(r))
+            .map(Res::token)
+            .collect()
     }
 }
 

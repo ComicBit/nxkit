@@ -12,7 +12,8 @@ fn defines_and_conditionals() {
 
 #[test]
 fn function_like_macros() {
-    let out = preprocess("#version 310 es\n#define SQ(x) ((x) * (x))\nfloat f = SQ(a + 1.0);\n").unwrap();
+    let out =
+        preprocess("#version 310 es\n#define SQ(x) ((x) * (x))\nfloat f = SQ(a + 1.0);\n").unwrap();
     assert!(out.contains("((a + 1.0) * (a + 1.0))"), "{out}");
 }
 

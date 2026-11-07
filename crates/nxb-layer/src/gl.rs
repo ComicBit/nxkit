@@ -12,14 +12,15 @@ use std::collections::BTreeSet;
 use std::sync::Mutex;
 
 use glslang::{
-    Compiler, CompilerOptions, ShaderInput, ShaderMessage, ShaderOptions, ShaderSource, ShaderStage, SourceLanguage,
-    SpirvVersion, Target, VulkanVersion,
+    Compiler, CompilerOptions, ShaderInput, ShaderMessage, ShaderOptions, ShaderSource,
+    ShaderStage, SourceLanguage, SpirvVersion, Target, VulkanVersion,
 };
 use naga::{AddressSpace, ArraySize, Module, ScalarKind, TypeInner};
 
 use crate::spirv::{
-    self, DEC_BINDING, DEC_BUILT_IN, DEC_LOCATION, OP_ENTRY_POINT, OP_TYPE_FLOAT, OP_TYPE_IMAGE, OP_TYPE_INT, OP_TYPE_MATRIX,
-    OP_TYPE_SAMPLED_IMAGE, OP_TYPE_VECTOR, OP_VARIABLE, SC_INPUT, SC_OUTPUT, SC_UNIFORM_CONSTANT, Spv,
+    self, DEC_BINDING, DEC_BUILT_IN, DEC_LOCATION, OP_ENTRY_POINT, OP_TYPE_FLOAT, OP_TYPE_IMAGE,
+    OP_TYPE_INT, OP_TYPE_MATRIX, OP_TYPE_SAMPLED_IMAGE, OP_TYPE_VECTOR, OP_VARIABLE, SC_INPUT,
+    SC_OUTPUT, SC_UNIFORM_CONSTANT, Spv,
 };
 use crate::{Shader, glsl_fix, glsl_pp, io, msl, slots};
 
@@ -30,8 +31,10 @@ pub const GLSLANG: &str = "0.9.1 (glslang-sys 0.9.2+e1b562a)";
 pub const TABLE_HEAD: &str = "# GL shaders (dm/gfx/tools/gl_shaders.py): key = sha256(GLSL source)[:16], Metal function gl_<key>_v / gl_<key>_f; a: vertex inputs, u: default uniform block members (offset:type:count:stride), b: the block (slot:size), t: combined samplers (slot:type), o: fragment outputs";
 
 /// The types a uniform member may have.
-const VEC_TYPES: &[&str] =
-    &["float", "vec2", "vec3", "vec4", "int", "ivec2", "ivec3", "ivec4", "uint", "uvec2", "uvec3", "uvec4", "bool", "mat2", "mat3", "mat4"];
+const VEC_TYPES: &[&str] = &[
+    "float", "vec2", "vec3", "vec4", "int", "ivec2", "ivec3", "ivec4", "uint", "uvec2", "uvec3",
+    "uvec4", "bool", "mat2", "mat3", "mat4",
+];
 
 /// glslang runs one compile at a time. Its process-wide state is set up once, and the crate does not promise more.
 static GLSLANG_LOCK: Mutex<()> = Mutex::new(());
@@ -75,33 +78,54 @@ fn prepare(src: &[u8], stage: &str) -> Result<(String, Vec<String>), String> {
 }
 
 pub(crate) fn compile(text: &str, stage: &str) -> Result<Vec<u32>, String> {
-    let st = if stage == "vert" { ShaderStage::Vertex } else { ShaderStage::Fragment };
+    let st = if stage == "vert" {
+        ShaderStage::Vertex
+    } else {
+        ShaderStage::Fragment
+    };
     let compiler = Compiler::acquire().ok_or("glslang does not start")?;
     let source = ShaderSource::from(text.to_string());
     let opts = CompilerOptions {
         source_language: SourceLanguage::GLSL,
-        target: Target::Vulkan { version: VulkanVersion::Vulkan1_0, spirv_version: SpirvVersion::SPIRV1_0 },
+        target: Target::Vulkan {
+            version: VulkanVersion::Vulkan1_0,
+            spirv_version: SpirvVersion::SPIRV1_0,
+        },
         version_profile: None,
         messages: ShaderMessage::DEFAULT | ShaderMessage::VULKAN_RULES | ShaderMessage::SPV_RULES,
     };
     let _guard = GLSLANG_LOCK.lock().map_err(|_| "glslang lock")?;
-    let input = ShaderInput::new(&source, st, &opts, None::<&[(&str, Option<&str>)]>, None).map_err(|e| format!("glslang: {e}"))?;
+    let input = ShaderInput::new(&source, st, &opts, None::<&[(&str, Option<&str>)]>, None)
+        .map_err(|e| format!("glslang: {e}"))?;
     let mut b = glslang::Shader::new(compiler, input);
     b.options(ShaderOptions::VULKAN_RULES_RELAXED);
-    let shader = b.parse().map_err(|e| format!("glslang: {}", errors(&e.to_string())))?;
-    shader.compile().map_err(|e| format!("glslang: {}", errors(&e.to_string())))
+    let shader = b
+        .parse()
+        .map_err(|e| format!("glslang: {}", errors(&e.to_string())))?;
+    shader
+        .compile()
+        .map_err(|e| format!("glslang: {}", errors(&e.to_string())))
 }
 
 /// The `ERROR` lines of a glslang log, at most 400 characters.
 fn errors(log: &str) -> String {
-    let e: Vec<&str> = log.lines().filter(|l| l.contains("ERROR") && !l.contains("compilation")).collect();
-    let s = if e.is_empty() { log.trim().to_string() } else { e.join(" | ") };
+    let e: Vec<&str> = log
+        .lines()
+        .filter(|l| l.contains("ERROR") && !l.contains("compilation"))
+        .collect();
+    let s = if e.is_empty() {
+        log.trim().to_string()
+    } else {
+        e.join(" | ")
+    };
     s.chars().take(400).collect()
 }
 
 /// The GLSL name of a SPIR-V scalar, vector or matrix type.
 fn type_name(s: &Spv, ty: u32) -> String {
-    let Some(d) = s.def(ty) else { return "?".into() };
+    let Some(d) = s.def(ty) else {
+        return "?".into();
+    };
     let scalar = |d: &spirv::Inst| match d.op {
         OP_TYPE_FLOAT => "",
         OP_TYPE_INT if d.w.get(2) == Some(&1) => "i",
@@ -118,7 +142,11 @@ fn type_name(s: &Spv, ty: u32) -> String {
         }
         OP_TYPE_MATRIX => {
             let rows = s.def(d.w[1]).and_then(|v| v.w.get(2)).copied().unwrap_or(0);
-            if rows == d.w[2] { format!("mat{rows}") } else { format!("mat{}x{rows}", d.w[2]) }
+            if rows == d.w[2] {
+                format!("mat{rows}")
+            } else {
+                format!("mat{}x{rows}", d.w[2])
+            }
         }
         20 => "bool".into(),
         _ => "?".into(),
@@ -127,7 +155,12 @@ fn type_name(s: &Spv, ty: u32) -> String {
 
 /// The GLSL name of a combined image sampler type.
 fn sampler_name(s: &Spv, sampled: u32) -> String {
-    let Some(img) = s.def(sampled).and_then(|d| d.w.get(1)).and_then(|&i| s.def(i)).filter(|d| d.op == OP_TYPE_IMAGE) else {
+    let Some(img) = s
+        .def(sampled)
+        .and_then(|d| d.w.get(1))
+        .and_then(|&i| s.def(i))
+        .filter(|d| d.op == OP_TYPE_IMAGE)
+    else {
         return "?".into();
     };
     let (dim, depth, arrayed, ms) = (img.w[2], img.w[3], img.w[4], img.w[5]);
@@ -153,8 +186,12 @@ fn sampler_name(s: &Spv, sampled: u32) -> String {
 
 /// The entry point's input or output variables without a built-in: (name, location, type).
 fn interface(s: &Spv, class: u32) -> Vec<(String, u32, u32)> {
-    let listed: BTreeSet<u32> =
-        s.insts.iter().filter(|i| i.op == OP_ENTRY_POINT).flat_map(|i| i.w.iter().copied()).collect();
+    let listed: BTreeSet<u32> = s
+        .insts
+        .iter()
+        .filter(|i| i.op == OP_ENTRY_POINT)
+        .flat_map(|i| i.w.iter().copied())
+        .collect();
     let mut v: Vec<(String, u32, u32)> = s
         .insts
         .iter()
@@ -170,13 +207,29 @@ fn interface(s: &Spv, class: u32) -> Vec<(String, u32, u32)> {
 }
 
 /// The default uniform block members: `u:name=offset:type:count:stride`, structs by their dotted member names.
-fn members(m: &Module, ty: naga::Handle<naga::Type>, prefix: &str, base: u32, bools: &[String], f: &mut Vec<String>) -> Result<(), String> {
-    let TypeInner::Struct { members: ref list, .. } = m.types[ty].inner else { return Err("the default block is not a struct".into()) };
+fn members(
+    m: &Module,
+    ty: naga::Handle<naga::Type>,
+    prefix: &str,
+    base: u32,
+    bools: &[String],
+    f: &mut Vec<String>,
+) -> Result<(), String> {
+    let TypeInner::Struct {
+        members: ref list, ..
+    } = m.types[ty].inner
+    else {
+        return Err("the default block is not a struct".into());
+    };
     for mb in list {
         let own = mb.name.clone().unwrap_or_default();
         let name = format!("{prefix}{own}");
         let (inner, count, stride) = match m.types[mb.ty].inner {
-            TypeInner::Array { base: b, size, stride } => {
+            TypeInner::Array {
+                base: b,
+                size,
+                stride,
+            } => {
                 let n = match size {
                     ArraySize::Constant(n) => n.get(),
                     _ => return Err(format!("uniform {name}: an array without a size")),
@@ -190,7 +243,9 @@ fn members(m: &Module, ty: naga::Handle<naga::Type>, prefix: &str, base: u32, bo
         };
         if let TypeInner::Struct { .. } = inner {
             if count > 0 {
-                return Err(format!("uniform {name}: an array of structs is not implemented"));
+                return Err(format!(
+                    "uniform {name}: an array of structs is not implemented"
+                ));
             }
             members(m, mb.ty, &format!("{name}."), base + mb.offset, bools, f)?;
             continue;
@@ -200,9 +255,14 @@ fn members(m: &Module, ty: naga::Handle<naga::Type>, prefix: &str, base: u32, bo
             t = "bool".into();
         }
         if !VEC_TYPES.contains(&t.as_str()) {
-            return Err(format!("uniform {name}: type {t} (structs are not implemented)"));
+            return Err(format!(
+                "uniform {name}: type {t} (structs are not implemented)"
+            ));
         }
-        f.push(format!("u:{name}={}:{t}:{count}:{stride}", base + mb.offset));
+        f.push(format!(
+            "u:{name}={}:{t}:{count}:{stride}",
+            base + mb.offset
+        ));
     }
     Ok(())
 }
@@ -223,9 +283,15 @@ fn glsl_of(t: &TypeInner) -> String {
             _ => format!("{:?}{}", s.kind, s.width * 8),
         },
         TypeInner::Vector { size, scalar } => format!("{}vec{}", p(scalar.kind), size as u8),
-        TypeInner::Matrix { columns, rows, .. } if columns as u8 == rows as u8 => format!("mat{}", columns as u8),
+        TypeInner::Matrix { columns, rows, .. } if columns as u8 == rows as u8 => {
+            format!("mat{}", columns as u8)
+        }
         TypeInner::Matrix { columns, rows, .. } => format!("mat{}x{}", columns as u8, rows as u8),
-        ref other => format!("{other:?}").split([' ', '{']).next().unwrap_or("?").to_string(),
+        ref other => format!("{other:?}")
+            .split([' ', '{'])
+            .next()
+            .unwrap_or("?")
+            .to_string(),
     }
 }
 
@@ -256,9 +322,12 @@ pub fn translate(src: &[u8], stage: &'static str) -> Result<Shader, String> {
             let ty = s.def(i.w[0]).and_then(|p| p.w.get(2)).copied()?;
             let d = s.def(ty)?;
             match d.op {
-                OP_TYPE_SAMPLED_IMAGE => {
-                    Some((i.w[1], s.name(i.w[1]), s.decoration(i.w[1], DEC_BINDING).unwrap_or(0), sampler_name(&s, ty)))
-                }
+                OP_TYPE_SAMPLED_IMAGE => Some((
+                    i.w[1],
+                    s.name(i.w[1]),
+                    s.decoration(i.w[1], DEC_BINDING).unwrap_or(0),
+                    sampler_name(&s, ty),
+                )),
                 _ => None,
             }
         })
@@ -267,7 +336,9 @@ pub fn translate(src: &[u8], stage: &'static str) -> Result<Shader, String> {
     let combined: BTreeSet<(u32, u32)> = samplers.iter().map(|x| (0, x.2)).collect();
     let name = format!("gl_{key}_{}", &stage[..1]);
     let is_vert = stage == "vert";
-    let (m, info) = crate::to_ir(&s.words(), false, &name, |m| if is_vert { io::clip_z(m) } else { Ok(()) })?;
+    let (m, info) = crate::to_ir(&s.words(), false, &name, |m| {
+        if is_vert { io::clip_z(m) } else { Ok(()) }
+    })?;
     for (_, g) in m.global_variables.iter() {
         match g.space {
             AddressSpace::Uniform => {
@@ -285,7 +356,9 @@ pub fn translate(src: &[u8], stage: &'static str) -> Result<Shader, String> {
             }
             AddressSpace::Storage { .. } => return Err("ssbos are not implemented".into()),
             AddressSpace::Immediate => return Err("push_constants are not implemented".into()),
-            AddressSpace::Handle if !combined.contains(&g.binding.map_or((9, 9), |b| (b.group, b.binding))) => {
+            AddressSpace::Handle
+                if !combined.contains(&g.binding.map_or((9, 9), |b| (b.group, b.binding))) =>
+            {
                 return Err("separate_images are not implemented".into());
             }
             _ => {}
@@ -297,9 +370,17 @@ pub fn translate(src: &[u8], stage: &'static str) -> Result<Shader, String> {
     let slots = slots::by_binding(&m, &combined)?;
     let mut src = msl::write(&m, &info, &slots, &name)?;
     for (l, n) in names {
-        src = src.replace(&format!("[[user(loc{l})"), &format!("[[user({n})")).replace(&format!("[[user(loc{l}),"), &format!("[[user({n}),"));
+        src = src
+            .replace(&format!("[[user(loc{l})"), &format!("[[user({n})"))
+            .replace(&format!("[[user(loc{l}),"), &format!("[[user({n}),"));
     }
-    Ok(Shader { key, stage, fields: f.join(" "), msl: src, msl_dual: None })
+    Ok(Shader {
+        key,
+        stage,
+        fields: f.join(" "),
+        msl: src,
+        msl_dual: None,
+    })
 }
 
 /// What one source gives: the stages that translate, or the error of each stage when none does.
@@ -317,7 +398,11 @@ pub fn translate_source(src: &[u8], stage: Option<&'static str>) -> Result<Vec<S
             Err(e) => errs.push(format!("{st}: {e}")),
         }
     }
-    if out.is_empty() { Err(errs.join(" / ")) } else { Ok(out) }
+    if out.is_empty() {
+        Err(errs.join(" / "))
+    } else {
+        Ok(out)
+    }
 }
 
 /// Builds the tool's table: two comment lines, then one row per (key, stage) in that order,

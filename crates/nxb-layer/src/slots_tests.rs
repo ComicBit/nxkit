@@ -1,7 +1,14 @@
 use super::Res;
 
 fn res(kind: char, count: u32) -> Res {
-    Res { kind, set: 1, binding: 3, count, slot: 4, globals: Vec::new() }
+    Res {
+        kind,
+        set: 1,
+        binding: 3,
+        count,
+        slot: 4,
+        globals: Vec::new(),
+    }
 }
 
 #[test]

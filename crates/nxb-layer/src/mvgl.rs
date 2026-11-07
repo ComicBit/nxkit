@@ -23,7 +23,11 @@ pub struct MvglEntry {
 impl MvglEntry {
     /// The file's content from its stored bytes.
     pub fn decode(&self, stored: &[u8]) -> Result<Vec<u8>, String> {
-        if self.stored < self.len { doboz(stored) } else { Ok(stored.to_vec()) }
+        if self.stored < self.len {
+            doboz(stored)
+        } else {
+            Ok(stored.to_vec())
+        }
     }
 }
 
@@ -41,14 +45,22 @@ fn latin1(b: &[u8]) -> String {
 
 /// The files of an MVGL archive, sorted by name. Of two entries with one name the later wins. `read(offset, len)` returns bytes of the archive. An error means the file is
 /// not an MVGL archive (the game's sound archives share the extension).
-pub fn mvgl_entries(mut read: impl FnMut(u64, usize) -> Result<Vec<u8>, String>) -> Result<Vec<MvglEntry>, String> {
+pub fn mvgl_entries(
+    mut read: impl FnMut(u64, usize) -> Result<Vec<u8>, String>,
+) -> Result<Vec<MvglEntry>, String> {
     let h = read(0, 0x14)?;
     if h.get(..4) != Some(b"MDB1") {
         return Err("not an MVGL archive".into());
     }
     let bad = || "a damaged MVGL header".to_string();
-    let (nt, nn) = (u16_at(&h, 4).ok_or_else(bad)? as usize, u16_at(&h, 6).ok_or_else(bad)? as usize);
-    let (nd, start) = (u32_at(&h, 8).ok_or_else(bad)? as usize, u32_at(&h, 12).ok_or_else(bad)?);
+    let (nt, nn) = (
+        u16_at(&h, 4).ok_or_else(bad)? as usize,
+        u16_at(&h, 6).ok_or_else(bad)? as usize,
+    );
+    let (nd, start) = (
+        u32_at(&h, 8).ok_or_else(bad)? as usize,
+        u32_at(&h, 12).ok_or_else(bad)?,
+    );
     let body = read(0x14, nt * 8 + nn * 0x40 + nd * 12)?;
     let (names, data) = (nt * 8, nt * 8 + nn * 0x40);
     let mut out = std::collections::BTreeMap::new();
@@ -57,14 +69,27 @@ pub fn mvgl_entries(mut read: impl FnMut(u64, usize) -> Result<Vec<u8>, String>)
         if idx == 0xffff {
             continue;
         }
-        let ne = body.get(names + k * 0x40..names + (k + 1) * 0x40).ok_or_else(bad)?;
+        let ne = body
+            .get(names + k * 0x40..names + (k + 1) * 0x40)
+            .ok_or_else(bad)?;
         let ext = latin1(&ne[..4]).trim_end_matches(['\0', ' ']).to_string();
         let name = latin1(ne[4..].split(|&c| c == 0).next().unwrap_or_default());
         let d = data + idx as usize * 12;
-        let (off, len, stored) =
-            (u32_at(&body, d).ok_or_else(bad)?, u32_at(&body, d + 4).ok_or_else(bad)?, u32_at(&body, d + 8).ok_or_else(bad)?);
+        let (off, len, stored) = (
+            u32_at(&body, d).ok_or_else(bad)?,
+            u32_at(&body, d + 4).ok_or_else(bad)?,
+            u32_at(&body, d + 8).ok_or_else(bad)?,
+        );
         let name = format!("{name}.{ext}");
-        out.insert(name.clone(), MvglEntry { name, offset: u64::from(start) + u64::from(off), len, stored });
+        out.insert(
+            name.clone(),
+            MvglEntry {
+                name,
+                offset: u64::from(start) + u64::from(off),
+                len,
+                stored,
+            },
+        );
     }
     Ok(out.into_values().collect())
 }
@@ -93,14 +118,23 @@ pub fn doboz(b: &[u8]) -> Result<Vec<u8>, String> {
     let w = usize::from((a >> 3) & 7) + 1;
     let int = |s: &[u8]| s.iter().rev().fold(0u64, |v, &c| (v << 8) | u64::from(c));
     let head = b.get(1..1 + 2 * w).ok_or("a cut doboz header")?;
-    let (size, csize) = (usize::try_from(int(&head[..w])).map_err(|e| e.to_string())?, int(&head[w..]));
+    let (size, csize) = (
+        usize::try_from(int(&head[..w])).map_err(|e| e.to_string())?,
+        int(&head[w..]),
+    );
     let start = 1 + 2 * w;
     if a & 0x80 != 0 {
-        return b.get(start..start + size).map(<[u8]>::to_vec).ok_or_else(|| "a cut stored doboz stream".into());
+        return b
+            .get(start..start + size)
+            .map(<[u8]>::to_vec)
+            .ok_or_else(|| "a cut stored doboz stream".into());
     }
     let mut src = b.to_vec();
     src.extend_from_slice(&[0; 8]);
-    let at = |i: usize, n: usize| src.get(i..i + n).ok_or_else(|| "a doboz stream overrun".to_string());
+    let at = |i: usize, n: usize| {
+        src.get(i..i + n)
+            .ok_or_else(|| "a doboz stream overrun".to_string())
+    };
     let word = |i: usize| at(i, 4).map(|s| u32::from_le_bytes([s[0], s[1], s[2], s[3]]));
     let mut out: Vec<u8> = Vec::with_capacity(size);
     let (mut i, mut ctl) = (start, 1u32);
@@ -131,7 +165,10 @@ pub fn doboz(b: &[u8]) -> Result<Vec<u8>, String> {
             let off = ((x & mask) >> shift) as usize;
             let n = ((x >> lshift) & lmask) as usize + 3;
             i += n_bytes;
-            let s = out.len().checked_sub(off).ok_or("a doboz match before the start")?;
+            let s = out
+                .len()
+                .checked_sub(off)
+                .ok_or("a doboz match before the start")?;
             for k in 0..n {
                 let c = *out.get(s + k).ok_or("a doboz match past the end")?;
                 out.push(c);
@@ -151,7 +188,11 @@ pub fn nso_glsl(ro: &[u8]) -> Vec<Vec<u8>> {
     let pat = b"#version ";
     let mut out = Vec::new();
     let mut i = 0;
-    while let Some(p) = ro.get(i..).and_then(|r| r.windows(pat.len()).position(|w| w == pat)).map(|p| p + i) {
+    while let Some(p) = ro
+        .get(i..)
+        .and_then(|r| r.windows(pat.len()).position(|w| w == pat))
+        .map(|p| p + i)
+    {
         i = p + 1;
         let starts = p == 0 || ro[p - 1] == 0;
         if !starts || !ro.get(p + pat.len()).is_some_and(u8::is_ascii_digit) {
