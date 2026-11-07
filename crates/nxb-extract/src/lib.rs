@@ -44,6 +44,7 @@ pub mod split;
 pub mod split_cli;
 pub mod split_out;
 pub mod storage;
+pub mod ue_decode;
 pub mod version;
 pub mod write;
 
