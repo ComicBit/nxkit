@@ -162,7 +162,7 @@ pub fn manifest(o: &Options) -> Result<Value, String> {
         ("image_marker", s(IMAGE_MARKER)),
         ("profile", s(PROFILE)),
         ("shader_map", s(SHADER_MAP)),
-        ("app binary", s(LAUNCHER)),
+        ("launcher", s(LAUNCHER)),
         ("romfs_marker", s(&o.romfs_marker)),
         ("romfs_identity", s(&o.romfs_identity)),
         ("min_os", s(&o.min_os)),
@@ -214,7 +214,7 @@ mod tests {
 
     /// The reference script's output for [`opts`] with `nro.tsv` = 2 rows, a comment, a blank line and `refused`
     /// (`python3 gen_manifest.py out --game 0100152000022000 ... --built-by ci`).
-    const EXPECTED: &str = "{\n  \"schema\": 1,\n  \"title_id\": \"0100152000022000\",\n  \"name\": \"Mario Kart \u{2605} \\\"8\\\"\",\n  \"display_version\": \"3.0.1\",\n  \"package_version\": \"v196608\",\n  \"modules\": [\n    \"main\",\n    \"sdk\",\n    \"subsdk0\"\n  ],\n  \"nro_count\": 2,\n  \"chain\": \"b-0ad559cdbb28\",\n  \"loader\": \"FR\",\n  \"framework\": \"DmGame.framework\",\n  \"framework_executable\": \"DmGame\",\n  \"image_marker\": \"dmgame_image_marker\",\n  \"profile\": \"profile.tsv\",\n  \"shader_map\": \"dm/shader_map.tsv\",\n  \"app binary\": \"dm/launcher.json\",\n  \"romfs_marker\": \"Data/x.bin\",\n  \"romfs_identity\": \"\",\n  \"min_os\": \"26.0\",\n  \"built_by\": \"ci\"\n}\n";
+    const EXPECTED: &str = "{\n  \"schema\": 1,\n  \"title_id\": \"0100152000022000\",\n  \"name\": \"Mario Kart \u{2605} \\\"8\\\"\",\n  \"display_version\": \"3.0.1\",\n  \"package_version\": \"v196608\",\n  \"modules\": [\n    \"main\",\n    \"sdk\",\n    \"subsdk0\"\n  ],\n  \"nro_count\": 2,\n  \"chain\": \"b-0ad559cdbb28\",\n  \"loader\": \"FR\",\n  \"framework\": \"DmGame.framework\",\n  \"framework_executable\": \"DmGame\",\n  \"image_marker\": \"dmgame_image_marker\",\n  \"profile\": \"profile.tsv\",\n  \"shader_map\": \"dm/shader_map.tsv\",\n  \"launcher\": \"dm/launcher.json\",\n  \"romfs_marker\": \"Data/x.bin\",\n  \"romfs_identity\": \"\",\n  \"min_os\": \"26.0\",\n  \"built_by\": \"ci\"\n}\n";
 
     const NRO: &str = "# name\tx\nfoo\t1\n\nrefused\tnn\nbar\t2\n";
 
