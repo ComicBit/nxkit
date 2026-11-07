@@ -5,6 +5,9 @@
 //! `FX_i == 0 ? fb0 : FX_i == 1 ? fb1 : ... : <sample>`. The host picks the colour attachment `k` that holds the
 //! texture with the function constants `FX_i` (`i` is the call number), the shader reads it through the parameters
 //! `fbK`. The result is one member per output and attachment, switched by `OM_j_k`.
+//!
+//! The entry is `main0_f`. The host asks the library for that name. The body stays `dm_body_main0`.
+//! The upstream tools cut `_bf` from the one compile of the shader. Here `_bf` is a source of its own.
 
 use super::fetch_origin::{How, Tracer};
 use crate::msl::abi::Kind;
@@ -221,7 +224,7 @@ fn outputs(plan: &Plan) -> R<Vec<&FragOut>> {
 }
 
 fn result_struct(outs: &[&FragOut]) -> String {
-    let mut t = String::from("struct main0_outf\n{\n");
+    let mut t = String::from("struct main0_out_f\n{\n");
     for (j, o) in outs.iter().enumerate() {
         for k in 0..NFB {
             let _ = writeln!(
@@ -249,7 +252,7 @@ fn attachments() -> Vec<Param> {
 fn entry(outs: &[&FragOut], ps: &[Param], early: bool) -> String {
     let full: Vec<String> = ps.iter().map(Param::full).collect();
     let mut t = format!(
-        "{}fragment main0_outf main0({})\n{{\n    main0_out dm_r = dm_body_main0({});\n    main0_outf out = {{}};\n",
+        "{}fragment main0_out_f main0_f({})\n{{\n    main0_out dm_r = dm_body_main0({});\n    main0_out_f out = {{}};\n",
         if early {
             "[[early_fragment_tests]] "
         } else {
