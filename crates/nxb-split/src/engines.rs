@@ -120,18 +120,14 @@ pub fn ndsr_shaders(d: &[u8], label: &str, var: &mut BahsVar) -> Result<Vec<Foun
     if d.get(..4) != Some(b"NDSR") || d.len() < 0x20 {
         return Ok(Vec::new());
     }
-    let records_from = |o: usize| -> Result<usize, SplitError> {
-        let s = d.get(o..(o + 256).min(d.len())).unwrap_or(&[]);
-        if s.len() % 16 != 0 {
-            return Err(SplitError::Format(
-                "NDSR records: a buffer that is not a multiple of 16 bytes".into(),
-            ));
-        }
-        Ok((0..s.len() / 16)
-            .filter(|i| nvn2_at(d, u32le(s, 16 * i).unwrap_or(0) as usize))
-            .count())
+    // Only complete 16-byte records count. A short pack ends in a partial one.
+    let records_from = |o: usize| -> usize {
+        let n = (d.len().saturating_sub(o) / 16).min(16);
+        (0..n)
+            .filter(|i| nvn2_at(d, u32le(d, o + 16 * i).unwrap_or(0) as usize))
+            .count()
     };
-    let mut o = if records_from(0x14)? > records_from(0x10)? {
+    let mut o = if records_from(0x14) > records_from(0x10) {
         0x14
     } else {
         0x10
