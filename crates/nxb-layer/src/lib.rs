@@ -40,7 +40,7 @@ pub struct Shader {
 /// The naga version and the revision of this crate's passes, for the table's second line and for cache keys. A change to the
 /// passes that changes the output raises the revision.
 pub fn translator_id() -> String {
-    format!("nxb-layer 1, naga 30.0.1, glslang {}", gl::GLSLANG)
+    format!("nxb-layer 2, naga 30.0.1, glslang {}", gl::GLSLANG)
 }
 
 /// Reads SPIR-V `words` into naga's IR, splits array varyings, runs `pass`, names the entry point `name` and validates the

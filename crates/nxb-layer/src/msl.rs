@@ -8,15 +8,15 @@ use crate::slots::Slots;
 
 /// Float overloads of min, max and clamp with IEEE NaN rules (`fmin`, `fmax`), which the Switch's GPU follows: min(NaN, x) is x.
 /// Metal compiles `metal::min` of a float under fast math, where the result for a NaN operand is undefined. Shaders rely on
-/// the IEEE result, for example Super Mario Galaxy 2 clamps a NaN to hide it. Other types keep `metal::`.
+/// the IEEE result, for example Super Mario Galaxy 2 clamps a NaN to hide it. Other types keep `metal::`. The helpers are `static`, as every shader of a library has them.
 pub(crate) const PRECISE: &str = "
-template <typename A, typename B> inline auto nxb_min(A a, B b) { return metal::min(a, b); }
-template <typename A, typename B> inline auto nxb_max(A a, B b) { return metal::max(a, b); }
-template <typename A, typename B, typename C> inline auto nxb_clamp(A a, B b, C c) { return metal::clamp(a, b, c); }
+template <typename A, typename B> static inline auto nxb_min(A a, B b) { return metal::min(a, b); }
+template <typename A, typename B> static inline auto nxb_max(A a, B b) { return metal::max(a, b); }
+template <typename A, typename B, typename C> static inline auto nxb_clamp(A a, B b, C c) { return metal::clamp(a, b, c); }
 #define NXB_PRECISE(T) \\
-inline T nxb_min(T a, T b) { return metal::precise::min(a, b); } \\
-inline T nxb_max(T a, T b) { return metal::precise::max(a, b); } \\
-inline T nxb_clamp(T a, T b, T c) { return metal::precise::clamp(a, b, c); }
+static inline T nxb_min(T a, T b) { return metal::precise::min(a, b); } \\
+static inline T nxb_max(T a, T b) { return metal::precise::max(a, b); } \\
+static inline T nxb_clamp(T a, T b, T c) { return metal::precise::clamp(a, b, c); }
 NXB_PRECISE(float)
 NXB_PRECISE(metal::float2)
 NXB_PRECISE(metal::float3)
@@ -58,7 +58,31 @@ pub(crate) fn write(
         .replace("metal::min(", "nxb_min(")
         .replace("metal::max(", "nxb_max(")
         .replace("metal::clamp(", "nxb_clamp(");
-    Ok(with_helpers(&src))
+    Ok(with_helpers(&internal(&src)))
+}
+
+/// Makes the functions other than the entry point `static`. A library links all shaders of a game, and two shaders with a
+/// helper of one name (naga names them after the SPIR-V's names, `main_` among them) would collide.
+pub(crate) fn internal(src: &str) -> String {
+    let mut out = String::with_capacity(src.len() + 1024);
+    for l in src.split_inclusive('\n') {
+        let head = l.split(['(', ' ']).next().unwrap_or("");
+        // naga writes a function head as `<type> <name>(` with the arguments on the lines after, or its helpers (`naga_f2i32`)
+        // as `<type> <name>(<arguments>) {`
+        let t = l.trim_end();
+        let def = (t.ends_with('(') || t.contains('(') && t.ends_with(") {"))
+            && l.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+            && ![
+                "fragment", "vertex", "kernel", "struct", "template", "typedef", "using", "static",
+                "constant", "}",
+            ]
+            .contains(&head);
+        if def {
+            out.push_str("static ");
+        }
+        out.push_str(l);
+    }
+    out
 }
 
 /// Puts the `PRECISE` helpers after the last line of the MSL preamble (`#include` and `using`).

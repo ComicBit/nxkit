@@ -55,6 +55,28 @@ fn fragment_shader_has_combined_sampler_and_dual_source_variant() {
 }
 
 #[test]
+fn only_the_entry_point_has_external_linkage() {
+    let s = shader(FRAG, "frag");
+    assert!(s.msl.contains("static void main_("), "{}", s.msl);
+    assert!(
+        s.msl
+            .contains(&format!("\nfragment vk_{}Output vk_{}(", s.key, s.key)),
+        "{}",
+        s.msl
+    );
+    assert!(!s.msl.contains("static static"), "{}", s.msl);
+}
+
+#[test]
+fn helpers_of_two_shaders_do_not_collide() {
+    let src = "struct S {\n};\nmetal::float3 f_(\n    int a\n) {\n}\nvertex V v(\n  S s [[stage_in]]\n, metal::sampler x [[sampler(0)]]\n) {\n}\nconstant int k = int(1);\nint naga_f2i32(float value) {\n}\n";
+    let want = src
+        .replace("metal::float3 f_(", "static metal::float3 f_(")
+        .replace("int naga_f2i32(", "static int naga_f2i32(");
+    assert_eq!(crate::msl::internal(src), want);
+}
+
+#[test]
 fn table_sorts_rows_and_keeps_the_first_of_a_key() {
     let mk = |key: &str, stage: &'static str| Shader {
         key: key.into(),
