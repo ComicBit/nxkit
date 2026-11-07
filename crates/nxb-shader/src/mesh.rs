@@ -120,9 +120,11 @@ impl Facts {
         let blocks = (self.max_v.max(self.max_p).max(1) + BLOCK - 1) / BLOCK;
         let comps = (self.vertex.len() + self.primitive.len()).max(1) as i64;
         let prim = out + blocks * comps * BLOCK * 4;
+        // The index bytes are reserved for whole blocks of primitives, as `nxb_xlate::msl::mesh::memory` does.
+        let p_blocks = (self.max_p.max(1) + BLOCK - 1) / BLOCK;
         (
             [0, INPUT, out, prim],
-            prim + align(4 + 3 * self.max_p.max(1), 4),
+            prim + align(4 + 3 * p_blocks * BLOCK, 4),
         )
     }
 
@@ -213,7 +215,7 @@ mod tests {
         assert_eq!(f.primitive, [(Some(2), 0)]);
         let (lay, size) = f.memory();
         assert_eq!(lay, [0, 0x10, 0x10, 0x10 + 32 * 7 * 4]);
-        assert_eq!(size, lay[3] + 12);
+        assert_eq!(size, lay[3] + 4 + 3 * 32);
         let v = f.to_value(true);
         assert_eq!(v.get("max_v"), Some(&Value::Int(6)));
         assert_eq!(v.get("refused"), Some(&Value::str(REFUSED)));

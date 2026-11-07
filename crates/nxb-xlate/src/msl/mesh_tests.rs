@@ -115,8 +115,8 @@ fn the_stage_memory_follows_the_layout_of_the_engine() {
     let ts = mesh("ts");
     assert_eq!(memory(&ts), ([0, 16, 48, 80], 48 + 32));
     let ms = mesh("ms");
-    // one block of 7 components of 32 words each, then 4 + 3 primitive bytes
-    assert_eq!(memory(&ms), ([0, 16, 48, 48 + 7 * 128], 48 + 7 * 128 + 8));
+    // one block of 7 components of 32 words each, then 4 index bytes and 3 for each of the 32 primitives of a block
+    assert_eq!(memory(&ms), ([0, 16, 48, 48 + 7 * 128], 48 + 7 * 128 + 100));
     let wide = MeshStage {
         max_v: 33,
         payload: 0,
@@ -124,6 +124,22 @@ fn the_stage_memory_follows_the_layout_of_the_engine() {
     };
     assert_eq!(memory(&wide).0[2], 16);
     assert_eq!(memory(&wide).0[3], 16 + 2 * 7 * 128);
+}
+
+#[test]
+fn the_index_bytes_are_reserved_for_every_primitive_block() {
+    // Lanes 126 and 127 of a mesh of 126 primitives write the index bytes of their block too.
+    let m = MeshStage {
+        max_v: 64,
+        max_p: 126,
+        ..mesh("ms")
+    };
+    let (lay, size) = memory(&m);
+    assert_eq!(size - i64::from(lay[3]), 4 + 3 * 128);
+    let m = MeshStage { max_p: 32, ..m };
+    assert_eq!(memory(&m).1 - i64::from(memory(&m).0[3]), 4 + 3 * 32);
+    let m = MeshStage { max_p: 33, ..m };
+    assert_eq!(memory(&m).1 - i64::from(memory(&m).0[3]), 4 + 3 * 64);
 }
 
 #[test]

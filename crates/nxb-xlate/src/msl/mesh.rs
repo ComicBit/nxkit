@@ -55,7 +55,10 @@ pub fn memory(m: &MeshStage) -> ([i32; 4], i64) {
     let blocks = i64::from(m.max_v.max(m.max_p).max(1).div_ceil(BLOCK));
     let comps = (m.vertex.len() + m.primitive.len()).max(1) as i64;
     let prim = out + blocks * comps * i64::from(BLOCK) * 4;
-    let size = prim + align(4 + 3 * i64::from(m.max_p.max(1)), 4);
+    // The guest writes the index bytes of primitive min(count - 1, lane + 32k) in each primitive block. A count of 0
+    // wraps count - 1, so every lane of every block writes. The bytes are reserved for whole blocks of 32 primitives.
+    let p_blocks = i64::from(m.max_p.max(1).div_ceil(BLOCK));
+    let size = prim + align(4 + 3 * p_blocks * i64::from(BLOCK), 4);
     ([0, INPUT as i32, out as i32, prim as i32], size)
 }
 

@@ -182,6 +182,9 @@ and the translator refuses a job whose layout differs. The body of the shader is
 The `.json` has `stage` `ts` or `ms`, `msl_entry_kind` null and `mesh_stage` (`kind`, `threads`, `payload`, `task`). A mesh function also has `entry_z`.
 The translator fails with `mesh stage failed` when the shader uses shared memory of its own or the sizes do not fit Metal.
 
+The stage memory of a mesh shader ends with its primitive bytes. The count is at +3. The index bytes start at +4. The memory reserves 4 plus 3 times 32 bytes for each block of 32 primitives of `max_p`.
+The guest writes the index bytes of each lane in each primitive block, and a count of 0 makes every lane write. A mesh of 126 primitives has four blocks, so lanes 126 and 127 stay inside the array.
+
 Tessellation and vertex as compute are not ported. Each gives `Failure` with the reason `not ported` and a detail that names the stage.
 
 ## Open points
