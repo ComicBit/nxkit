@@ -45,6 +45,8 @@ mod spin2;
 mod spinreg;
 mod tailcall;
 mod windows;
+#[cfg(test)]
+mod windows_tests;
 
 pub use census::census;
 pub use error::RewriteError;

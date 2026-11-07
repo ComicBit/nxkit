@@ -18,6 +18,9 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 - The entry of the library `_bf` is `main0_f` and its result struct is `main0_out_f` (upstream `c8bfa161`). The host asks for `main0_f`. Not ported: the cut of `_bf` out of the one compile of `_b`. `nxb` still compiles `_bf` as a source of its own, so the build speed gain is not there. Every extra pixel entry already calls the one `dm_body_main0`.
 - A short NDSR pack no longer stops the shader split (upstream `ff33639c`, issue 1296). The record-start score counts only complete 16-byte records. Before, a pack with a partial last record gave the error "NDSR records: a buffer that is not a multiple of 16 bytes". The split of every pack that was read before is unchanged.
 - The pipeline archives hold a compute pipeline for each compute shader of the profile (the `C` rows of `pso_manifest.tsv`, then the compute rows of `shader_map.tsv`), compiled offline in groups of 16 apart from the render bases. Shaders with function constants are left out. `archive.tsv` gets a `compute` line. `nxb pso` takes `--shader-map`, `--manifest` and `--no-compute`. The host side (`cps_new` looks the pipeline up in the bundle) is not part of nxb. (upstream 30fb2136)
+- The rewriter keeps the branches of an exclusive window in its copy (upstream `10fd9705`). A conditional branch to the store of its own window is no longer taken for a retry block, and a `b` in a window is relocated to the copy or to an exit stub.
+  A window with a `b` may not leave with a live reservation. A direct branch from another function into the middle of such a window is refused, and so is a retry copy that branches into the middle of its window.
+  Before, the first case stopped with "retry block overlaps a window" and the second case was copied without relocation.
 - `TRANSLATOR_ID` is `msl-2.16`.
 
 ## 0.8.0

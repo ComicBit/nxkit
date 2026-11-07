@@ -8,10 +8,11 @@ use crate::error::fail;
 use crate::jumps::An;
 use crate::pat::{gn, is_direct_branch, preg};
 use crate::rw::{R, Rw, num};
-use crate::scan::{BIG_FN, Kind, Scan, pieces};
+use crate::scan::{BIG_FN, Kind, Scan, code_ranges, pieces};
 use crate::windows::{find_windows, retry_block};
 
 /// The result of the function analysis.
+#[derive(Debug)]
 pub(crate) struct Analysis {
     pub(crate) windows: Vec<Vec<Insn>>,
     pub(crate) retries: Vec<Vec<(Vec<Insn>, i64)>>,
@@ -93,6 +94,7 @@ pub(crate) fn analyse(rw: &Rw, scan: &Scan) -> R<Analysis> {
     funcs.dedup();
     let mut far_into: Vec<(i64, i64)> = Vec::new();
     let mut rmid_all: HashSet<i64> = HashSet::new();
+    let mut newly_accepted: HashSet<u64> = HashSet::new();
     if funcs.iter().any(|(fa, fb)| fb - fa > BIG_FN) {
         let mut split = Vec::new();
         for (fa, fb) in &funcs {
@@ -116,6 +118,11 @@ pub(crate) fn analyse(rw: &Rw, scan: &Scan) -> R<Analysis> {
         for w in &ws {
             for x in w {
                 a.done.insert(x.addr as i64);
+            }
+        }
+        for w in &ws {
+            if w.iter().any(|x| x.mn == "b") {
+                newly_accepted.insert(w[0].addr);
             }
         }
         a.windows.extend(ws.iter().cloned());
@@ -250,6 +257,10 @@ pub(crate) fn analyse(rw: &Rw, scan: &Scan) -> R<Analysis> {
                 let Some(wseg) = ws.iter().find(|w| w.iter().any(|y| y.addr == t)) else {
                     continue;
                 };
+                if x.mn != "bl" && wseg.iter().any(|y| y.addr == x.addr) {
+                    newly_accepted.insert(wseg[0].addr);
+                    continue;
+                }
                 let rb = if !matches!(x.mn, "b" | "bl") {
                     retry_block(&insl, k, wseg)
                 } else {
@@ -263,6 +274,22 @@ pub(crate) fn analyse(rw: &Rw, scan: &Scan) -> R<Analysis> {
                         "assertion failed: retry block overlaps a window {:x}",
                         rb.0[0].addr
                     ));
+                }
+                let tail_addrs: HashSet<u64> = rb.1.iter().map(|y| y.addr).collect();
+                for y in &rb.1 {
+                    let cond =
+                        matches!(y.mn, "cbz" | "cbnz" | "tbz" | "tbnz") || y.mn.starts_with("b.");
+                    let dest = y.target().unwrap_or(0);
+                    if cond
+                        && inwin.contains(&dest)
+                        && !heads.contains(&dest)
+                        && !tail_addrs.contains(&dest)
+                    {
+                        return fail(format!(
+                            "assertion failed: retry copy branches into window {:x}",
+                            y.addr
+                        ));
+                    }
                 }
                 let wend = wseg[wseg.len() - 1].addr as i64 + 4;
                 for y in &rb.0 {
@@ -319,5 +346,66 @@ pub(crate) fn analyse(rw: &Rw, scan: &Scan) -> R<Analysis> {
             }
         }
     }
+    reject_foreign_entries(rw, scan, &a, &newly_accepted)?;
     Ok(a)
+}
+
+/// Direct branches from another function were not part of the entry check of each function. A window with a
+/// `b` or an inner branch is copied whole, so no branch from outside may land in its middle.
+fn reject_foreign_entries(
+    rw: &Rw,
+    scan: &Scan,
+    a: &Analysis,
+    newly_accepted: &HashSet<u64>,
+) -> R<()> {
+    let fresh: Vec<&Vec<Insn>> = a
+        .windows
+        .iter()
+        .filter(|w| newly_accepted.contains(&w[0].addr))
+        .collect();
+    for w in &fresh {
+        if let Some(p) = w.windows(2).find(|p| p[1].addr != p[0].addr + 4) {
+            return fail(format!(
+                "assertion failed: noncontiguous window {:x}",
+                p[0].addr
+            ));
+        }
+    }
+    let new_mid: HashSet<i64> = fresh
+        .iter()
+        .flat_map(|w| w[1..].iter().map(|x| x.addr as i64))
+        .collect();
+    if new_mid.is_empty() {
+        return Ok(());
+    }
+    for (start, end) in code_ranges(&scan.data_blocks, rw.text_end) {
+        let mut at = start;
+        while at + 4 <= end {
+            let w = rw.w32(at);
+            let t = w >> 24;
+            let d = if (t == 0x54 && w & 0x10 == 0) || t & 0x7e == 0x34 {
+                let d = i64::from((w >> 5) & 0x7_ffff);
+                d - ((d & 0x4_0000) << 1)
+            } else if t & 0x7e == 0x36 {
+                let d = i64::from((w >> 5) & 0x3fff);
+                d - ((d & 0x2000) << 1)
+            } else if t & 0x7c == 0x14 {
+                let d = i64::from(w & 0x03ff_ffff);
+                d - ((d & 0x0200_0000) << 1)
+            } else {
+                at += 4;
+                continue;
+            };
+            let dest = at + 4 * d;
+            if new_mid.contains(&dest)
+                && func_of(scan, rw.text_end, at) != func_of(scan, rw.text_end, dest)
+            {
+                return fail(format!(
+                    "assertion failed: branch into window from another function {at:x}"
+                ));
+            }
+            at += 4;
+        }
+    }
+    Ok(())
 }
