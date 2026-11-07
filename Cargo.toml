@@ -54,7 +54,7 @@ nxb-nro = { path = "crates/nxb-nro" }
 nxb-profile = { path = "crates/nxb-profile" }
 nxb-xlatedev = { path = "crates/nxb-xlatedev" }
 nxb-xlate = { path = "crates/nxb-xlate" }
-nxb-vk = { path = "crates/nxb-vk" }
+nxb-layer = { path = "crates/nxb-layer" }
 nxb-maxwell = { path = "crates/nxb-maxwell" }
 
 [profile.test]
