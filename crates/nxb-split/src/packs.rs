@@ -75,11 +75,7 @@ pub fn gfpak_members(d: &[u8], label: &str) -> R<Vec<(String, Vec<u8>)>> {
             2 => crate::lz4::block_upto(raw, usz)?,
             1 => zlib_all(raw, label)?,
             0 => raw.to_vec(),
-            3 => {
-                return Err(SplitError::Unsupported(format!(
-                    "{label}: entry {i} is Oodle Kraken"
-                )));
-            }
+            3 => crate::oodle::decode(raw, usz, &format!("{label}: entry {i}"))?,
             _ => {
                 return red(format!(
                     "{label}: entry {i} has compression {ct}, which this reader does not decode"

@@ -1,5 +1,6 @@
-//! Unreal Engine pak files (`uepak.py`: `Pak`, `footer`, `inline_shaders`), read by ranges with no key. Blocks in
-//! other methods than stored, Zlib and LZ4 (LZ5, Oodle) need the game's own decoder: `Unsupported`.
+//! Unreal Engine pak files (`uepak.py`: `Pak`, `footer`, `inline_shaders`), read by ranges, with no key in the split
+//! and with the key from main in the build's Unreal decode ([`super::uejob`]). Blocks in other methods than stored,
+//! Zlib and LZ4 (LZ5, Oodle) need the game's own decoder (`crate::oodle`).
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -40,6 +41,9 @@ impl<'a> Rd<'a> {
         let v = &self.b[self.o..self.o + n];
         self.o += n;
         Ok(v)
+    }
+    pub(super) fn pos(&self) -> usize {
+        self.o
     }
     pub(super) fn le(&mut self, n: usize) -> R<u64> {
         Ok(self
@@ -99,10 +103,11 @@ pub(super) struct Pak {
     legacy: HashMap<String, Ent>,
     enc_blob: Vec<u8>,
     idx: HashMap<String, u32>,
+    key: Option<crate::aes256::Aes256>,
 }
 
 /// `footer`: (encrypted index, index offset, index size, method names, version).
-fn footer(s: &dyn Src, rel: &str) -> R<(bool, u64, u64, Vec<String>, u32)> {
+pub(super) fn footer(s: &dyn Src, rel: &str) -> R<(bool, u64, u64, Vec<String>, u32)> {
     let size = s.len();
     let mut found = None;
     for (back, foot) in [(0x2cu64, 0x2du64), (0xc8, 0xc8 + 21), (0xcc, 0xcc + 21)] {
@@ -165,7 +170,7 @@ fn footer(s: &dyn Src, rel: &str) -> R<(bool, u64, u64, Vec<String>, u32)> {
     Ok((enc, ioff, isz, methods, ver))
 }
 
-fn range(s: &dyn Src, off: u64, n: u64, what: &str) -> R<Vec<u8>> {
+pub(super) fn range(s: &dyn Src, off: u64, n: u64, what: &str) -> R<Vec<u8>> {
     if off.saturating_add(n) > s.len() {
         return ve(format!(
             "{what}: {n:#x} bytes at {off:#x} do not lie inside the file"
@@ -177,27 +182,33 @@ fn range(s: &dyn Src, off: u64, n: u64, what: &str) -> R<Vec<u8>> {
 impl Pak {
     /// `Pak(path)` without a key.
     pub(super) fn open(src: Arc<dyn Src>, rel: &str) -> R<Pak> {
+        Pak::open_keyed(src, rel, None)
+    }
+
+    /// `Pak(path, key)`.
+    pub(super) fn open_keyed(src: Arc<dyn Src>, rel: &str, key: Option<&[u8; 32]>) -> R<Pak> {
         let (enc, ioff, isz, methods, version) = footer(src.as_ref(), rel)?;
-        if enc {
+        if enc && key.is_none() {
             return ve(format!(
                 "{rel}: the index is encrypted and no key was given"
             ));
         }
-        let ib = range(src.as_ref(), ioff, isz, rel)?;
-        let mut r = Rd::new(&ib, 0, format!("{rel}: the index"));
-        let mount = r.fstr()?;
-        let count = r.i32()?;
         let mut pk = Pak {
             src: src.clone(),
             rel: rel.to_string(),
             version,
             methods,
-            mount,
+            mount: String::new(),
             names: Vec::new(),
             legacy: HashMap::new(),
             enc_blob: Vec::new(),
             idx: HashMap::new(),
+            key: key.map(crate::aes256::Aes256::new),
         };
+        let ib = pk.read_at(ioff, isz, enc)?;
+        let mut r = Rd::new(&ib, 0, format!("{rel}: the index"));
+        pk.mount = r.fstr()?;
+        let count = r.i32()?;
         if version == 4 || version == 8 {
             for _ in 0..count {
                 let name = r.fstr()?;
@@ -276,7 +287,7 @@ impl Pak {
         if r.i32()? != 0 {
             return ve(format!("{rel}: unencoded entries are not read"));
         }
-        let db = range(src.as_ref(), doff, dsz, rel)?;
+        let db = pk.read_at(doff, dsz, enc)?;
         let mut d = Rd::new(&db, 0, format!("{rel}: the directory index"));
         for _ in 0..d.i32()? {
             let dn = d.fstr()?;
@@ -363,13 +374,24 @@ impl Pak {
     }
 
     fn read_at(&self, off: u64, n: u64, enc: bool) -> R<Vec<u8>> {
-        if enc {
+        if !enc {
+            return range(self.src.as_ref(), off, n, &self.rel);
+        }
+        let Some(k) = &self.key else {
             return ve(format!(
                 "{}: {n:#x} encrypted bytes at {off:#x} and no key was given",
                 self.rel
             ));
-        }
-        range(self.src.as_ref(), off, n, &self.rel)
+        };
+        let mut b = range(
+            self.src.as_ref(),
+            off,
+            n.saturating_add(15) & !15,
+            &self.rel,
+        )?;
+        k.decrypt_ecb(&mut b);
+        b.truncate(n as usize);
+        Ok(b)
     }
 
     /// `Pak.read`: a file's bytes, block by block.
@@ -393,12 +415,11 @@ impl Pak {
                     }
                     crate::lz4::block_upto(&b, k as usize).ok()
                 }
-                m => {
-                    return Err(SplitError::Unsupported(format!(
-                        "{}: {path} is {m}-compressed (the game's own decoder)",
-                        self.rel
-                    )));
-                }
+                m => Some(crate::oodle::decode(
+                    &b,
+                    k as usize,
+                    &format!("{}: {path} ({m})", self.rel),
+                )?),
             };
             let Some(d) = d else {
                 return ve(format!("{}: {path} block {i} does not decode", self.rel));

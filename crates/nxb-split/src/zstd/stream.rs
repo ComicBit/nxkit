@@ -31,7 +31,46 @@ pub fn decompress_stream(
     limit: u64,
     sink: &mut Sink<'_>,
 ) -> R<u64> {
-    stream_n(input, input_len, limit, sink, false).map(|x| x.0)
+    stream_n(input, input_len, limit, sink, false, 0).map(|x| x.0)
+}
+
+/// The first frame of an input read through `input` only (`ZstdDecompressor` until `eof`): its output goes to `sink`.
+/// Returns the bytes of output and the bytes of input it took.
+pub fn decompress_first(
+    input: &mut Input<'_>,
+    input_len: u64,
+    limit: u64,
+    sink: &mut Sink<'_>,
+) -> R<(u64, u64)> {
+    stream_n(input, input_len, limit, sink, true, 0)
+}
+
+/// The first `n` bytes (or fewer, when the frame is shorter) the first frame of `d` decodes to, decoding no further
+/// than the block that reaches them (`ZstdDecompressor().decompress(d, max_length=n)`).
+pub fn decompress_head(d: &[u8], n: usize) -> R<Vec<u8>> {
+    let mut at = 0usize;
+    let mut input = |buf: &mut [u8]| -> R<()> {
+        let part = d
+            .get(at..at + buf.len())
+            .ok_or_else(|| err("input ends inside a frame"))?;
+        buf.copy_from_slice(part);
+        at += buf.len();
+        Ok(())
+    };
+    let mut out = Vec::new();
+    stream_n(
+        &mut input,
+        d.len() as u64,
+        u64::MAX,
+        &mut |b| {
+            out.extend_from_slice(b);
+            Ok(())
+        },
+        true,
+        n.max(1),
+    )?;
+    out.truncate(n);
+    Ok(out)
 }
 
 /// The first frame of `d` only: its output and the bytes it took (`ZstdDecompressor().decompress` with `unused_data`).
@@ -45,7 +84,7 @@ pub fn decompress_one(d: &[u8], limit: u64, sink: &mut Sink<'_>) -> R<(u64, usiz
         at += buf.len();
         Ok(())
     };
-    let (n, used) = stream_n(&mut input, d.len() as u64, limit, sink, true)?;
+    let (n, used) = stream_n(&mut input, d.len() as u64, limit, sink, true, 0)?;
     Ok((n, used as usize))
 }
 
@@ -55,6 +94,7 @@ fn stream_n(
     limit: u64,
     sink: &mut Sink<'_>,
     one: bool,
+    head: usize,
 ) -> R<(u64, u64)> {
     let mut used = 0u64;
     let mut total = 0u64;
@@ -140,6 +180,10 @@ fn stream_n(
             }
             if total + out.len() as u64 > limit {
                 return Err(err("output larger than expected"));
+            }
+            if head > 0 && out.len() >= head {
+                sink(&out)?;
+                return Ok((total + out.len() as u64, used));
             }
             if out.len() > keep + SLACK {
                 let n = out.len() - keep;

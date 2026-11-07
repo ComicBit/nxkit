@@ -99,11 +99,12 @@ Since version 0.4.0, the split reads many more container families. A format that
 | NSO segments with ZBIC compression (flag bit 7) | ported. The decoder is `nxb-codec::zbic`. The split and the rewrite use it. The four modules of the Switch 2 package were read and each segment hash was checked. A synthetic NSO also passes |
 | Unity bundles and serialized files (LZMA, LZ4, stored blocks, format 17 to 22, type trees) | ported. Compared on synthetic files only, because no real Unity title was available |
 | Needle, Sumo, Phyre, MGFX, XNB, SLCT, Monolith, Snowdrop, SDF, MT Framework and some more | ported. Compared on synthetic files |
-| formats that need Oodle (some packs, Frostbite roots, some Unreal blocks) | not ported. Exit code 4 |
+| formats that need Oodle or LZ5 (Oodle packs, Trinity packs, Frostbite superbundles, PKZ, GFPAK, Unreal 3 archives, Unreal pak blocks) | ported. The game's own decoder runs in the Mac host in its tool mode (`DM_OODLE_SERVE`, `nxb-extract::oodle_host`). `nxb build` starts it when the profile's shader sources name Oodle packs or legacy Unreal paks, and only on a Mac with Apple silicon. `nxb extract` and `nxb split` alone have no host, so these formats still stop them with exit code 4. Compared on synthetic files with a fake decoder only |
 | the CRA family | ported. `nxb-split::cra` unscrambles each file and checks its checksum. The file table is read from the NROs of `DM_NRO_DIR`, and a missing table stops the plan. Each NRO is also scanned like main. Compared with the reference script on a synthetic NRO and archive made by `tools/gen_cra_fixture.py` |
 | zip members (stored, Deflate, bzip2, lzma) | ported. The decoders are `nxb-split::bzip2` and `nxb-split::unity::lzma`. Compared with vectors from Python's `zipfile`, `bzip2` and `xz` |
 | BND3 entry names in Shift JIS | ported. `nxb-split::sjis` decodes ASCII, half-width katakana and JIS X 0208 like Python's `shift-jis` codec with `replace`. A test compares all 65536 byte pairs with the codec. The table is made by `tools/gen_sjis_table.py` |
-| encrypted Unreal indexes, LZ5 packages | not ported. Exit code 4 or a note |
+| Unreal shader code archives in paks, with an AES-256 index | ported in `nxb build` (`nxb-split::jobs::uejob`, `boot/uedec.rs`). The key comes from main. LZ4 shaders decode in nxb, Oodle shaders decode in one boot of the Mac host (`DM_OODLE_JOB`). The split reads `<version>/ue_shaders`. Checked with the AES test vectors of FIPS 197 and SP 800-38A and with synthetic archives. No real game was run |
+| Unreal Engine 5.6 IoStore shader libraries | not ported. The Unreal decode stops with an error that names the container |
 
 Real data: the update image of one title with a 17.6 GB archive gave all 12 package files and all tables byte-identical to the reference split (measured: 298 s, and about 25 minutes for the reference).
 The reference scripts read approximately 35 container formats, and the port covers most of them. Only the real image and the NSP titles have real-data results. For all other families, the evidence is synthetic.
@@ -316,12 +317,22 @@ It reads SPIR-V files, Trinity packs, GLSL files, Unreal paks (with their IoStor
 A package without `RomFS.img` uses the counts of the survey. `nxb profile guess` always uses the counts of the survey.
 The survey report has the census of the rewrite sites (`nxb_rewrite::census`) of every module except `rtld`.
 
-Some checks of the reference script start the game on the Mac. `nxb build` does not start the game. These checks are not ported:
+Some steps of the reference script start the game on the Mac. `nxb build` runs them after the rewrite (`crates/nxb-build/src/boot/`).
+Each boot runs the Mac host `<work>/tools/dmhost`, which `nxb build` builds from the engine. The host runs headless and silent in `<work>/tmp/<step>`.
+Its output goes to `<work>/logs/<step>.log`. Each boot has a time limit. After the limit the host gets `SIGTERM`, and `SIGKILL` 5 s later.
+A step whose output is complete is skipped, so a build with unchanged inputs boots nothing. The boots need a Mac with Apple silicon.
 
-- The heap check and the region check. A game that has one of them stops with exit code 4. The build writes the profile first. The message names `--no-heap-check`.
+- The NRO capture writes the NROs that the game loads at run time to `<work>/nro_<package>`. The split reads them.
+- The heap check and the region check run for a provisional profile. They write their results into `game.tsv`.
   With `--no-heap-check`, the build omits the two checks and keeps the memory layout that the survey guessed. **A run of the game did not check this layout.**
-- The shader captures (Vulkan, OpenGL, `glslc`, Unreal decode and others). The build writes a `[RED]` line for each capture that it leaves out.
-  A Vulkan or OpenGL game gets the shaders of its files without a capture (see [Vulkan and OpenGL games](#vulkan-and-opengl-games)). Shaders that the game makes at run time are missing.
+- The GLSLC capture writes the shaders that the game compiles at run time to `<version>/glslc_capture`. The split reads them.
+  A boot that captures no output but observes shader keys passes only if the split covers every observed key.
+- The Unreal decode writes the decoded shader code archives to `<version>/ue_shaders`. The split reads them.
+- The game's own Oodle and LZ5 decoder serves the split (see the family table).
+- The Vulkan and GL captures write `<version>/vk_capture` and `gl_capture`. nxb has no port of `vk_shaders.py` and `gl_shaders.py`, so nothing translates these shaders. The build writes a `[RED]` line, and the shader library has to come from `--shaders`.
+- The JIT capture is not ported. `nxb build --platform ios` stops for a game whose main imports `nn::jit` unless `<version>/jit/jit.img` exists.
+
+These boots were not run against real games in nxb. The tests use synthetic data.
 
 `nxb profile` has four commands: `guess`, `show`, `check` and `manifest`. `guess` writes the values of the survey, `show` shows a profile,
 `check` compares the guess with a registered profile, and `manifest` lists a RomFS image.

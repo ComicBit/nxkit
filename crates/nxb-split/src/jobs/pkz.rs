@@ -59,11 +59,7 @@ fn shaders(s: &dyn Src, rel: &str, ents: &[Entry]) -> R<JobOut> {
         let c = s.read_up(*off, *csz as usize)?;
         let d = match comp.as_str() {
             "None" => c,
-            "OodleKraken" => {
-                return Err(SplitError::Unsupported(format!(
-                    "/{rel}/{name}: Oodle Kraken"
-                )));
-            }
+            "OodleKraken" => crate::oodle::decode(&c, *usz as usize, &format!("/{rel}/{name}"))?,
             "ZStandard" => crate::zstd::decompress(&c)?,
             _ => return red(format!("/{rel}/{name}: compression {comp:?} is not known")),
         };

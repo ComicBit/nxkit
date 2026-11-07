@@ -194,8 +194,9 @@ fn with_bytes<T>(
     })
 }
 
-/// Extracts the packages of the input (and the split in the same pass).
-fn packages(a: &Args, b: &Build, p: &Progress) -> Result<usize, String> {
+/// Extracts the packages of the input (and the split in the same pass). Returns the image count and, when the fused
+/// split needs the game's own decoder (Oodle, LZ5), why: the split then runs again once the Mac host can decode.
+fn packages(a: &Args, b: &Build, p: &Progress) -> Result<(usize, Option<String>), String> {
     let out = |v: &str| b.work.join("extract").join(v);
     let counter = Arc::new(nxb_extract::Counter::default());
     let req = nxb_extract::Request {
@@ -224,7 +225,7 @@ fn packages(a: &Args, b: &Build, p: &Progress) -> Result<usize, String> {
     p.say("extract and shader split in one pass (nxb-extract)");
     let s = with_bytes(p, "extracting", &counter, || nxb_extract::extract(&req))
         .map_err(|e| damaged(p, &e))?;
-    Ok(s.images.len())
+    Ok((s.images.len(), s.split_unsupported.clone()))
 }
 
 /// A NUP or a dump: one `extract/v<version>` per needed version.
@@ -286,6 +287,22 @@ pub(crate) fn container(a: &Args, b: &Build, p: &Progress) -> Result<usize, Stri
 
 /// The shader split of a NUP or a dump (the packages' split runs inside the extract's pass).
 pub(crate) fn split(a: &Args, b: &Build, p: &Progress) -> Result<String, String> {
+    let inputs = crate::boot::inputs::HostInputs::load(&b.work);
+    // the game's own decoder: the Mac host the boot steps built, serving with the rewritten modules
+    let oodle = match &inputs.oodle {
+        Some((host, modules)) => {
+            let c = crate::boot::Ctx::of(b, p)?;
+            let (cwd, env) = c.run_dir("oodle_serve", false)?;
+            Some(nxb_extract::oodle_host::HostSpec {
+                host: host.clone(),
+                modules: modules.clone(),
+                env,
+                cwd,
+                logs: c.logs(),
+            })
+        }
+        None => None,
+    };
     let req = nxb_extract::split::SplitRequest {
         versions: b
             .split_versions
@@ -295,11 +312,20 @@ pub(crate) fn split(a: &Args, b: &Build, p: &Progress) -> Result<String, String>
         game_tsv: b.profile.0.join("game.tsv"),
         outputs: split_outputs(b),
         threads: a.threads,
+        nro_dir: inputs.nro_dir.clone(),
+        oodle,
     };
     p.say("shader split (nxb-extract)");
     let (_, bad) = nxb_extract::split::split(&req).map_err(|e| damaged(p, &e))?;
     for l in bad {
         p.say(&l);
+    }
+    if !inputs.glslc_observed.is_empty() {
+        let map = std::fs::read_to_string(&req.outputs.map)
+            .map_err(|e| format!("{}: {e}", req.outputs.map.display()))?;
+        let said = crate::boot::captures::check_glslc_coverage(&inputs.glslc_observed, &map)
+            .map_err(|e| crate::exit::fail(1, e))?;
+        p.say(&said);
     }
     crate::provisional::take_tables(b)?;
     Ok(format!("{} versions", req.versions.len()))
@@ -316,14 +342,11 @@ pub(crate) fn run(a: &Args, b: &Build, p: &Progress) -> Result<String, String> {
             b.program, b.title
         ));
     }
-    let images = match b.src.source {
+    let (images, later) = match b.src.source {
         Source::Packages => packages(a, b, p)?,
-        _ => container(a, b, p)?,
+        _ => (container(a, b, p)?, None),
     };
     let aoc = dlc(a, b, p)?;
-    if b.prov {
-        crate::provisional::runs_check(a, b, p)?;
-    }
     let note = crate::rewrite::ensure(&b.engine, &b.profile.0, &b.work, &b.package)?;
     // the rewrite is skipped when this engine is not the one the port was checked against: without rewritten modules
     // the app cannot be made, and saying so here is clearer than the app stage's missing file
@@ -343,7 +366,24 @@ pub(crate) fn run(a: &Args, b: &Build, p: &Progress) -> Result<String, String> {
     }
     if b.prov {
         crate::provisional::refine(b, p)?;
-        if b.src.source == Source::Packages {
+    }
+    crate::boot::run::after_rewrite(a, b, p)?;
+    if b.src.source == Source::Packages {
+        // the fused split ran before the boots: what they made (or the decoder it lacked) needs a split of its own
+        if let Some(why) = &later {
+            p.say(&format!(
+                "the split runs again with the game's own decoder: {why}"
+            ));
+        }
+        let mut inputs = crate::boot::inputs::HostInputs::load(&b.work);
+        if later.is_some() && inputs.oodle.is_none() && crate::boot::run::apple_silicon() {
+            let c = crate::boot::Ctx::of(b, p)?;
+            inputs.oodle = Some((c.host()?, c.patched()));
+            inputs.save(&b.work)?;
+        }
+        if later.is_some() || inputs.split_again {
+            split(a, b, p)?;
+        } else if b.prov {
             crate::provisional::take_tables(b)?;
         }
     }

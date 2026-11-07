@@ -33,6 +33,7 @@ pub mod meta;
 pub mod nca;
 pub mod ncz;
 pub mod nup;
+pub mod oodle_host;
 pub mod post;
 pub mod prof;
 pub mod romfs;
@@ -43,6 +44,7 @@ pub mod split;
 pub mod split_cli;
 pub mod split_out;
 pub mod storage;
+pub mod ue_decode;
 pub mod version;
 pub mod write;
 
