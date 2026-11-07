@@ -202,6 +202,7 @@ impl Props {
                         ty: AggType(num(field_at(&f, 1)?)? as u32),
                         array_length: num(field_at(&f, 2)?)?,
                         name: field_at(&f, 3)?.to_string(),
+                        zero_init: false,
                     };
                     if kw == "lmem" {
                         p.properties.local_memories.push(def);

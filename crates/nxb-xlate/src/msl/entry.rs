@@ -295,7 +295,12 @@ pub(super) fn entry_text(
     }
     for m in &s.props.properties.local_memories {
         let (ty, n) = memory(m)?;
-        let _ = writeln!(t, "    {};", memory_decl(&ty, &format!("lm{}", m.id), n).0);
+        let init = if m.zero_init { " = {}" } else { "" };
+        let _ = writeln!(
+            t,
+            "    {}{init};",
+            memory_decl(&ty, &format!("lm{}", m.id), n).0
+        );
     }
     if let (false, Some(sp)) = (body_fn, e.spill) {
         t.push_str(&sp.decls(&s.props.properties.shared_memories, &builtins)?);

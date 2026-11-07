@@ -183,6 +183,9 @@ pub struct MemoryDefinition {
     pub name: String,
     pub ty: AggregateType,
     pub array_length: i32,
+    /// The memory starts at zero in each invocation, for state a shader reads before it writes (the last entry of a
+    /// raw global memory lookup).
+    pub zero_init: bool,
 }
 
 impl MemoryDefinition {
@@ -191,6 +194,7 @@ impl MemoryDefinition {
             name: name.to_string(),
             ty,
             array_length,
+            zero_init: false,
         }
     }
 }

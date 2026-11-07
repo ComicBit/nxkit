@@ -131,6 +131,7 @@ fn mem_defs(v: &[tp::MemoryDefinition]) -> Vec<cp::MemoryDef> {
             name: m.name.clone(),
             ty: agg(m.ty),
             array_length: m.array_length,
+            zero_init: m.zero_init,
         })
         .collect()
 }

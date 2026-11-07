@@ -96,11 +96,15 @@ Every fragment entry gets `[[early_fragment_tests]]` when `early_tests` is true.
 `ATOMG` and `RED` with `INC` or `DEC` become a compare and swap loop. `INC` gives 0 when the old value is at least the operand. `DEC` gives the operand when the old value is 0 or above the operand.
 Bit 76 of `LDG` and `STG` and bit 71 of `ATOMG` and `RED` mark the uniform register as a memory descriptor. A descriptor is not added to the address.
 
+A raw global access whose buffer is not known at translation time looks up the bound storage buffers at run time (`opt/gts_raw.rs`).
+Each lookup keeps the entry it chose last in a zeroed local word `gmem_last_N`. The next access first checks that entry.
+When the address is outside it, the lookup tries the hint and then searches all entries. The end of the chosen entry is checked once more after the search.
+
 ## Identity and the cache
 
 The step stores each translation in the store. The key `nxb.xlate.v2` has the translator identity, the job, the code, the chain version V, the source, the paired shader,
 the answer-table flag, the dual-source and fetch-outputs-only flags and the varyings of the partners.
-The translator identity is a hash of the label `nxb-xlate msl`, V, `nxb_xlate::msl::TRANSLATOR_ID` (now `msl-2.5`) and `NXB_TEST_XLATE_SALT`.
+The translator identity is a hash of the label `nxb-xlate msl`, V, `nxb_xlate::msl::TRANSLATOR_ID` (now `msl-2.6`) and `NXB_TEST_XLATE_SALT`.
 V is a hash of the engine files that `dm/gfx/tools/dmsh_chain.py` lists in `FILES`, and the options string `debug=True reduced=True`. No Rust source goes into V.
 A change of the translator translates again only when someone increases `TRANSLATOR_ID` by hand. Without the increase, the store gives the old MSL. A failure is not stored.
 
