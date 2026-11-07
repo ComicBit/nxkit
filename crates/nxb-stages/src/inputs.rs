@@ -30,6 +30,8 @@ fn keys_of(text: &str, key: fn(&str) -> Option<&str>) -> BTreeSet<String> {
 pub struct ShaderInputs {
     /// key → (package file name, record index): the first row of each key (`loc.setdefault`).
     pub loc: BTreeMap<String, (String, usize)>,
+    /// The keys of the profile's map that the split did not find. They have no record.
+    pub unsplit: BTreeSet<String>,
     /// key → facts object.
     pub facts: BTreeMap<String, Value>,
     /// key → the map's column 5 (`pc_of`), overridden by the conflicts table.
@@ -42,20 +44,45 @@ pub struct ShaderInputs {
     packs: Mutex<BTreeMap<String, std::sync::Arc<Pack>>>,
 }
 
+/// The rows of a `shader_map.tsv`: (package file name, record index, key, column 5).
+fn map_rows(text: &str) -> impl Iterator<Item = (&str, usize, &str, &str)> {
+    text.lines().filter_map(|ln| {
+        let c: Vec<&str> = ln.split('\t').collect();
+        if c.len() > 4 && c[0].ends_with(".bin") {
+            c[1].parse().ok().map(|i| (c[0], i, c[3], c[4]))
+        } else {
+            None
+        }
+    })
+}
+
 impl ShaderInputs {
     /// Load the profile tables (`profile_dir` holds `shader_map.tsv` and `shader_facts.tsv`) for the package folder.
+    ///
+    /// The record of a key is found through the `shader_map.tsv` beside `pkg_dir` when the split wrote one: the
+    /// package files and that map come from the same split, while the profile's map can come from another split
+    /// whose packages hold other records at the same index. The profile keys that map lacks are in [`Self::unsplit`].
     pub fn load(pkg_dir: &Path, profile_dir: &Path) -> io::Result<ShaderInputs> {
         let mut loc = BTreeMap::new();
         let mut pc_of = BTreeMap::new();
-        for ln in fs::read_to_string(profile_dir.join("shader_map.tsv"))?.lines() {
-            let c: Vec<&str> = ln.split('\t').collect();
-            if c.len() > 4
-                && c[0].ends_with(".bin")
-                && let Ok(i) = c[1].parse()
-            {
-                pc_of.entry(c[3].to_string()).or_insert(c[4].to_string());
-                loc.entry(c[3].to_string()).or_insert((c[0].to_string(), i));
+        let profile_map = fs::read_to_string(profile_dir.join("shader_map.tsv"))?;
+        for (pk, i, key, pc) in map_rows(&profile_map) {
+            pc_of.entry(key.to_string()).or_insert(pc.to_string());
+            loc.entry(key.to_string()).or_insert((pk.to_string(), i));
+        }
+        let mut unsplit = BTreeSet::new();
+        let split_map = pkg_dir.parent().map(|d| d.join("shader_map.tsv"));
+        if let Some(text) = split_map.and_then(|p| fs::read_to_string(p).ok()) {
+            let mut own = BTreeMap::new();
+            for (pk, i, key, _) in map_rows(&text) {
+                own.entry(key.to_string()).or_insert((pk.to_string(), i));
             }
+            unsplit = loc
+                .keys()
+                .filter(|k| !own.contains_key(*k))
+                .cloned()
+                .collect();
+            loc = own;
         }
         if let Ok(t) = fs::read_to_string(profile_dir.join("shader_map.tsv.conflicts.tsv")) {
             for ln in t.lines() {
@@ -84,6 +111,7 @@ impl ShaderInputs {
         }
         Ok(ShaderInputs {
             loc,
+            unsplit,
             facts,
             pc_of,
             dual_want: key_list(profile_dir, "dual_want.tsv", |l| {
@@ -118,7 +146,12 @@ impl ShaderInputs {
     /// `rec_of(key)`: (package name, the record's bytes).
     pub fn record(&self, key: &str) -> io::Result<(String, Vec<u8>)> {
         let (name, k) = self.loc.get(key).ok_or_else(|| {
-            io::Error::new(io::ErrorKind::NotFound, format!("{key} is not in the map"))
+            let why = if self.unsplit.contains(key) {
+                "the split did not find it"
+            } else {
+                "it is not in the map"
+            };
+            io::Error::new(io::ErrorKind::NotFound, format!("{key}: {why}"))
         })?;
         let p = self.index(name)?;
         let (a, b) = (
@@ -144,6 +177,31 @@ fn read_exact_at(f: &File, buf: &mut [u8], off: u64) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn records_are_found_through_the_splits_own_map() {
+        let d = std::env::temp_dir().join(format!("nxb-inputs-{}", std::process::id()));
+        let (prof, pkg) = (d.join("profile"), d.join("shader/pkg"));
+        fs::create_dir_all(&prof).unwrap();
+        fs::create_dir_all(&pkg).unwrap();
+        let head = "package\tindex\tstage\tdm_ctl_sha16\tsource\n";
+        let profile = format!("{head}ps_a.bin\t0\tpixel\taaaa\tx\nps_a.bin\t1\tpixel\tbbbb\ty\n");
+        fs::write(prof.join("shader_map.tsv"), profile).unwrap();
+        fs::write(
+            d.join("shader/shader_map.tsv"),
+            format!("{head}ps_a.bin\t0\tpixel\tbbbb\ty\n"),
+        )
+        .unwrap();
+        fs::write(pkg.join("ps_a.bin"), b"BTCDBTCDrecord-of-bbbb").unwrap();
+        let s = ShaderInputs::load(&pkg, &prof).unwrap();
+        assert_eq!(s.loc.get("bbbb"), Some(&("ps_a.bin".to_string(), 0)));
+        assert_eq!(s.record("bbbb").unwrap().1, b"BTCDBTCDrecord-of-bbbb");
+        assert!(s.unsplit.contains("aaaa"));
+        let e = s.record("aaaa").unwrap_err().to_string();
+        assert!(e.contains("the split did not find it"), "{e}");
+        assert_eq!(s.pc_of.get("aaaa").map(String::as_str), Some("x"));
+        fs::remove_dir_all(&d).unwrap();
+    }
 
     #[test]
     fn a_want_list_has_one_key_per_line() {
