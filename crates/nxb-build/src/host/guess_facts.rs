@@ -393,6 +393,35 @@ pub fn facts_of(exefs: &Path, romfs: &Path) -> Result<Facts, String> {
     Ok(f)
 }
 
+/// The facts of main alone that `build_sources` reads (its imports, GLSL sources and `glShaderSource` names), for a
+/// build whose profile is registered (no survey).
+pub fn main_facts(exefs: &Path) -> Result<Facts, String> {
+    let p = exefs.join("main");
+    let (img, bid, sizes, bss) = read_nso(&p)?;
+    let syms = nf::dynsyms(&img).map_err(|e| format!("{}: {e}", p.display()))?;
+    let mut f = Facts {
+        glslc: nf::count(&img, &GLSLC_MAGIC),
+        glsl_src: nf::glsl_sources(&img),
+        gl_names: nf::count(&img, b"glShaderSource"),
+        gl_src: nf::gl_src_count(&img),
+        ..Default::default()
+    };
+    f.mods.push((
+        "main".into(),
+        ModFacts {
+            bid,
+            sizes,
+            bss,
+            far: false,
+            imports: syms.iter().filter(|s| !s.1).map(|s| s.0.clone()).collect(),
+            exports: BTreeSet::new(),
+            comps: BTreeSet::new(),
+            kind: "the game".into(),
+        },
+    ));
+    Ok(f)
+}
+
 /// Every `NSO0` file including `rtld`.
 fn nso_files_all(exefs: &Path) -> Vec<PathBuf> {
     let mut v: Vec<PathBuf> = std::fs::read_dir(exefs)

@@ -62,9 +62,11 @@ pub fn body(d: &[u8], label: &str) -> Result<Vec<u8>, SplitError> {
                 })?;
                 out.extend(z);
             } else {
-                return Err(SplitError::Unsupported(format!(
-                    "{label}: a chunk block that needs the game's Oodle decoder"
-                )));
+                out.extend(crate::oodle::decode(
+                    blk,
+                    u,
+                    &format!("{label}: chunk at {i:#x} block {k}"),
+                )?);
             }
             o += c;
         }

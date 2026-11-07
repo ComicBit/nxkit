@@ -45,6 +45,7 @@ pub(crate) fn run_nodes(
                 Work::Turn(Box::new(move || {
                     let note =
                         crate::rewrite::ensure(&b.engine, &b.profile.0, &b.work, &b.package)?;
+                    crate::boot::run::after_rewrite(a, b, p)?;
                     Ok(format!(
                         "reused: {r}{}",
                         note.map(|n| format!(", {n}")).unwrap_or_default()

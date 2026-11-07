@@ -19,6 +19,7 @@ pub mod misc;
 pub mod monolith;
 pub mod narc;
 pub mod nso;
+pub mod oodle;
 pub mod packs;
 pub mod raw;
 pub(crate) mod rd;

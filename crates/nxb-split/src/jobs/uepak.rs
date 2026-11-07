@@ -393,12 +393,11 @@ impl Pak {
                     }
                     crate::lz4::block_upto(&b, k as usize).ok()
                 }
-                m => {
-                    return Err(SplitError::Unsupported(format!(
-                        "{}: {path} is {m}-compressed (the game's own decoder)",
-                        self.rel
-                    )));
-                }
+                m => Some(crate::oodle::decode(
+                    &b,
+                    k as usize,
+                    &format!("{}: {path} ({m})", self.rel),
+                )?),
             };
             let Some(d) = d else {
                 return ve(format!("{}: {path} block {i} does not decode", self.rel));

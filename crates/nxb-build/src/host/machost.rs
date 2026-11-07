@@ -207,6 +207,7 @@ fn decoder_host_key(r: &Runner, out: &Path) -> Option<String> {
 }
 
 /// Build the Mac host for `game` into `out` unless the last build there is still current. Returns whether it built.
+/// One build at a time: the "Mac host" stage and a step that boots the game may both ask for it.
 pub fn build(
     r: &Runner,
     engine: &Path,
@@ -214,6 +215,8 @@ pub fn build(
     game: &str,
     logs: &Path,
 ) -> Result<bool, String> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _one = LOCK.lock().map_err(|_| "the Mac host build lock")?;
     if r.stdout("sysctl", ["-n", "hw.optional.arm64"], None)
         .map(|s| s.trim().to_string())
         .ok()
