@@ -495,22 +495,7 @@ pub fn extract(req: &Request) -> Result<Summary> {
             let scanned = t.scanned();
             t.merge(&vin, outs).map(|(_, bad)| (scanned, bad))
         });
-        match merged {
-            Ok((scanned, bad)) => {
-                for b in bad {
-                    println!("{b}");
-                }
-                eprintln!(
-                    "nxb-extract: split fused, {scanned} distinct files scanned, merge {:.2} s",
-                    t2.elapsed().as_secs_f64()
-                );
-            }
-            Err(ExtractError::Unsupported(why)) => {
-                eprintln!("nxb-extract: split left for later: {why}");
-                split_unsupported = Some(why);
-            }
-            Err(e) => return Err(e),
-        }
+        split_unsupported = crate::split_out::fused_result(merged, t2)?;
     }
 
     let mut stdout = std::io::stdout().lock();

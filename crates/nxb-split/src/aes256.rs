@@ -150,11 +150,8 @@ impl Aes256 {
 
     /// ECB decryption of the whole blocks of `data`, a tail shorter than a block is left as is.
     pub fn decrypt_ecb(&self, data: &mut [u8]) {
-        for c in data.chunks_exact_mut(16) {
-            let mut b = [0u8; 16];
-            b.copy_from_slice(c);
-            self.decrypt_block(&mut b);
-            c.copy_from_slice(&b);
+        for b in data.as_chunks_mut::<16>().0 {
+            self.decrypt_block(b);
         }
     }
 }

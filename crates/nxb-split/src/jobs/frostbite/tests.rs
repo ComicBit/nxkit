@@ -177,7 +177,7 @@ fn hash_of_compiled_bytecode() {
 
 #[test]
 fn reads_install_chunks() {
-    let c = install_chunks(&layout()).ok().expect("layout");
+    let c = install_chunks(&layout()).expect("layout");
     assert_eq!(c.get(&7).map(String::as_str), Some("chunk7"));
     assert!(install_chunks(&TOC_MAGIC).is_err());
 }
@@ -186,11 +186,11 @@ fn reads_install_chunks() {
 fn reads_toc_bundles() {
     let (a, b) = (cid(7, 1), cid(7, 2));
     let ents = vec![(a, 0, 10), (a, 10, 5), (b, 0, 3)];
-    let got = toc_bundles(&toc(&ents), "t").ok().expect("toc");
+    let got = toc_bundles(&toc(&ents), "t").expect("toc");
     assert_eq!(got, vec![ents]);
     assert!(toc_bundles(b"nope", "t").is_err());
     assert_eq!(
-        cas_path(&cid(7, 3), &install_chunks(&layout()).ok().expect("l")).ok(),
+        cas_path(&cid(7, 3), &install_chunks(&layout()).expect("l")).ok(),
         Some("Data/NX/chunk7/cas_03.cas".into())
     );
 }
@@ -256,7 +256,7 @@ fn plans_and_reads_the_resources() {
         },
     ];
     let mut p = Plan::default();
-    plan(&files, &mut p).ok().expect("plan");
+    plan(&files, &mut p).expect("plan");
     assert_eq!(p.jobs.len(), 1);
     assert_eq!(p.jobs[0].rel, "Data/NX/chunk7/cas_01.cas");
     assert_eq!(p.taken, [0, 1, 2].into_iter().collect());
@@ -266,7 +266,7 @@ fn plans_and_reads_the_resources() {
         dicts: &dicts,
     };
     let mut notes = Vec::new();
-    let out = (p.jobs[0].run)(&ctx, &mut notes).ok().expect("run");
+    let out = (p.jobs[0].run)(&ctx, &mut notes).expect("run");
     assert!(out.found.is_empty());
     assert_eq!(notes.len(), 1);
     assert!(
@@ -283,6 +283,6 @@ fn skips_roots_without_the_magic() {
         live: true,
     }];
     let mut p = Plan::default();
-    plan(&files, &mut p).ok().expect("plan");
+    plan(&files, &mut p).expect("plan");
     assert!(p.jobs.is_empty() && p.taken.is_empty());
 }

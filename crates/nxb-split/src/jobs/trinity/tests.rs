@@ -16,13 +16,10 @@ impl B {
         let mut at = Vec::new();
         for (i, f) in fields.iter().enumerate() {
             let p = self.0.len();
-            match f {
-                Some(b) => {
-                    self.0.extend_from_slice(b);
-                    let o = (p - t) as u16;
-                    self.0[vt + 4 + 2 * i..vt + 6 + 2 * i].copy_from_slice(&o.to_le_bytes());
-                }
-                None => {}
+            if let Some(b) = f {
+                self.0.extend_from_slice(b);
+                let o = (p - t) as u16;
+                self.0[vt + 4 + 2 * i..vt + 6 + 2 * i].copy_from_slice(&o.to_le_bytes());
             }
             at.push(p as u64);
         }

@@ -223,3 +223,28 @@ pub(crate) fn read_nros(given: Option<&std::path::Path>) -> Result<Nros> {
         files,
     })
 }
+
+/// The end of a fused split: its bad-file lines and timing, or the reason when it stopped on a file only the game's
+/// own decoder reads (Oodle, LZ5), which leaves the split for later.
+pub(crate) fn fused_result(
+    merged: Result<(usize, Vec<String>)>,
+    t0: std::time::Instant,
+) -> Result<Option<String>> {
+    match merged {
+        Ok((scanned, bad)) => {
+            for b in bad {
+                println!("{b}");
+            }
+            eprintln!(
+                "nxb-extract: split fused, {scanned} distinct files scanned, merge {:.2} s",
+                t0.elapsed().as_secs_f64()
+            );
+            Ok(None)
+        }
+        Err(crate::error::ExtractError::Unsupported(why)) => {
+            eprintln!("nxb-extract: split left for later: {why}");
+            Ok(Some(why))
+        }
+        Err(e) => Err(e),
+    }
+}
