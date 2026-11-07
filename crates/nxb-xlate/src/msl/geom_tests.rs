@@ -10,13 +10,13 @@ fn out_i(ty: u64) -> u64 {
     0x3DB8u64 << 50 | 0xff | 0xff << 8 | PRED7 | ty << 39
 }
 
-fn job(extra: &str) -> Job {
+pub(super) fn job(extra: &str) -> Job {
     let json = format!(r#"[{{"key": "gs0", "stage": "gs"{extra}}}]"#);
     parse_jobs(&json).expect("job").remove(0)
 }
 
 /// A Maxwell geometry program: the 0x50 byte header (one thread per primitive, triangle strip, 6 vertices) and the ops.
-fn code(word0: u32, ops: &[u64]) -> Vec<u8> {
+pub(super) fn code(word0: u32, ops: &[u64]) -> Vec<u8> {
     let mut h = [0u32; 20];
     h[0] = 4 << 10 | word0;
     h[2] = 1 << 24;
@@ -34,11 +34,11 @@ fn code(word0: u32, ops: &[u64]) -> Vec<u8> {
     c
 }
 
-fn run(j: &Job, c: &[u8]) -> Result<Translated, Failure> {
+pub(super) fn run(j: &Job, c: &[u8]) -> Result<Translated, Failure> {
     translate(j, c, &Context::default())
 }
 
-fn extra<'a>(r: &'a super::Reflection, k: &str) -> Option<&'a nxb_pyjson::Value> {
+pub(super) fn extra<'a>(r: &'a super::Reflection, k: &str) -> Option<&'a nxb_pyjson::Value> {
     r.extra.iter().find(|(n, _)| n == k).map(|(_, v)| v)
 }
 
@@ -154,35 +154,38 @@ fn tessellation_is_not_ported() {
 #[test]
 #[ignore]
 fn metal_compiles_the_geometry_libraries() {
+    for l in &emitting().libraries {
+        compile_metal(&format!("geom{}", l.suffix), &l.msl);
+    }
+}
+
+/// Compile one source with Apple's compiler into `scratch/<name>.air`.
+pub(super) fn compile_metal(name: &str, msl: &str) {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scratch");
     std::fs::create_dir_all(&dir).expect("scratch");
-    for l in &emitting().libraries {
-        let src = dir.join(format!("geom{}.metal", l.suffix));
-        let air = dir.join(format!("geom{}.air", l.suffix));
-        std::fs::write(&src, &l.msl).expect("write");
-        let o = std::process::Command::new("xcrun")
-            .args([
-                "-sdk",
-                "macosx",
-                "metal",
-                "-c",
-                "-O1",
-                "-fpreserve-invariance",
-                "-std=metal3.0",
-            ])
-            .arg(&src)
-            .arg("-o")
-            .arg(&air)
-            .output()
-            .expect("run metal");
-        assert!(
-            o.status.success(),
-            "{}: {}\n{}",
-            l.suffix,
-            String::from_utf8_lossy(&o.stderr),
-            l.msl
-        );
-    }
+    let src = dir.join(format!("{name}.metal"));
+    let air = dir.join(format!("{name}.air"));
+    std::fs::write(&src, msl).expect("write");
+    let o = std::process::Command::new("xcrun")
+        .args([
+            "-sdk",
+            "macosx",
+            "metal",
+            "-c",
+            "-O1",
+            "-fpreserve-invariance",
+            "-std=metal3.0",
+        ])
+        .arg(&src)
+        .arg("-o")
+        .arg(&air)
+        .output()
+        .expect("run metal");
+    assert!(
+        o.status.success(),
+        "{name}: {}\n{msl}",
+        String::from_utf8_lossy(&o.stderr)
+    );
 }
 
 const TF: &str = r#", "tf": [{"stride": 16, "outputs": [[1, 4]]}, [], [], []]"#;
@@ -269,32 +272,7 @@ fn a_geometry_job_without_a_layout_has_no_capture() {
 #[test]
 #[ignore]
 fn metal_compiles_the_geometry_capture() {
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scratch");
-    std::fs::create_dir_all(&dir).expect("scratch");
     let t = tf_reader();
     let l = t.libraries.last().expect("reader");
-    let src = dir.join("geomtf.metal");
-    let air = dir.join("geomtf.air");
-    std::fs::write(&src, &l.msl).expect("write");
-    let o = std::process::Command::new("xcrun")
-        .args([
-            "-sdk",
-            "macosx",
-            "metal",
-            "-c",
-            "-O1",
-            "-fpreserve-invariance",
-            "-std=metal3.0",
-        ])
-        .arg(&src)
-        .arg("-o")
-        .arg(&air)
-        .output()
-        .expect("run metal");
-    assert!(
-        o.status.success(),
-        "{}\n{}",
-        String::from_utf8_lossy(&o.stderr),
-        l.msl
-    );
+    compile_metal("geomtf", &l.msl);
 }
