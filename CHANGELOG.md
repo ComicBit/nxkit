@@ -10,6 +10,10 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 - `nxtitle` splits the host into services (`Service`). `RuntimeHooks::runtime` lets a family or title move one service of its game from nxnative to nxkit. `Resolved::nxkit_services` lists them.
 - `docs/plans/runtime-hooks.md` plans how needs reach the host and how the nxkit runtime replaces nxnative one service at a time.
 
+### Fixed
+
+- `nxb build` names a version that the input lacks. Before, the rewrite stage stopped with an NRO collection error about a missing `extract/<version>/RomFS.img`. Now the build stops before the extraction. Where the NSP script derives a profile from the version it has (the `package` or a `shader_versions` entry of the profile is not in the input), the exit code is 4, so a launcher can run the script. `-p` with a version that the input lacks is an error (exit code 1), as in the script.
+
 ### Changed
 
 - `render_cond`, `tex_flush_upload` and `tex_dirty_upload` are needs of `nxgame-oot`, not of `nxfamily-agl`. Breath of the Wild runs on agl and sets none of them.
