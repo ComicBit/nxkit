@@ -71,17 +71,13 @@ pub(crate) fn run_of(
         std::fs::create_dir_all(cwd.join(d))
             .map_err(|e| format!("{}: {e}", cwd.join(d).display()))?;
     }
-    let gfx = b
-        .profile
-        .1
-        .get("graphics")
-        .and_then(|g| g.split(' ').next())
-        .unwrap_or("nvn");
+    let gfx = crate::layer::gfx(b)?.name();
     let romfs = work.join("extract").join(&b.package).join("RomFS.img");
-    let msl = b
-        .shaders
-        .parent()
-        .map_or_else(|| b.shaders.clone(), Path::to_path_buf);
+    let lib = crate::layer::msl_dir(b)?;
+    let lib = lib
+        .strip_prefix(&b.work)
+        .map_or_else(|_| lib.clone(), |r| work.join(r));
+    let msl = lib.parent().map_or_else(|| lib.clone(), Path::to_path_buf);
     let mut env: Vec<(String, String)> = Vec::new();
     set(&mut env, "DM_ROOT", text(&work));
     set(&mut env, "DM_ROMFS", text(&romfs));

@@ -44,7 +44,7 @@ pub(crate) fn stage_app(
         companion: companion.clone(),
         patched: patched.clone(),
         romfs: ex.join("RomFS.img"),
-        msl: b.shaders.clone(),
+        msl: crate::layer::msl_dir(b)?,
         msl_name: None,
         tables,
         guard_tables: crate::pipeline::guard_tables(a, b),
@@ -111,6 +111,9 @@ pub(crate) fn stage_app(
         format!("{done}; signed with {}", a.mac_sign)
     };
     // a partial library folder travels into the app as `msl/<b-V>/_b_partial.json`, the summary says so too
+    if crate::layer::gfx(b)? != crate::layer::Gfx::Nvn {
+        return Ok(done);
+    }
     Ok(match nxb_sched::Partial::read(&b.shaders) {
         Some(st) => format!("{done}; {}", st.note()),
         None => done,

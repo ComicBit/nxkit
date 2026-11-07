@@ -26,6 +26,7 @@ nxb-shader.workspace = true
 nxb-rewrite.workspace = true
 nxb-nro.workspace = true
 nxb-profile.workspace = true
+nxb-layer.workspace = true
 
 [features]
 default = ["air-front"]

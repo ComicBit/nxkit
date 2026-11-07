@@ -216,8 +216,7 @@ fn metal_stops(found: &[(String, String, String)]) -> Vec<(String, String, Strin
 /// An NVN game's shaders are built only with the Metal compiler they were tested with (`dmsh_chain.lock`), unless
 /// `--allow-other-metal` (`check_metal`): checked before the shader step.
 pub(crate) fn check_metal(a: &Args, b: &Build, p: &Progress) -> Result<(), String> {
-    let gfx = b.profile.1.get("graphics").map_or("nvn", String::as_str);
-    if a.shaders.is_some() || gfx.split(' ').next() != Some("nvn") {
+    if a.shaders.is_some() || crate::layer::gfx(b)? != crate::layer::Gfx::Nvn {
         return Ok(());
     }
     let lock = std::fs::read_to_string(b.engine.join("dm/gfx/tools/dmsh_chain.lock"))

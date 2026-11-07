@@ -88,8 +88,7 @@ fn inputs(a: &Args, b: &Build) -> Result<ipa::Inputs, String> {
     let ex = w.join("extract").join(&b.package);
     let base_ex = w.join("extract/v0");
     let p = |x: PathBuf| Some(x.to_string_lossy().into_owned());
-    let gfx = b.profile.1.get("graphics").cloned().unwrap_or_default();
-    if matches!(gfx.split(' ').next(), Some("vulkan" | "gl")) {
+    if crate::layer::gfx(b)? != crate::layer::Gfx::Nvn {
         return Err(
             "unsupported: a Vulkan or OpenGL game in nxb build --platform ios (run the script)"
                 .into(),
