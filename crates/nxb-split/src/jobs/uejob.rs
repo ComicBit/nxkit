@@ -1,26 +1,27 @@
 //! The Unreal decode of the build (`uepak.py` `job`, `finish`, `find_key`, `code_keys`, `decoded_archive`,
-//! `lz4_shaders`): the shader code archives of every Unreal pak whose shaders are not inline, with an AES-encrypted
-//! index opened by the key found in main, and one Oodle job (`DMOJ`, `dm/host/hle_oodle.c`) of their compressed
-//! shaders for the game's own decoder in the Mac host. LZ4 shaders are decoded here and need no job.
+//! `lz4_shaders`): the shader libraries of the IoStore containers, decoded with the game's decoder ([`crate::oodle`]),
+//! and the shader code archives of every Unreal pak whose shaders are not inline, with an AES-encrypted index opened
+//! by the key found in main. One Oodle job (`DMOJ`, `dm/host/hle_oodle.c`) holds the compressed shaders of the paks
+//! for the game's own decoder in the Mac host. LZ4 shaders are decoded here and need no job.
 
 use std::sync::Arc;
 
 use super::R;
 use super::uepak::{Pak, footer, inline_shaders, range, ve};
+use super::uetoc::{IO_SHADER_LIBRARY, Toc, dirname, inline_in_containers};
 use crate::rd::u32le;
 use crate::src::Src;
 
 const ARCHIVE_VERSION: u32 = 2;
 const JOB_MAGIC: u32 = 0x4a4f_4d44;
 const OUT_MAGIC: u32 = 0x524f_4d44;
-const IO_SHADER_LIBRARY: u8 = 8;
 
 /// A shader of an archive: (offset from the code start, size, raw size, frequency).
 type Shader = (u64, u32, u32, u8);
 
 /// `archive`: the shaders of a version 2 shader code archive, the end of the table before the shader entries and
 /// the code start.
-fn tables(b: &[u8], what: &str) -> R<(Vec<Shader>, usize, usize)> {
+pub(super) fn tables(b: &[u8], what: &str) -> R<(Vec<Shader>, usize, usize)> {
     let mut r = super::uepak::Rd::new(b, 0, what.to_string());
     if r.le(4)? != u64::from(ARCHIVE_VERSION) {
         return ve(format!("{what}: not a version 2 shader code archive"));
@@ -203,15 +204,15 @@ pub fn find_key(img: &[u8], lo: usize, hi: usize, blk: &[u8; 16]) -> Option<[u8;
 pub struct UeArchive {
     /// Its file name (`ShaderArchive-<library>-<format>.ushaderbytecode`).
     pub name: String,
-    /// The pak it came from, relative to the RomFS root.
+    /// The pak (or the IoStore TOC) it came from, relative to the RomFS root.
     pub pak: String,
-    /// Its path in the pak.
+    /// Its path in the pak (`chunk <chunk ID in hex>` in an IoStore container).
     pub path: String,
     /// Its shader count.
     pub shaders: usize,
     /// Its compressed shaders (they go to the job).
     pub compressed: usize,
-    /// `Oodle`, `LZ4` (decoded here) or empty.
+    /// `Oodle`, `LZ4` (decoded here), `IoStore, decoded` or empty.
     pub compression: &'static str,
     bytes: Vec<u8>,
 }
@@ -219,7 +220,7 @@ pub struct UeArchive {
 /// The decode of one version: the archives and the records of the Oodle job.
 #[derive(Debug, Default)]
 pub struct UeJob {
-    /// The archives, in pak and path order.
+    /// The archives: the IoStore libraries, then the paks' archives in pak and path order.
     pub archives: Vec<UeArchive>,
     /// (archive, shader, compressed bytes, raw size).
     recs: Vec<(usize, usize, Vec<u8>, u32)>,
@@ -227,33 +228,79 @@ pub struct UeJob {
 
 /// Whether an IoStore TOC holds Unreal Engine 5 shader libraries (`Toc.of_type(IO_SHADER_LIBRARY)`).
 pub fn toc_has_shader_libraries(b: &[u8], rel: &str) -> bool {
-    super::uetoc::Toc::open(b, rel).is_ok_and(|t| t.of_type(IO_SHADER_LIBRARY))
+    Toc::open(b, rel).is_ok_and(|t| t.of_type(IO_SHADER_LIBRARY))
 }
 
-/// `job`: the shader code archives of `paks` (path relative to the RomFS root, the file; in path order) whose
-/// shaders are not inline, the encrypted ones opened with the key found in main (`main`: the NSO file).
-pub fn ue_job(paks: &[(String, Arc<dyn Src>)], main: &[u8]) -> R<UeJob> {
+/// The key of an encrypted pak: the one in main that decrypts its first index block.
+fn main_key(main: &[u8], src: &dyn Src, rel: &str, ioff: u64) -> R<[u8; 32]> {
+    let img = crate::nso::image(main)?;
+    let lo = u32le(main, 0x24)?;
+    let blk: [u8; 16] = range(src, ioff, 16, rel)?.try_into().unwrap_or([0; 16]);
+    find_key(&img, lo, img.len(), &blk).ok_or_else(|| {
+        crate::SplitError::Red(format!(
+            "ValueError: {rel}: the index is encrypted and no key in main (a 32-byte window or two 16-byte literals its code stores together) decrypts it"
+        ))
+    })
+}
+
+impl UeJob {
+    /// Adds an archive. A later archive of the same name replaces the earlier one (its file is written over).
+    fn push(&mut self, a: UeArchive) -> usize {
+        if let Some(k) = self.archives.iter().position(|x| x.name == a.name) {
+            self.recs.retain(|r| r.0 != k);
+            self.archives[k].bytes.clear();
+        }
+        self.archives.push(a);
+        self.archives.len() - 1
+    }
+}
+
+/// `job`: the shader libraries of the IoStore containers in `files`, then the shader code archives of its paks whose
+/// shaders are not inline. `files` holds the paks, the IoStore TOCs and partitions and the manifests at the top
+/// (path relative to the RomFS root, the file, in path order). An encrypted pak or container is opened with the key
+/// found in main (`main`: the NSO file). The IoStore libraries need the game's decoder ([`crate::oodle`]).
+pub fn ue_job(files: &[(String, Arc<dyn Src>)], main: &[u8]) -> R<UeJob> {
+    let paks: Vec<&(String, Arc<dyn Src>)> =
+        files.iter().filter(|f| f.0.ends_with(".pak")).collect();
     let mut key: Option<[u8; 32]> = None;
     let mut job = UeJob::default();
+    let libs = super::uelib::io_libraries(files, &mut || {
+        for (rel, src) in &paks {
+            if let Ok((true, ioff, _, _, _)) = footer(src.as_ref(), rel) {
+                key = Some(main_key(main, src.as_ref(), rel, ioff)?);
+                return Ok(key);
+            }
+        }
+        Ok(None)
+    })?;
+    for l in libs {
+        job.push(UeArchive {
+            name: l.name,
+            pak: l.rel,
+            path: l.path,
+            shaders: l.shaders,
+            compressed: 0,
+            compression: "IoStore, decoded",
+            bytes: l.bytes,
+        });
+    }
     for (rel, src) in paks {
         let Ok((enc, ioff, _, _, _)) = footer(src.as_ref(), rel) else {
             continue;
         };
-        if inline_shaders(src.as_ref(), rel) {
+        let beside = || {
+            inline_in_containers(
+                files
+                    .iter()
+                    .filter(|x| x.0.ends_with(".utoc") && dirname(&x.0) == dirname(rel))
+                    .map(|x| (x.0.as_str(), x.1.as_ref())),
+            )
+        };
+        if inline_shaders(src.as_ref(), rel, &beside) {
             continue;
         }
         if enc && key.is_none() {
-            let img = crate::nso::image(main)?;
-            let lo = u32le(main, 0x24)?;
-            let blk: [u8; 16] = range(src.as_ref(), ioff, 16, rel)?
-                .try_into()
-                .unwrap_or([0; 16]);
-            key = find_key(&img, lo, img.len(), &blk);
-            if key.is_none() {
-                return ve(format!(
-                    "{rel}: the index is encrypted and no key in main (a 32-byte window or two 16-byte literals its code stores together) decrypts it"
-                ));
-            }
+            key = Some(main_key(main, src.as_ref(), rel, ioff)?);
         }
         let p = Pak::open_keyed(src.clone(), rel, key.as_ref())?;
         let mut paths: Vec<&String> = p
@@ -276,17 +323,12 @@ pub fn ue_job(paks: &[(String, Arc<dyn Src>)], main: &[u8]) -> R<UeJob> {
                 comp.clear();
                 how = "LZ4";
             }
-            // a later archive of the same name replaces the earlier one (its file is written over)
-            if let Some(k) = job.archives.iter().position(|a| a.name == name) {
-                job.recs.retain(|r| r.0 != k);
-                job.archives[k].bytes.clear();
-            }
-            let k = job.archives.len();
+            let mut recs = Vec::with_capacity(comp.len());
             for &i in &comp {
                 let c = stored(&b, code, &sh[i], &what)?;
-                job.recs.push((k, i, c.to_vec(), sh[i].2));
+                recs.push((i, c.to_vec(), sh[i].2));
             }
-            job.archives.push(UeArchive {
+            let k = job.push(UeArchive {
                 name,
                 pak: rel.clone(),
                 path: path.clone(),
@@ -295,6 +337,8 @@ pub fn ue_job(paks: &[(String, Arc<dyn Src>)], main: &[u8]) -> R<UeJob> {
                 compression: how,
                 bytes: b,
             });
+            job.recs
+                .extend(recs.into_iter().map(|(i, c, raw)| (k, i, c, raw)));
         }
     }
     Ok(job)

@@ -104,7 +104,7 @@ Since version 0.4.0, the split reads many more container families. A format that
 | zip members (stored, Deflate, bzip2, lzma) | ported. The decoders are `nxb-split::bzip2` and `nxb-split::unity::lzma`. Compared with vectors from Python's `zipfile`, `bzip2` and `xz` |
 | BND3 entry names in Shift JIS | ported. `nxb-split::sjis` decodes ASCII, half-width katakana and JIS X 0208 like Python's `shift-jis` codec with `replace`. A test compares all 65536 byte pairs with the codec. The table is made by `tools/gen_sjis_table.py` |
 | Unreal shader code archives in paks, with an AES-256 index | ported in `nxb build` (`nxb-split::jobs::uejob`, `boot/uedec.rs`). The key comes from main. LZ4 shaders decode in nxb, Oodle shaders decode in one boot of the Mac host (`DM_OODLE_JOB`). The split reads `<version>/ue_shaders`. Checked with the AES test vectors of FIPS 197 and SP 800-38A and with synthetic archives. No real game was run |
-| Unreal Engine 5.6 IoStore shader libraries | not ported. The Unreal decode stops with an error that names the container |
+| Unreal Engine 5.6 IoStore shader libraries | ported in `nxb build` (`nxb-split::jobs::uetoc` and `uelib`, `boot/uedec.rs`). The decode reads the `.utoc` tables and the `.ucas` partitions by ranges. Stored, zlib and LZ4 blocks decode in nxb. Oodle blocks and the Oodle shader groups decode with the game's own decoder in the Mac host (`DM_OODLE_SERVE`). An encrypted container opens with the AES-256 key of the paks. The archive names come from the `Manifest_*.txt` files. Checked with synthetic containers and a fake decoder only. No real IoStore game was available |
 
 Real data: the update image of one title with a 17.6 GB archive gave all 12 package files and all tables byte-identical to the reference split (measured: 298 s, and about 25 minutes for the reference).
 The reference scripts read approximately 35 container formats, and the port covers most of them. Only the real image and the NSP titles have real-data results. For all other families, the evidence is synthetic.
@@ -328,6 +328,7 @@ A step whose output is complete is skipped, so a build with unchanged inputs boo
 - The GLSLC capture writes the shaders that the game compiles at run time to `<version>/glslc_capture`. The split reads them.
   A boot that captures no output but observes shader keys passes only if the split covers every observed key.
 - The Unreal decode writes the decoded shader code archives to `<version>/ue_shaders`. The split reads them.
+  When the IoStore containers hold shader libraries, the decode starts the game's Oodle decoder in the host's tool mode for them.
 - The game's own Oodle and LZ5 decoder serves the split (see the family table).
 - The Vulkan and GL captures write `<version>/vk_capture` and `gl_capture`. The Mac shader stage reads these folders like the RomFS (see [Vulkan and OpenGL games](#vulkan-and-opengl-games)).
 - The JIT capture is not ported. `nxb build --platform ios` stops for a game whose main imports `nn::jit` unless `<version>/jit/jit.img` exists.
