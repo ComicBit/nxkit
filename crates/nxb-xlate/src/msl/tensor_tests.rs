@@ -144,3 +144,26 @@ fn chained_hmmas_on_an_ldsm_keep_a_and_the_accumulator() {
         "{m}"
     );
 }
+
+/// `STS.U32 [R9 * 16 + 8], R36`: a store after the LDSM.
+const STS_A: (u64, u64) = (0x0000_0824_0900_8388, 0x000f_e800_0000_c800);
+
+/// The LDSM's reads lie between two SIMD-group barriers, and the store after it after the second.
+#[test]
+fn ldsm_reads_lie_between_subgroup_barriers() {
+    let m = msl(&[S2R, IMAD, LDSM, STS_A]);
+    let main = &m[m.find("kernel void main0").expect("entry")..];
+    let at = |pat: &str| -> Vec<usize> { main.match_indices(pat).map(|(i, _)| i).collect() };
+    let bars = at("simdgroup_barrier(mem_flags::mem_threadgroup);");
+    assert_eq!(bars.len(), 2, "{m}");
+    let reads = at("= as_type<float>(sm0[");
+    let store = *at("sm0[")
+        .iter()
+        .find(|&&i| main[i..].split(';').next().unwrap().contains("] = "))
+        .expect("store");
+    assert!(!reads.is_empty(), "{m}");
+    assert!(
+        bars[0] < reads[0] && *reads.last().unwrap() < bars[1] && bars[1] < store,
+        "{m}"
+    );
+}

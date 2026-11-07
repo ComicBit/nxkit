@@ -114,13 +114,14 @@ The flags are constants at each call. The tensor pass sets them for HMMA chains 
 
 In a compute shader an `LDSM` becomes one `MatrixLoad` per matrix. The tensor pass reads the address from it and then lowers it to shuffles, as in other stages.
 A divergence analysis (`xform/uniformity.rs`) decides which values are the same in the whole SIMD-group.
+An `LDSM` sits between two SIMD-group barriers. A warp often stores the rows and reads them with `LDSM` without a `BAR` between. The Switch runs these accesses in order. Metal orders the store of another lane only through a barrier.
 Each function that calls the helper declares `dm_acc[16]` and `dm_am[4]` and passes them by reference. The helper is always inlined.
 
 ## Identity and the cache
 
 The step stores each translation in the store. The key `nxb.xlate.v2` has the translator identity, the job, the code, the chain version V, the source, the paired shader,
 the answer-table flag, the dual-source and fetch-outputs-only flags and the varyings of the partners.
-The translator identity is a hash of the label `nxb-xlate msl`, V, `nxb_xlate::msl::TRANSLATOR_ID` (now `msl-2.8`) and `NXB_TEST_XLATE_SALT`.
+The translator identity is a hash of the label `nxb-xlate msl`, V, `nxb_xlate::msl::TRANSLATOR_ID` (now `msl-2.9`) and `NXB_TEST_XLATE_SALT`.
 V is a hash of the engine files that `dm/gfx/tools/dmsh_chain.py` lists in `FILES`, and the options string `debug=True reduced=True`. No Rust source goes into V.
 A change of the translator translates again only when someone increases `TRANSLATOR_ID` by hand. Without the increase, the store gives the old MSL. A failure is not stored.
 
