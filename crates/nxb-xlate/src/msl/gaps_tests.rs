@@ -228,12 +228,12 @@ fn the_hmma_helper_runs_on_simdgroup_matrices() {
     let m = msl(&hmma_sample());
     for want in [
         "inline __attribute__((always_inline)) uint fn1(thread uint& a0, thread uint& a1,",
-        "thread uint& a17, thread simdgroup_half8x8 (&acc)[16], thread simdgroup_half8x8 (&am)[4]",
+        "thread uint& a17, thread simdgroup_float8x8 (&acc)[16], thread simdgroup_half8x8 (&am)[4]",
         "threadgroup uint* s = &sm0[uint(a1)];",
         "uint g = uint(a0) >> 2, t = uint(a0) & 3;",
         "const int f = int(uint(a10)), k = (f >> 8) * 2;",
         "adirect = false;",
-        "simdgroup_multiply_accumulate(c0, am[0], b0, c0);",
+        "simdgroup_multiply_accumulate(c0, am[1], b1, c0);",
         "simdgroup_load(b0, h + 256, 16, ulong2(0, 0), true);",
         "a17 = as_type<uint>(d1);",
         "return as_type<uint>(d0);",
@@ -254,7 +254,7 @@ fn the_hmma_helper_touches_a_slot_only_for_a_chain() {
     assert!(
         writes[0]
             .trim_start()
-            .starts_with("if (cslot) { c0 = acc[k];"),
+            .starts_with("else if (cslot) { simdgroup_multiply_accumulate(c0, am[0], b0, acc[k]);"),
         "{body}"
     );
     assert!(
@@ -321,6 +321,32 @@ fn a_shared_store_of_a_spilled_kernel_is_a_device_store() {
     let body = &body[..body.find("\n}\n").expect("end")];
     assert!(
         body.contains("((device uchar*)&sm0[0])[uint(a0)] = uchar(uint(a1));"),
+        "{body}"
+    );
+}
+
+/// The helper accumulates in FP32 and rounds D to half once, as Ampere does. Apple's half `simdgroup_matrix` product
+/// rounds after each step and overflows to infinity on a partial sum (upstream issue 1568, speckles in Ocarina of
+/// Time on M1 and M2).
+#[test]
+fn the_hmma_helper_accumulates_in_fp32() {
+    let m = msl(&hmma_sample());
+    let body = &m[m.find("fn1(").expect("helper")..];
+    let body = &body[..body.find("\n}\n").expect("end")];
+    for want in [
+        "simdgroup_half8x8 b0, b1;",
+        "simdgroup_float8x8 c0, c1;",
+        "simdgroup_half8x8 ch0, ch1;",
+        "simdgroup_multiply_accumulate(c0, am[0], b0, ch0);",
+        "threadgroup float* w = (threadgroup float*)(s + 128);",
+        "simdgroup_store(c0, w, 8, ulong2(0, 0)); simdgroup_store(c1, w, 8, ulong2(0, 8));",
+        "uint d0 = as_type<uint>(half2(w[g * 8 + t * 2], w[g * 8 + t * 2 + 1]));",
+        "uint d1 = as_type<uint>(half2(w[(g + 8) * 8 + t * 2], w[(g + 8) * 8 + t * 2 + 1]));",
+    ] {
+        assert!(body.contains(want), "missing {want}\n{body}");
+    }
+    assert!(
+        !body.contains("simdgroup_half8x8 b0, b1, c0, c1;"),
         "{body}"
     );
 }

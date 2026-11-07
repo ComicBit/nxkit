@@ -146,6 +146,9 @@ In a compute shader an `LDSM` becomes one `MatrixLoad` per matrix. The tensor pa
 A divergence analysis (`xform/uniformity.rs`) decides which values are the same in the whole SIMD-group.
 An `LDSM` sits between two SIMD-group barriers. A warp often stores the rows and reads them with `LDSM` without a `BAR` between. The Switch runs these accesses in order. Metal orders the store of another lane only through a barrier.
 Each function that calls the helper declares `dm_acc[16]` and `dm_am[4]` and passes them by reference. The helper is always inlined.
+A and B are half matrices. C, D and the slots are float matrices, so the products and the sum are FP32. D is rounded to half once, when a lane reads it.
+Ampere does the same. Apple's half `simdgroup_matrix` product rounds to half after each step. On an M2 Max it gives infinity when a partial sum is larger than 65504, and its error grows with cancellation.
+A chain keeps FP32 in its slot from one call to the next. Ampere rounds D to half after each call, so the result of a chain can be more accurate than on the Switch.
 
 ## Identity and the cache
 
