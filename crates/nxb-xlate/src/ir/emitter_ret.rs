@@ -13,6 +13,16 @@ fn check_default_state(d: &Definitions) -> Result<(), String> {
     Ok(())
 }
 
+/// The register of the depth output: four registers for each render target with any component enabled, then the
+/// sample mask register (upstream `473c9026`). Counting the enabled components agrees only when every enabled target
+/// has all four.
+pub fn depth_register(omap_targets: i32) -> i32 {
+    let targets = (0..8)
+        .filter(|rt| omap_targets & (0xf << (rt * 4)) != 0)
+        .count();
+    targets as i32 * 4 + 1
+}
+
 impl EmitterContext<'_, '_> {
     /// `EmitStart` (constructor tail).
     pub fn emit_start(&mut self) -> Result<(), String> {
@@ -65,7 +75,7 @@ impl EmitterContext<'_, '_> {
         let omap = self.tc.definitions.omap_targets;
         // GenerateAlphaToCoverageDitherDiscard and the alpha test are off in the job's graphics state.
         if self.tc.definitions.omap_depth {
-            let reg = (omap as u32).count_ones() as i32 + 1;
+            let reg = depth_register(omap);
             let src = self.ir.register(reg, crate::ir::regtype::GPR);
             self.store_io(
                 StorageKind::Output,
@@ -101,5 +111,22 @@ impl EmitterContext<'_, '_> {
     /// `UsesViewportMask`.
     pub fn uses_viewport_mask(&self) -> bool {
         self.tc.program.used_features & feature::VIEWPORT_MASK != 0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::depth_register;
+
+    #[test]
+    fn the_depth_register_follows_four_registers_per_target() {
+        assert_eq!(depth_register(0), 1);
+        assert_eq!(depth_register(0xf), 5);
+        // RT0 is R0..R3 and RT2 is R4..R7, then the sample mask R8 and the depth R9
+        assert_eq!(depth_register(0x10f), 9);
+        assert_eq!(depth_register(0x100), 5);
+        assert_eq!(depth_register(0x3f), 9);
+        assert_eq!(depth_register(0x30), 5);
+        assert_eq!(depth_register(i32::MIN | 1), 9);
     }
 }
