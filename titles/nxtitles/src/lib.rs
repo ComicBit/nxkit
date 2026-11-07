@@ -1,6 +1,6 @@
 //! The one list of families and title modules.
 //!
-//! Each module is behind its own cargo feature (`agl`, `oot`), so a build can leave any of them out. This is the
+//! Each module is behind its own cargo feature (`agl`, `oot`, `botw`), so a build can leave any of them out. This is the
 //! only crate that depends on family and title crates. The core depends on this crate and on `nxtitle`.
 
 use nxtitle::{Catalog, Family, Title};
@@ -14,6 +14,8 @@ pub fn catalog() -> Result<Catalog, String> {
     let titles: Vec<&'static dyn Title> = vec![
         #[cfg(feature = "oot")]
         &nxgame_oot::OOT,
+        #[cfg(feature = "botw")]
+        &nxgame_botw::BOTW,
     ];
     Catalog::new(families, titles)
 }
@@ -25,11 +27,14 @@ mod tests {
     #[test]
     fn the_catalog_builds() {
         let c = catalog().unwrap();
-        #[cfg(all(feature = "agl", feature = "oot"))]
+        #[cfg(feature = "agl")]
         assert!(c.missing_families().is_empty());
-        #[cfg(all(feature = "oot", not(feature = "agl")))]
-        assert_eq!(c.missing_families().len(), 1);
-        #[cfg(not(any(feature = "agl", feature = "oot")))]
+        #[cfg(not(feature = "agl"))]
+        assert_eq!(
+            c.missing_families().len(),
+            usize::from(cfg!(feature = "oot")) + usize::from(cfg!(feature = "botw"))
+        );
+        #[cfg(not(any(feature = "agl", feature = "oot", feature = "botw")))]
         assert!(c.titles().is_empty() && c.families().is_empty());
     }
 
@@ -46,5 +51,19 @@ mod tests {
         assert_eq!(r.family.map(|f| f.id()), Some("agl"));
         assert_eq!(r.family_from, FamilyFrom::Declared);
         assert_eq!(r.needs().len(), 6);
+    }
+
+    #[cfg(all(feature = "agl", feature = "botw"))]
+    #[test]
+    fn botw_resolves_to_agl_without_the_oot_keys() {
+        use nxtitle::{FamilyFrom, TitleFacts, TitleId};
+        let c = catalog().unwrap();
+        let r = c.resolve(&TitleFacts::new(TitleId(0x0100_7EF0_0011_E000)));
+        assert_eq!(r.family.map(|f| f.id()), Some("agl"));
+        assert_eq!(r.family_from, FamilyFrom::Declared);
+        let keys: Vec<_> = r.needs().iter().map(|n| n.value.capability).collect();
+        assert!(!keys.contains(&"render_cond") && !keys.contains(&"tex_flush_upload"));
+        assert_eq!(keys.len(), 5);
+        assert!(r.nxkit_services().is_empty());
     }
 }

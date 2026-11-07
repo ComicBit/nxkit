@@ -33,8 +33,15 @@ A family and a title answer questions through hooks. `None` means no opinion.
 | `needs` | `RuntimeHooks` | host behaviours the game depends on, with the setting |
 | `upscaler` | `RuntimeHooks` | keep the game's upscaler, render at the output size, or use MetalFX |
 | `pacing` | `RuntimeHooks` | the game, the display or a fixed rate paces the frames |
+| `runtime` | `RuntimeHooks` | whether nxnative or nxkit runs one service of the game |
 
 A role names what a shader does. The core decides what to do with it. A title module does not change the core's code path for a shader.
+
+## Which engine runs a game
+
+The host is split into services (`Service`): `fs`, `input`, `audio`, `video`, `system`, `offline`, `pacing`, `kernel` and `gpu`. nxnative runs every service by default. A family or title answers `runtime` for a service with `Runtime::Nxkit`, and the nxkit runtime runs that service for the game. `Resolved::nxkit_services` lists them.
+
+The plan for the nxkit runtime and for applying needs is [plans/runtime-hooks.md](plans/runtime-hooks.md).
 
 ## Evidence
 
@@ -68,12 +75,19 @@ A new family follows the same steps in `titles/families/<id>/` with `Family` in 
 
 The Nintendo Switch 2 game on NVN2, family `agl`. The records are in `seedds/nxnative` `dm/games/0400486024DEC000/README.md`.
 
-- The family states `render_cond`, `tex_flush_upload` and `tex_dirty_upload`. They come from agl's depth prepass and the terrain maps the CPU writes. Tears of the Kingdom needs the two upload keys as well.
 - The family marks the `agl_ndsr_vr` networks as the game's upscaler. The archive path that identifies them is unverified.
-- The title states `gpu_timestamps`, `draw_barriers` and `mem_map_limit`.
+- The title states `gpu_timestamps`, `draw_barriers`, `mem_map_limit`, `render_cond`, `tex_flush_upload` and `tex_dirty_upload`. The last three come from agl's depth prepass and the terrain maps the CPU writes. They are title facts, because Breath of the Wild sets none of them.
 
 Open questions:
 
 - Is the game logic time-stepped, so that a pacing other than the game's own is safe?
 - Should the host keep `agl_ndsr_vr`, render at the output size, or use MetalFX?
 - Which facts of the family hold for Tears of the Kingdom and other agl games?
+
+## The Legend of Zelda: Breath of the Wild (`01007EF00011E000`)
+
+The Nintendo Switch game on NVN, update 1.9.0 (v1114112), family `agl`. The records are in `seedds/nxnative` `dm/games/01007EF00011E000/`.
+
+- The title states `gpu_timestamps segment`, `fps_target 60`, `present_snap`, `pso_mtl4` and `screen_aspect`.
+- `fps_target 60` needs the `FRAME_STEP` stubs of the game's `patches.py`. `nxb` applies them from `data/rewrite-rules`.
+- The game is the pilot for the nxkit runtime. nxnative runs every service of it.

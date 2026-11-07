@@ -1,8 +1,8 @@
 //! The catalog: families and titles, and how they are composed for one game.
 
 use crate::{
-    BuildHooks, Fact, Family, Match, Need, Pacing, RuntimeHooks, Seed, ShaderRole, ShaderView,
-    Title, TitleFacts, Upscaler,
+    BuildHooks, Fact, Family, Match, Need, Pacing, Runtime, RuntimeHooks, Seed, Service,
+    ShaderRole, ShaderView, Title, TitleFacts, Upscaler,
 };
 use std::collections::BTreeSet;
 
@@ -111,26 +111,42 @@ pub struct Resolved {
 }
 
 impl Resolved {
-    fn build(&self) -> impl Iterator<Item = &'static dyn BuildHooks> {
+    fn build_hooks(&self) -> impl Iterator<Item = &'static dyn BuildHooks> {
         let t = self.title.map(|t| t as &'static dyn BuildHooks);
         let f = self.family.map(|f| f as &'static dyn BuildHooks);
         t.into_iter().chain(f)
     }
 
-    fn runtime(&self) -> impl Iterator<Item = &'static dyn RuntimeHooks> {
+    fn runtime_hooks(&self) -> impl Iterator<Item = &'static dyn RuntimeHooks> {
         let t = self.title.map(|t| t as &'static dyn RuntimeHooks);
         let f = self.family.map(|f| f as &'static dyn RuntimeHooks);
         t.into_iter().chain(f)
     }
 
+    /// The engine that runs a service: the title's choice, then the family's, then [`Runtime::Nxnative`].
+    pub fn runtime(&self, service: Service) -> Runtime {
+        self.runtime_hooks()
+            .find_map(|h| h.runtime(service))
+            .map(|f| f.value)
+            .unwrap_or_default()
+    }
+
+    /// The services nxkit runs for this game, in [`Service::ALL`] order.
+    pub fn nxkit_services(&self) -> Vec<Service> {
+        Service::ALL
+            .into_iter()
+            .filter(|s| self.runtime(*s) == Runtime::Nxkit)
+            .collect()
+    }
+
     /// The role of a shader.
     pub fn shader_role(&self, shader: &ShaderView<'_>) -> Option<Fact<ShaderRole>> {
-        self.build().find_map(|h| h.shader_role(shader))
+        self.build_hooks().find_map(|h| h.shader_role(shader))
     }
 
     /// The seeds of the family, then the title's.
     pub fn seeds(&self) -> Vec<Seed> {
-        let hooks: Vec<_> = self.build().collect();
+        let hooks: Vec<_> = self.build_hooks().collect();
         hooks
             .into_iter()
             .rev()
@@ -140,14 +156,17 @@ impl Resolved {
 
     /// The rewriter rules of the family, then the title's.
     pub fn rewrite_rules(&self) -> Vec<&'static str> {
-        let mut v: Vec<&'static str> = self.build().filter_map(|h| h.rewrite_rules()).collect();
+        let mut v: Vec<&'static str> = self
+            .build_hooks()
+            .filter_map(|h| h.rewrite_rules())
+            .collect();
         v.reverse();
         v
     }
 
     /// The needs of the family, then the title's.
     pub fn needs(&self) -> Vec<Fact<Need>> {
-        let hooks: Vec<_> = self.runtime().collect();
+        let hooks: Vec<_> = self.runtime_hooks().collect();
         hooks
             .into_iter()
             .rev()
@@ -157,11 +176,11 @@ impl Resolved {
 
     /// How to handle the game's upscaler.
     pub fn upscaler(&self) -> Option<Fact<Upscaler>> {
-        self.runtime().find_map(|h| h.upscaler())
+        self.runtime_hooks().find_map(|h| h.upscaler())
     }
 
     /// Who paces the frames.
     pub fn pacing(&self) -> Option<Fact<Pacing>> {
-        self.runtime().find_map(|h| h.pacing())
+        self.runtime_hooks().find_map(|h| h.pacing())
     }
 }

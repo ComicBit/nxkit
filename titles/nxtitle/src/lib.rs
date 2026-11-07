@@ -13,12 +13,16 @@
 //! the catalog from the modules that are switched on by cargo features. The core uses this crate and the catalog
 //! only, never a family or title crate.
 //!
+//! nxnative runs every [`Service`] of a game by default. A family or title moves a service to nxkit through
+//! [`RuntimeHooks::runtime`], so nxkit replaces nxnative one service at a time.
+//!
 //! A title module does not work around a core bug. A fix that helps more than one game belongs in the core.
 
 mod catalog;
 mod evidence;
 mod facts;
 mod hooks;
+mod runtime;
 
 pub use catalog::{Catalog, FamilyFrom, Resolved};
 pub use evidence::{Evidence, Fact};
@@ -28,6 +32,7 @@ pub use hooks::{
 };
 
 pub use nxb_model::TitleId;
+pub use runtime::{Runtime, Service};
 
 /// An engine family: the facts and hooks that hold for every game of one engine.
 pub trait Family: BuildHooks + RuntimeHooks {

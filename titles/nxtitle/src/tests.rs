@@ -34,6 +34,9 @@ impl RuntimeHooks for Fam {
     fn pacing(&self) -> Option<Fact<Pacing>> {
         Some(Fact::new(Pacing::Display, REC))
     }
+    fn runtime(&self, s: Service) -> Option<Fact<Runtime>> {
+        matches!(s, Service::Audio | Service::Fs).then_some(Fact::new(Runtime::Nxkit, REC))
+    }
     fn upscaler(&self) -> Option<Fact<Upscaler>> {
         Some(Fact::new(Upscaler::MetalFx, REC))
     }
@@ -72,6 +75,13 @@ impl BuildHooks for Game {
 impl RuntimeHooks for Game {
     fn upscaler(&self) -> Option<Fact<Upscaler>> {
         Some(Fact::new(Upscaler::Native, REC))
+    }
+    fn runtime(&self, s: Service) -> Option<Fact<Runtime>> {
+        match (self.0, s) {
+            (1, Service::Fs) => Some(Fact::new(Runtime::Nxnative, REC)),
+            (2, Service::Pacing) => Some(Fact::new(Runtime::Nxkit, REC)),
+            _ => None,
+        }
     }
 }
 impl Title for Game {
@@ -159,4 +169,24 @@ fn evidence_checked() {
         .is_checked()
     );
     assert!(!REC.is_checked());
+}
+
+#[test]
+fn each_service_runs_where_the_title_then_the_family_says() {
+    let c = catalog();
+    let r = c.resolve(&TitleFacts::new(TitleId(1)));
+    assert_eq!(r.runtime(Service::Fs), Runtime::Nxnative);
+    assert_eq!(r.runtime(Service::Audio), Runtime::Nxkit);
+    assert_eq!(r.runtime(Service::Gpu), Runtime::Nxnative);
+    assert_eq!(r.nxkit_services(), [Service::Audio]);
+    let lone = c.resolve(&TitleFacts::new(TitleId(2)));
+    assert_eq!(lone.nxkit_services(), [Service::Pacing]);
+    let none = c.resolve(&TitleFacts::new(TitleId(0xdead)));
+    assert!(none.nxkit_services().is_empty());
+}
+
+#[test]
+fn service_ids_are_unique() {
+    let ids: std::collections::BTreeSet<_> = Service::ALL.iter().map(|s| s.id()).collect();
+    assert_eq!(ids.len(), Service::ALL.len());
 }

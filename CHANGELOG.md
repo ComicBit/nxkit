@@ -2,6 +2,18 @@
 
 All notable changes are in this file. The format follows Keep a Changelog. Versions follow Semantic Versioning.
 
+## Unreleased
+
+### Added
+
+- The title module `nxgame-botw` for The Legend of Zelda: Breath of the Wild (`01007EF00011E000`), behind the `nxtitles` feature `botw`.
+- `nxtitle` splits the host into services (`Service`). `RuntimeHooks::runtime` lets a family or title move one service of its game from nxnative to nxkit. `Resolved::nxkit_services` lists them.
+- `docs/plans/runtime-hooks.md` plans how needs reach the host and how the nxkit runtime replaces nxnative one service at a time.
+
+### Changed
+
+- `render_cond`, `tex_flush_upload` and `tex_dirty_upload` are needs of `nxgame-oot`, not of `nxfamily-agl`. Breath of the Wild runs on agl and sets none of them.
+
 ## 0.9.0
 
 ### Changed
