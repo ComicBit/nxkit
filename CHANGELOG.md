@@ -17,6 +17,7 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 - Mesh outputs are as wide as the pixel shaders that read them, so a large mesh fits the Metal limit of 32 KB (upstream `d777f0a3`). `Varying` has a new field `read`, the mask of the components that the pixel shader reads.
 - The entry of the library `_bf` is `main0_f` and its result struct is `main0_out_f` (upstream `c8bfa161`). The host asks for `main0_f`. Not ported: the cut of `_bf` out of the one compile of `_b`. `nxb` still compiles `_bf` as a source of its own, so the build speed gain is not there. Every extra pixel entry already calls the one `dm_body_main0`.
 - A short NDSR pack no longer stops the shader split (upstream `ff33639c`, issue 1296). The record-start score counts only complete 16-byte records. Before, a pack with a partial last record gave the error "NDSR records: a buffer that is not a multiple of 16 bytes". The split of every pack that was read before is unchanged.
+- The pipeline archives hold a compute pipeline for each compute shader of the profile (the `C` rows of `pso_manifest.tsv`, then the compute rows of `shader_map.tsv`), compiled offline in groups of 16 apart from the render bases. Shaders with function constants are left out. `archive.tsv` gets a `compute` line. `nxb pso` takes `--shader-map`, `--manifest` and `--no-compute`. The host side (`cps_new` looks the pipeline up in the bundle) is not part of nxb. (upstream 30fb2136)
 - `TRANSLATOR_ID` is `msl-2.16`.
 
 ## 0.8.0
