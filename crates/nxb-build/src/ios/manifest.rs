@@ -42,6 +42,8 @@ pub struct Options {
     pub min_os: String,
     /// `--framework-name` (default `DmGame`).
     pub framework_name: String,
+    /// `--loader` (default `FR`): `FH` when the framework links its own host (a patched engine's shell framework).
+    pub loader: String,
     /// `--built-by`.
     pub built_by: Option<String>,
 }
@@ -60,6 +62,7 @@ impl Default for Options {
             romfs_identity: String::new(),
             min_os: "26.0".into(),
             framework_name: "DmGame".into(),
+            loader: "FR".into(),
             built_by: None,
         }
     }
@@ -126,6 +129,12 @@ pub fn manifest(o: &Options) -> Result<Value, String> {
             repr_str(&o.chain)
         ));
     }
+    if o.loader != "FR" && o.loader != "FH" {
+        return Err(format!(
+            "[RED] gen_manifest: --loader {} is not FR or FH",
+            repr_str(&o.loader)
+        ));
+    }
     if !o.romfs_identity.is_empty() && !o.romfs_identity.starts_with("DMROMFSID1 ") {
         return Err(
             "[RED] gen_manifest: --romfs-identity is not a romfs_image.py identity line (DMROMFSID1 ...)".into(),
@@ -144,7 +153,7 @@ pub fn manifest(o: &Options) -> Result<Value, String> {
         ),
         ("nro_count", Value::Int(nro_count(o.nro_table.as_deref())?)),
         ("chain", s(&o.chain)),
-        ("loader", s("FR")),
+        ("loader", s(&o.loader)),
         (
             "framework",
             Value::Str(format!("{}.framework", o.framework_name)),
@@ -225,6 +234,20 @@ mod tests {
     }
 
     #[test]
+    fn writes_the_loader_it_is_given() {
+        let mut o = opts();
+        assert_eq!(
+            manifest(&o).unwrap().get("loader").unwrap().as_str(),
+            Some("FR")
+        );
+        o.loader = "FH".into();
+        assert_eq!(
+            manifest(&o).unwrap().get("loader").unwrap().as_str(),
+            Some("FH")
+        );
+    }
+
+    #[test]
     fn refuses_what_the_schema_cannot_carry() {
         let bad = |f: fn(&mut Options)| {
             let mut o = opts();
@@ -238,6 +261,7 @@ mod tests {
         assert!(bad(|o| o.chain = "c-1".into()).contains("--chain"));
         assert!(bad(|o| o.chain = "b-".into()).contains("--chain"));
         assert!(bad(|o| o.romfs_identity = "X".into()).contains("--romfs-identity"));
+        assert!(bad(|o| o.loader = "FX".into()).contains("--loader"));
         // lower case title IDs are written upper case, Python's `$` passes one final newline
         let mut o = opts();
         o.game = "0100152000022abc".into();
@@ -290,6 +314,9 @@ mod tests {
             }
             if let Some(b) = &o.built_by {
                 c.arg("--built-by").arg(b);
+            }
+            if o.loader != "FR" {
+                c.arg("--loader").arg(&o.loader);
             }
             assert!(c.status().unwrap().success());
             let rs = d.join(format!("rs{i}.json"));

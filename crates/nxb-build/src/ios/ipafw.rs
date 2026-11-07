@@ -49,6 +49,13 @@ fn copy_tree(from: &Path, to: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Whether the engine's framework project has the `DmShellGame` target: a patched engine (NX2Apple patch 0077) links the
+/// host into each shell framework there and writes loader `FH`. Upstream's engine has `DmGame` only, loader `FR`.
+pub(crate) fn links_host(engine: &Path) -> bool {
+    std::fs::read_to_string(engine.join("dm/ios/project-framework.yml"))
+        .is_ok_and(|t| t.lines().any(|l| l.trim_end() == "  DmShellGame:"))
+}
+
 fn done<T>(c: Result<T, String>, what: &str) -> Result<(), String> {
     c.map(|_| ()).map_err(|_| die(what))
 }
@@ -100,6 +107,12 @@ pub(crate) fn gen_framework(
         romfs_marker: f.marker.into(),
         romfs_identity: id,
         framework_name: f.name.into(),
+        loader: if f.only && links_host(&i.engine) {
+            "FH"
+        } else {
+            "FR"
+        }
+        .into(),
         ..manifest::Options::default()
     };
     manifest::write(&fw.join("game.manifest.json"), &opts)
@@ -148,9 +161,12 @@ pub(crate) fn build_framework_only(
     let r: &Runner = &st.runner;
     let folder = PathBuf::from(or(&i.framework_only, ""));
     let name = &st.fw_name;
-    say(&format!(
-        "xcodebuild (Release, unsigned, the game framework {name} only)"
-    ));
+    let host = links_host(&i.engine);
+    say(&if host {
+        format!("xcodebuild (Release, unsigned, the game framework {name} with its own host)")
+    } else {
+        format!("xcodebuild (Release, unsigned, the game framework {name} only)")
+    });
     mkdir_p(&st.o)?;
     mkdir_p(&folder)?;
     let dd = st.dd.to_string_lossy().into_owned();
@@ -163,7 +179,7 @@ pub(crate) fn build_framework_only(
         "-project",
         "DmIOS.xcodeproj",
         "-target",
-        "DmGame",
+        if host { "DmShellGame" } else { "DmGame" },
         "-configuration",
         "Release",
         "-sdk",
@@ -298,4 +314,32 @@ pub(crate) fn build_framework_only(
         script::du_sh(r, &out).replace('\t', "")
     ));
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::links_host;
+
+    #[test]
+    fn links_the_host_only_with_the_shell_game_target() {
+        let d = std::env::temp_dir().join(format!("nxb-links-host-{}", std::process::id()));
+        let yml = d.join("dm/ios/project-framework.yml");
+        std::fs::create_dir_all(yml.parent().unwrap()).unwrap();
+        assert!(!links_host(&d));
+        std::fs::write(&yml, "targets:\n  DmGame:\n    type: framework\n").unwrap();
+        assert!(!links_host(&d));
+        std::fs::write(
+            &yml,
+            "targets:\n  DmGame:\n    type: framework\n  DmShellGame:\n    type: framework\n",
+        )
+        .unwrap();
+        assert!(links_host(&d));
+        std::fs::write(
+            &yml,
+            "targets:\n  DmGame:\n    sources:\n      - DmShellGame:\n",
+        )
+        .unwrap();
+        assert!(!links_host(&d));
+        let _ = std::fs::remove_dir_all(&d);
+    }
 }
