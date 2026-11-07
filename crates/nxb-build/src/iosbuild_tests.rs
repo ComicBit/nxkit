@@ -1,5 +1,6 @@
 use super::*;
 use crate::host::profile::Game;
+use std::path::Path;
 
 /// A build in `target/iosbuild-tests` with the Mac plan's first stages, the profile's `graphics` key set to `api`.
 fn build(dir: &str, api: Option<&str>) -> Build {
