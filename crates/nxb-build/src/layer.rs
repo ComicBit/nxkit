@@ -4,8 +4,9 @@
 //! them in the game's files, compiles the MSL with Metal's tools and writes the library and the table into
 //! `<work>/shader/vk` or `<work>/shader/gl`. Such a game has no NVN shader step and no pipeline archive.
 //!
-//! Not ported: the shaders a game makes at run time (`capture_shaders` of the script boots the game in the Mac host to
-//! catch them). A game whose shaders all come from such a capture has no shaders here and the stage fails.
+//! The shaders a game makes at run time come from the capture boot (`crate::boot::captures`, `capture_shaders` of the
+//! script), which writes them to `<extract>/<package>/vk_capture` or `gl_capture`. This stage reads those folders like
+//! the RomFS.
 
 use crate::Args;
 use crate::events::Progress;
@@ -139,10 +140,18 @@ fn par_map<T: Sync, R: Send>(items: &[T], threads: usize, f: impl Fn(&T) -> R + 
     out.into_iter().map(|x| x.1).collect()
 }
 
-/// The images the shaders are read from: the packed version's RomFS, then the DLC's (`<work>/aoc`, folders or `.img`
-/// files).
+/// The images the shaders are read from: the packed version's RomFS, the capture folders of its boot in the Mac host
+/// (`vk_capture`, `gl_capture`, read like a RomFS as the script's tools do), then the DLC's (`<work>/aoc`, folders or
+/// `.img` files).
 fn images(b: &Build) -> Vec<PathBuf> {
-    let mut out = vec![b.work.join("extract").join(&b.package).join("RomFS.img")];
+    let ex = b.work.join("extract").join(&b.package);
+    let mut out = vec![ex.join("RomFS.img")];
+    out.extend(
+        ["vk_capture", "gl_capture"]
+            .into_iter()
+            .map(|c| ex.join(c))
+            .filter(|d| d.is_dir()),
+    );
     let mut dlc: Vec<PathBuf> = std::fs::read_dir(b.work.join("aoc"))
         .map(|d| {
             d.flatten()
@@ -179,7 +188,7 @@ fn vulkan(imgs: &[PathBuf], threads: usize) -> Result<Translated, String> {
     }
     if mods.is_empty() {
         return Err(format!(
-            "no SPIR-V files in {} (shaders the game makes at run time need the Mac host's capture, which nxb does not port)",
+            "no SPIR-V files in {} (shaders the game makes at run time come from the Vulkan capture boot)",
             imgs.iter()
                 .map(|p| p.display().to_string())
                 .collect::<Vec<_>>()
@@ -254,7 +263,7 @@ fn gl(imgs: &[PathBuf], main: &Path, threads: usize) -> Result<Translated, Strin
     srcs.retain(|(s, st, _)| seen.insert((s.clone(), *st)));
     if srcs.is_empty() {
         return Err(format!(
-            "no GLSL shaders in {} and {} (shaders the game puts together at run time need the Mac host's capture, which nxb does not port)",
+            "no GLSL shaders in {} and {} (shaders the game puts together at run time come from the GL capture boot)",
             imgs.iter()
                 .map(|p| p.display().to_string())
                 .collect::<Vec<_>>()

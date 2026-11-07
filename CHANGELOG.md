@@ -9,6 +9,7 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 - Vulkan and OpenGL games build. The new crate `nxb-layer` translates their shaders with naga (SPIR-V) and the `glslang` crate (GLSL).
   The Mac shader stage writes `shader/vk/vk_shaders.{metallib,tsv}` or `shader/gl/gl_shaders.*` in the format of the host's `vk_shaders.py` and `gl_shaders.py`.
   The shader split and the pipeline archive are skipped for these games. The Mac app ships `msl/vk` or `msl/gl`.
+  The stage also reads the `vk_capture` or `gl_capture` folder of the capture boot, so shaders the game makes at run time are in the library.
   On Hades, 74 of 74 shaders translate and compile.
 - `nxb build` boots the game in the Mac host after the rewrite. The host runs headless with a time limit, and its output goes to `<work>/logs`.
   The boots are the NRO capture, the heap check and the region check of a provisional profile, the GLSLC capture, the Vulkan and GL captures and the Unreal decode.
@@ -59,7 +60,7 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 ### Known gaps
 
 - The iOS app build of Vulkan and OpenGL games.
-- nxb has no translator for the Vulkan and GL captures. The build writes a `[RED]` line.
+- Standalone `nxb extract` and `nxb split` have no host. They still stop with exit code 4 for Oodle and LZ5 formats.
 - The JIT capture is not ported. `nxb build --platform ios` stops for a game that imports `nn::jit` and has no `jit/jit.img`.
 - Unreal Engine 5.6 IoStore shader libraries are not read. The Unreal decode stops with an error.
 - No boot and no host decoder was tested with a real game. The tests use synthetic data.

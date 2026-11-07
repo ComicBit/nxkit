@@ -33,7 +33,8 @@ Version 0.6.6 is the fourteenth public release. It is early software. Read this 
   220 gave a different output. Nobody tested the other shaders. If you need Apple's output, set `NXB_OWN_RAW=0`.
 - The shader step for iOS is not part of the verified path. Only a sample was compared.
 - Unity readers, large text segments (100 MB and more), frame step builds without a local sample and framework and multi-program builds are checked with synthetic files only.
-- Not ported: each format that needs Oodle. These stop with exit code 4.
+- Vulkan and OpenGL games build for the Mac. `nxb-layer` translates their shaders with naga and glslang. The iOS app build refuses them.
+- Oodle and LZ5 formats decode with the game's own decoder in the Mac host. Only `nxb build` starts the host. `nxb extract` and `nxb split` alone stop with exit code 4 for them.
 - The reference scripts remain the fallback. If a stage fails or does not support an input, run the reference script for that stage.
   The tools return exit code 4 for an unsupported input. The caller then runs the reference script. Exit code 3 means damaged data.
   The signer command `nxb sign` returns 3 for unsupported input, and the caller runs `codesign`.
@@ -115,14 +116,14 @@ The first estimate in the table is the sum of the measured stages, and it does n
   Three more titles were not checked again with the current script.
 - Each change of the engine changes the hashes that the rules pin. Make the rules again (`nxb rewrite-rules`) and compare the oracle cases. If the engine differs from the pin,
   `nxb rewrite` stops with exit code 4, and `nxb build` stops at the rewrite step with exit code 1. The message gives the two hashes.
-- Not supported in the extract and the split (exit code 4 with a named message): Oodle formats, LZ5.
+- Not supported in `nxb extract` and `nxb split` alone (exit code 4 with a named message): Oodle formats, LZ5. `nxb build` decodes them in the Mac host.
   The file table of a CRA archive is read from the NROs in `DM_NRO_DIR`. Without a table the split stops with a named message. The CRA reader was checked with a synthetic NRO and archive only.
   The base game of a sparse program is read only with its update NSP (`--updates-only`). Without the update it stops with exit code 4, as in the reference.
   The sparse reader follows the Atmosphere algorithm and was checked with a synthetic fixture only. The meta hash layer of a sparse section is not verified.
   The checksums of LZ4 frames are not checked. A base game with its update in one run gives an error in the reference split and in this split.
 - XCI, merged packages, dump folders, NSZ block mode and DLC were checked with synthetic files only. One real NSZ file was checked. `nxb build` does not split the shader content of DLC.
-- `nxb build` was run with a registered profile on one title (Mac app). A game without a profile gets a provisional profile. The heap check, the region check and the shader captures start the game, and they are not ported.
-  Without `--no-heap-check`, such a game stops with exit code 4. With it, the memory layout is a guess. Nobody checked it with a run. The shader step and the stages after it were **not** run for the Switch 2 package.
+- `nxb build` was run with a registered profile on one title (Mac app). A game without a profile gets a provisional profile. The heap check, the region check and the shader captures boot the game in the Mac host.
+  These boots were tested with synthetic data only. With `--no-heap-check`, the memory layout is a guess. Nobody checked it with a run. The shader step and the stages after it were **not** run for the Switch 2 package.
 - `nxb build` reads the files of `RomFS.img` at build time (Unreal paks, Frostbite headers and the other source checks of the reference script). They were checked with synthetic files only.
   `--platform mac` (the development build) ends with the command that runs the game on the Mac. It does not run the pipeline prebuild, which starts the host. It does not set `DM_JIT_CAPTURE` either.
   `--program N` and the other programs of a multi-program profile are built for `--platform mac` and `mac-app`. They were checked with synthetic files only. An iOS build of a profile with `programs` packs the first program only. `--allow-shader-regressions` has no effect. `--mac-sign` was not run with a real identity.
