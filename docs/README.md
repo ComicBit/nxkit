@@ -1,6 +1,6 @@
 # Documentation index
 
-`nxbuild` is a Rust workspace that changes Switch game packages into Apple builds. It extracts the game package, splits
+`nxkit` is a Rust monorepo. Its build tool `nxb` changes Switch game packages into Apple builds. It extracts the game package, splits
 the shaders, rewrites the code, translates and compiles the shaders into Metal libraries, makes the pipeline archive, and packs and signs the app.
 The output files are byte-identical to the output of the reference build scripts, with two exceptions. The MSL of the Rust translator is not byte-identical.
 The own shader front end is not byte-identical either. Its raw path is on by default since 0.4.0, and GPU tests cover only a part of the shaders.

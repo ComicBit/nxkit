@@ -31,4 +31,4 @@ jobs:
         run: >
           gh release create "${GITHUB_REF_NAME}"
           "dist/nxb-${GITHUB_REF_NAME}-macos-arm64.zip" dist/SHA256SUMS
-          --title "nxbuild ${GITHUB_REF_NAME}" --notes-file dist/notes.md
+          --title "nxkit ${GITHUB_REF_NAME}" --notes-file dist/notes.md

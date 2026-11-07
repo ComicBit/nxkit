@@ -1,6 +1,6 @@
 [package]
 name = "air-front"
-description = "In-process MSL front end: MSL bytes to AIR bitcode (or text IR) plus the back-half arguments, for library callers such as the nxbuild FrontEnd trait"
+description = "In-process MSL front end: MSL bytes to AIR bitcode (or text IR) plus the back-half arguments, for library callers such as the nxkit FrontEnd trait"
 version.workspace = true
 edition = "2021"
 rust-version.workspace = true

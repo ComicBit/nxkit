@@ -75,7 +75,7 @@ SOFTWARE.
 `nxb rewrite` reads these files by default. It checks the SHA-256 of the engine files that the rules come from
 and refuses to run (exit code 4) when they differ. The same notice is in `data/rewrite-rules/NOTICE`.
 
-## Tools that nxbuild starts and does not contain
+## Tools that nxkit starts and does not contain
 
 | tool | licence | use |
 |---|---|---|

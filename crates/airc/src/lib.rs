@@ -24,7 +24,7 @@ fn usage() -> i32 {
     2
 }
 
-/// `deny`: the deny list for nxbuild's `DenyList` from `check --opt --ref-store` results: the SHA-256
+/// `deny`: the deny list for nxkit's `DenyList` from `check --opt --ref-store` results: the SHA-256
 /// of every source whose verdict is not `own-identical`, sorted, with a comment header.
 fn deny(opts: &Opts) -> i32 {
     let Some(r) = &opts.results else {
