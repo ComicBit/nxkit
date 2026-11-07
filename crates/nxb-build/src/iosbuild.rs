@@ -1,5 +1,6 @@
 //! `nxb build --platform ios`: the NSP script's iOS branch as stages. Extract and split, then the shader step (the
-//! iOS libraries `<work>/shader/ios/b-<V>`, from the same translation as the Mac ones), the "app build" (the script's
+//! iOS libraries `<work>/shader/ios/b-<V>`, from the same translation as the Mac ones), the "JIT capture" of a game
+//! that imports `nn::jit` ([`crate::boot::jit`]), the "app build" (the script's
 //! `build_ipa.sh` up to `xcodebuild` and the signature, in [`crate::ios::ipa`]) and the "IPA pack". The rewrite
 //! (`patched_<package>`) comes from the work folder, as for the Mac app. Events are those of the other platform.
 
@@ -11,7 +12,7 @@ use crate::ios::{ipa, ipapack};
 use crate::order::{Stage, Work};
 use nxb_model::ContentKey;
 use std::cell::RefCell;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 /// The stages of an iOS build.
@@ -43,11 +44,17 @@ pub(crate) fn nodes(a: &Args, b: &Build) -> Vec<Node> {
             key: key("shaders", &[("libraries", b.shaders.display().to_string())]),
             reused: reuse(2),
         },
+        Node {
+            name: "JIT capture".into(),
+            deps: vec![2],
+            key: key("jit", &[("work", b.work.display().to_string())]),
+            reused: None,
+        },
     ];
     let one = |name: &str| {
         vec![Node {
             name: name.into(),
-            deps: vec![2],
+            deps: vec![3],
             key: key(name, &[("out", b.out.display().to_string())]),
             reused: None,
         }]
@@ -60,7 +67,7 @@ pub(crate) fn nodes(a: &Args, b: &Build) -> Vec<Node> {
         nodes.extend(vec![
             Node {
                 name: "app build".into(),
-                deps: vec![2],
+                deps: vec![3],
                 key: key(
                     "app",
                     &[
@@ -73,25 +80,13 @@ pub(crate) fn nodes(a: &Args, b: &Build) -> Vec<Node> {
             },
             Node {
                 name: "IPA pack".into(),
-                deps: vec![3],
+                deps: vec![4],
                 key: key("pack", &[("out", b.out.display().to_string())]),
                 reused: None,
             },
         ]);
     }
     nodes
-}
-
-/// `uses_jit`: main imports `nn::jit::CreateJitEnvironment` (Super Mario 64 of Super Mario 3D All-Stars).
-fn uses_jit(exefs: &Path) -> Result<bool, String> {
-    let main = exefs.join("main");
-    if !main.is_file() {
-        return Ok(false);
-    }
-    let (img, ..) = crate::host::guess::read_nso(&main)?;
-    Ok(crate::host::nsofacts::dynsyms(&img)?
-        .iter()
-        .any(|s| !s.1 && s.0.starts_with("_ZN2nn3jit20CreateJitEnvironment")))
 }
 
 /// The script's environment for `build_ipa.sh`, from the build's plan.
@@ -106,9 +101,9 @@ fn inputs(a: &Args, b: &Build) -> Result<ipa::Inputs, String> {
                 .into(),
         );
     }
-    if !ex.join("jit/jit.img").is_file() && uses_jit(&ex.join("ExeFS"))? {
+    if !ex.join("jit/jit.img").is_file() && crate::boot::jit::uses_jit(&ex.join("ExeFS"))? {
         return Err(format!(
-            "unsupported: main imports nn::jit, and the iPhone needs an image of the code the game's JIT plugin makes ({}): the JIT capture (two boots with DM_JIT_CAPTURE and jit_capture.py) is not ported to nxb (run the script)",
+            "main imports nn::jit, and the JIT capture made no image of the code the game's JIT plugin makes ({})",
             ex.join("jit/jit.img").display()
         ));
     }
@@ -233,15 +228,16 @@ pub(crate) fn run(a: &Args, b: &Build, p: &Arc<Progress>) -> Result<(), String> 
             (_, 2) => Work::Turn(Box::new(move || {
                 crate::pipeline::shaders_and_archive(a2, b, p).map(|o| o.shaders)
             })),
-            (_, 3) if a.shell_framework.is_some() => Work::Turn(Box::new(move || {
+            (_, 3) => Work::Turn(Box::new(move || crate::boot::jit::stage(b, p))),
+            (_, 4) if a.shell_framework.is_some() => Work::Turn(Box::new(move || {
                 // route C's shell: the game's framework alone, the game files stay where they are
                 let inp = inputs(a, b)?;
                 let r = Runner::from_parent()?;
                 let fw = ipa::run(&r, ipa::Target::Ipa(None), &inp, &mut |l| step(l))?;
                 Ok(fw.display().to_string())
             })),
-            (_, 3) if a.prepare_xcode => Work::Turn(Box::new(move || prepare_xcode(a, b, &step))),
-            (_, 3) => Work::Turn(Box::new(move || {
+            (_, 4) if a.prepare_xcode => Work::Turn(Box::new(move || prepare_xcode(a, b, &step))),
+            (_, 4) => Work::Turn(Box::new(move || {
                 let inp = inputs(a, b)?;
                 let r = Runner::from_parent()?;
                 let st = ipa::generate(&r, false, Some(&b.out), &inp, &mut |l| step(l))?;

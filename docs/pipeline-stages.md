@@ -279,7 +279,7 @@ The default platform is `ios`, as in the reference script. Use `--platform mac-a
 | `--team-id`, `--framework`, `--shell-framework`, `--prepare-xcode`, `--xcode-workspace` | the iOS options. They call the code of `nxb ios` | **no device test.** Each stage was checked with a real `xcodebuild`. Nobody ran the stages in one run |
 | `--provisional`, `--survey-only`, `--no-heap-check`, `--profile-out` | the survey options (refer to the next section) | see the next section |
 | `--allow-shader-regressions` | accepted, no effect. No regression check is in the build | not applicable |
-| `--platform mac` | the development build: extract, shader split, Mac shaders and Mac host, then the command that runs the game (`cd <work>/run && DM_ROOT=... <work>/tools/dmhost <work>/patched_<package>`). The command is printed and not started. The pipeline prebuild (`DM_PSO_PREBUILD=tool`) starts the host and is not run. `DM_JIT_CAPTURE` is not set. `--seen-shaders` adds `DM_PSO_ARCHIVE` and a `tee` of the host log. Apple silicon is needed, as for `mac-app` | unit tests for the environment, the command text and `programs.tsv`. Not run on a game |
+| `--platform mac` | the development build: extract, shader split, Mac shaders and Mac host, then the command that runs the game (`cd <work>/run && DM_ROOT=... <work>/tools/dmhost <work>/patched_<package>`). The command is printed and not started. The pipeline prebuild (`DM_PSO_PREBUILD=tool`) starts the host and is not run. For a game whose main imports `nn::jit`, `DM_JIT_CAPTURE` is `<version>/jit_capture/play`. The next iOS build adds this folder to the JIT image. `--seen-shaders` adds `DM_PSO_ARCHIVE` and a `tee` of the host log. Apple silicon is needed, as for `mac-app` | unit tests for the environment, the command text and `programs.tsv`. Not run on a game |
 | `--program N` | the title ID of the game is the application's + N. The packages are read as the application (`--app`) and `--program=<title ID>` picks the Program NCA. Exit code 2 for a NUP and a dump folder | **synthetic.** The picking of the Program NCA is tested on a package of two programs |
 
 A profile with a `programs` key (the engine has one, `010049900F546000`) lists the other programs as `<index>=<title ID>`.
@@ -330,7 +330,11 @@ A step whose output is complete is skipped, so a build with unchanged inputs boo
 - The Unreal decode writes the decoded shader code archives to `<version>/ue_shaders`. The split reads them.
 - The game's own Oodle and LZ5 decoder serves the split (see the family table).
 - The Vulkan and GL captures write `<version>/vk_capture` and `gl_capture`. The Mac shader stage reads these folders like the RomFS (see [Vulkan and OpenGL games](#vulkan-and-opengl-games)).
-- The JIT capture is not ported. `nxb build --platform ios` stops for a game whose main imports `nn::jit` unless `<version>/jit/jit.img` exists.
+- The JIT capture runs for an iOS build when main imports `nn::jit` (Super Mario 64 in Super Mario 3D All-Stars). The iPhone does not run code that the game makes at run time.
+  The game boots twice with `DM_JIT_CAPTURE` into `<version>/jit_capture/boot1` and `boot2`. A third boot plays the profile's `jit_route` with `DM_KEYS`, if the profile has one.
+  `nxb_rewrite::jit` (the port of `jit_capture.py`) builds `<version>/jit/jit.img` from all capture folders. The app build embeds this image.
+  `jit_capture/stamp.json` holds the sizes of the rewritten modules and the profile keys `jit_key_data`, `jit_out_code` and `jit_route`. A different stamp clears the capture folders.
+  A capture folder with a `.jit` file is reused. If the captures do not agree or hold no boot code, the build stops with a message and the log.
 
 These boots were not run against real games in nxb. The tests use synthetic data.
 
@@ -395,7 +399,7 @@ Added in 0.4.0:
 - **The iOS helper scripts.** `nacp.py`, `romfs.py` (identity line), `pso_offline.py` for iOS and the button-icon font are ported. The check of the identity line equals the script on a 3.7 GB image.
   The `pso_offline` run for iOS gave `prebuilt.tsv`, `archive.tsv` and `bases.mtl4-json` byte-identical on 40 pairs.
 
-`nxb build --platform ios` has the stages `extract`, `shader split`, `iOS shaders`, `app build` and `IPA pack`, with the usual events.
+`nxb build --platform ios` has the stages `extract`, `shader split`, `iOS shaders`, `JIT capture`, `app build` and `IPA pack`, with the usual events.
 The shader step runs with the iOS target (and builds the Mac libraries also). The wiring is checked: `--dry-run` prints the graph, and a run reaches the first check with real inputs.
 **It was not run end to end**, because no iOS libraries were available and the translator run takes minutes. The default platform is `ios`, as in the reference script.
 

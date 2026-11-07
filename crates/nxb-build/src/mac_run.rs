@@ -102,6 +102,13 @@ pub(crate) fn run_of(
         let _ = std::fs::remove_file(archive.join("prebuilt.tsv"));
         set(&mut env, "DM_PSO_ARCHIVE", text(&archive));
     }
+    let game = work.join("extract").join(&b.package);
+    if crate::boot::jit::uses_jit(&game.join("ExeFS"))? {
+        // what the game's nn::jit plugin makes in play goes into the iPhone's JIT image at the next build
+        let play = game.join("jit_capture").join("play");
+        std::fs::create_dir_all(&play).map_err(|e| format!("{}: {e}", play.display()))?;
+        set(&mut env, "DM_JIT_CAPTURE", text(&play));
+    }
     if b.program != 0 && b.profile.1.contains_key("program_of") {
         set(&mut env, "DM_PROGRAM", b.program.to_string());
     }
@@ -284,6 +291,11 @@ mod tests {
         std::fs::write(prof.join("shader_pairs.tsv"), "").unwrap();
         std::fs::create_dir_all(work.join("shader")).unwrap();
         std::fs::write(work.join("shader/pso_pairs.tsv"), "").unwrap();
+        let exefs = work.join("extract/v0/ExeFS");
+        std::fs::create_dir_all(&exefs).unwrap();
+        let jit =
+            "_ZN2nn3jit20CreateJitEnvironmentEPNS0_14JitEnvironmentERKNS0_16JitConfigurationE";
+        std::fs::write(exefs.join("main"), crate::boot::jit::test_main(jit, false)).unwrap();
         let mut b = Build::for_test(work.clone(), prof.clone());
         b.package = "v0".into();
         b.program = 2;
@@ -312,6 +324,7 @@ mod tests {
                 "DM_AOC_DIR",
                 "DM_NVN_SHMAP",
                 "DM_PSO_ARCHIVE",
+                "DM_JIT_CAPTURE",
                 "DM_PROGRAM",
                 "DM_LANG",
                 "DM_WINDOW",
@@ -324,6 +337,8 @@ mod tests {
         assert!(get("DM_MSL_DIR").ends_with("work/shader/cache"));
         assert!(get("DM_PSO_ARCHIVE").ends_with("work/run/pso_archive_partial"));
         assert!(work.join("run/save").is_dir() && work.join("run/temp").is_dir());
+        assert!(get("DM_JIT_CAPTURE").ends_with("work/extract/v0/jit_capture/play"));
+        assert!(work.join("extract/v0/jit_capture/play").is_dir());
         assert_eq!(get("DM_NVN_SHMAP"), text(&prof.join("shader_map.tsv")));
         let _ = std::fs::remove_dir_all(&d);
     }
