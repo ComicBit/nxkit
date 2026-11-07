@@ -2,6 +2,21 @@
 
 All notable changes are in this file. The format follows Keep a Changelog. Versions follow Semantic Versioning.
 
+## Unreleased
+
+### Added
+
+- `tools/hmma-precision/run.sh` shows how the GPU of the Mac sums a half `simdgroup_matrix` product.
+- The `nxb-xlatedev` tool `xlate-msl` writes the MSL of a list of shader keys.
+- `docs/analysis/oot-open-issues.md` gives the cause of three defects of one title on Apple GPUs (upstream issues 1547, 1568 and 1326). The cause of 1326 is in the upstream runtime.
+
+### Fixed
+
+- The `simdgroup_matrix` body of `HMMA.16816.F16` sums in FP32 and rounds D to half once, as Ampere does. Before, it summed in half. On an M2 Max a half product rounds after each step and gives infinity when a partial sum is larger than 65504.
+  A GPU test on the M2 Max with random matrices gave the exact half result for 31 % of the values with the old body and for more than 99.9 % with the new body. The cost is about 1 %.
+  This is the likely cause of the coloured speckles of upstream issue 1568 on M1 and M2. No game was run.
+- `TRANSLATOR_ID` is `msl-2.16`.
+
 ## 0.8.0
 
 ### Added
