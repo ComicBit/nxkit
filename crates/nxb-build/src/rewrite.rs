@@ -4,22 +4,22 @@
 //! with the tool: `rewrite-rules` next to the executable (the release archive), or `data/rewrite-rules` of a checkout.
 //! `NXB_REWRITE_RULES` (a folder of rule files) and `NXB_REWRITE_PATCHES` (the snapshot they come from, made by
 //! `tools/gen_rewrite_patches.py`) override them, and a `rewrite_patches.tsv` beside `patch_nso.py` is the last
-//! resort. The port refuses (`nxb rewrite` gives exit code 4 so that the caller runs the reference script, and `nxb build`
-//! stops at the rewrite with the same message and exit code 1) when the engine is not the one this port was checked against: the rewriter's Python files, the patch files and `game.tsv` must hash as the snapshot says,
-//! `DM_GAMES_DIR` must be empty, and an unreplayable frame step stub is
-//! unsupported. A game with `.nrr` files gets its collected NROs rewritten too (see [`ensure`]).
+//! resort. An engine whose Python files differ from the version the rewriter was last checked against is used as it
+//! is, with one line on stderr naming the files and both hashes. The port refuses (`nxb rewrite` gives exit code 4 so
+//! that the caller runs the reference script, and `nxb build` stops at the rewrite with the same message and exit
+//! code 1) when a patch file differs from the snapshot or is missing in it, `DM_GAMES_DIR` must be empty, and an
+//! unreplayable frame step stub is unsupported. A game with `.nrr` files gets its collected NROs rewritten too (see [`ensure`]).
 
 use std::path::{Path, PathBuf};
 
 use nxb_model::sha256;
 use nxb_rewrite::{Options, RewriteError, patches::PatchTable, rewrite};
 
-/// The SHA-256 of the engine files (`dm/tools`) this port was checked against: the engine at its pinned commit
-/// (nxnative `88c7e03f`). The first `SOURCES` of them are the ones `build_src.sha256` lists, in the script's order.
-/// When one differs, `nxb rewrite` stops with exit code 4 naming the file and both hashes, and `nxb build` stops at
-/// the rewrite with the same message and exit code 1: the rewriter is checked against the new engine files (diff them, port what
-/// changed, run the oracle on real modules) and these pins are updated with it, never skipped.
-const PINNED: [(&str, &str); 13] = [
+/// The engine files (`dm/tools`) the rewriter reads and the SHA-256 they had when it was last checked (nxnative
+/// `88c7e03f`). The first `SOURCES` of them are the ones `build_src.sha256` lists, in the script's order (with the
+/// hashes of the engine at hand). This is not a gate: a file that differs is reported on one line and the engine's
+/// own file is used.
+const CHECKED: [(&str, &str); 13] = [
     (
         "patch_nso.py",
         "6ca3aeeda9cb608f2298926f546b7ab3488afba9dcd23ebcce0077fe2b84f009",
@@ -74,7 +74,7 @@ const PINNED: [(&str, &str); 13] = [
     ),
 ];
 
-/// How many of [`PINNED`] go into `build_src.sha256`.
+/// How many of [`CHECKED`] go into `build_src.sha256`.
 const SOURCES: usize = 11;
 
 /// Exit code of a rewrite outside this port's contract (the script runs instead).
@@ -204,19 +204,32 @@ impl Engine {
                 }
             }
         };
-        for (rel, want) in PINNED {
+        Engine::with_table(engine, table)
+    }
+
+    /// Checks the engine's files against `table` and reads their hashes.
+    fn with_table(engine: &Path, table: PatchTable) -> Result<Engine, Fail> {
+        let un = |m: String| Fail::Unsupported(m);
+        let tools = engine.join("dm/tools");
+        let mut sources: Vec<(String, String)> = Vec::with_capacity(CHECKED.len());
+        let mut differ = Vec::new();
+        for (i, (rel, checked)) in CHECKED.iter().enumerate() {
             let have = file_sha(&tools.join(rel)).map_err(un)?;
-            if have != want {
-                return Err(un(format!(
-                    "{rel} of the engine ({}) differs from the version this rewriter was checked against (pinned sha256 {want}, engine sha256 {have}): the engine changed, the rewriter must be checked against it and the pins updated",
-                    tools.display()
-                )));
+            if have != *checked {
+                differ.push(format!("{rel} (checked {checked}, engine {have})"));
+            }
+            if i < SOURCES {
+                sources.push((have, (*rel).to_string()));
             }
         }
-        let mut sources: Vec<(String, String)> = PINNED[..SOURCES]
-            .iter()
-            .map(|(r, h)| ((*h).to_string(), (*r).to_string()))
-            .collect();
+        if !differ.is_empty() {
+            eprintln!(
+                "nxb rewrite: engine file{} differ{} from the version this rewriter was last checked against, using the engine's own files: {}",
+                if differ.len() == 1 { "" } else { "s" },
+                if differ.len() == 1 { "s" } else { "" },
+                differ.join("; ")
+            );
+        }
         for (rel, want) in &table.files {
             if file_sha(&tools.join(rel)).map_err(un)? != *want {
                 return Err(un(format!(
@@ -443,8 +456,8 @@ fn stopped(why: &str) -> String {
 /// A game with `.nrr` files in its RomFS also gets its NROs rewritten (`nro0.patched.bin` and so on, and the
 /// manifest `nro.tsv` beside them, as the script does) when the script has collected them into `nro_<package>`
 /// before or `nxb-nro` collects them now (the script's collection, ported). Returns a note for the console, or `None`
-/// when the work folder already holds the patched modules. A case this port does not support (an engine whose
-/// pinned files differ, a module outside the rewriter's contract) is an error: the build stops here with the message
+/// when the work folder already holds the patched modules. A case this port does not support (a module
+/// outside the rewriter's contract) is an error: the build stops here with the message
 /// of `nxb rewrite` (exit code 4 there), it does not go on without the patched modules.
 pub fn ensure(
     engine: &Path,
@@ -531,7 +544,10 @@ pub fn ensure(
 
 #[cfg(test)]
 mod tests {
-    use super::{PatchTable, collected_nros, ensure, read_rules, shipped_rules};
+    use super::{
+        CHECKED, Engine, Fail, PatchTable, SOURCES, collected_nros, ensure, file_sha, read_rules,
+        shipped_rules,
+    };
 
     #[test]
     fn shipped_rules_are_found_and_equal_the_shipped_snapshot() {
@@ -549,6 +565,33 @@ mod tests {
             regenerated.len() + 2,
             std::fs::read_dir(&dir).expect("dir").count()
         );
+    }
+
+    #[test]
+    fn an_engine_file_that_differs_from_the_checked_version_is_used() {
+        let d = std::env::temp_dir().join(format!("nxb-engine-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let tools = d.join("dm/tools");
+        std::fs::create_dir_all(&tools).expect("dir");
+        for (rel, _) in CHECKED {
+            std::fs::write(tools.join(rel), format!("# {rel} of a newer engine")).expect("file");
+        }
+        let eng = Engine::with_table(&d, PatchTable::default()).expect("the engine is used");
+        assert_eq!(eng.sources.len(), SOURCES);
+        let (sha, rel) = &eng.sources[0];
+        assert_eq!(rel, "patch_nso.py");
+        assert_eq!(
+            *sha,
+            file_sha(&tools.join("patch_nso.py")).expect("hash"),
+            "build_src.sha256 lists the engine's hash, not the checked one"
+        );
+        assert_ne!(*sha, CHECKED[0].1);
+        std::fs::remove_file(tools.join("nso.py")).expect("remove");
+        assert!(matches!(
+            Engine::with_table(&d, PatchTable::default()),
+            Err(Fail::Unsupported(_))
+        ));
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
