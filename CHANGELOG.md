@@ -4,6 +4,11 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ## Unreleased
 
+### Fixed
+
+- The rewrite step follows the engine `f25fa956`: the rules in `data/rewrite-rules` come from that engine with the patches of NX2Apple, as before. They have the two new frame step sites of Hyrule Warriors: Age of Calamity (in-engine cutscenes at 30 frames a second under the 60 fps frame step, upstream `922679a1`) and the build rows of three new profiles. Without them a profile of the new engine stopped the rewrite with "not in the patch snapshot". The rules come from Haseenesss (#17). The three changes of `patch_nso.py` since `88c7e03f` were already ported (upstream `10fd9705`, `e49afb1e` and `9671a581`).
+- The rules in `data/rewrite-rules` come from the engine `f25fa956` with the patches of NX2Apple, as before. They have the two new frame step sites of Hyrule Warriors: Age of Calamity (in-engine cutscenes at 30 frames a second under the 60 fps frame step, upstream `922679a1`) and the build rows of three new profiles.
+
 ### Changed
 
 - `nxb rewrite` and `nxb build` no longer pin the engine. The table of expected hashes of the engine files (`patch_nso.py` and the other Python files of `dm/tools`) is gone, with its comparison and its message, so a newer engine no longer stops the build. The engine's files are read as they are, and `build_src.sha256` lists their hashes. A missing engine file is still an error, and a patch file that differs from the rule snapshot or is missing in it still stops the rewrite.
