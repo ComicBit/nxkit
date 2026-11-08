@@ -6,7 +6,7 @@ All notable changes are in this file. The format follows Keep a Changelog. Versi
 
 ### Changed
 
-- `nxb rewrite` and `nxb build` no longer stop when an engine file (`patch_nso.py` and the other Python files of `dm/tools`) differs from the version the rewriter was last checked against. The engine's own files are used, one line on stderr names the files and both hashes, and `build_src.sha256` lists the hashes of the engine at hand. A patch file that differs from the rule snapshot or is missing in it still stops the rewrite.
+- `nxb rewrite` and `nxb build` no longer pin the engine. The table of expected hashes of the engine files (`patch_nso.py` and the other Python files of `dm/tools`) is gone, with its comparison and its message, so a newer engine no longer stops the build. The engine's files are read as they are, and `build_src.sha256` lists their hashes. A missing engine file is still an error, and a patch file that differs from the rule snapshot or is missing in it still stops the rewrite.
 - nxkit is licensed under GPL-3.0-only. Releases up to 0.9.2 stay under MIT. Code ported from Ryujinx and nxnative keeps its MIT notice in `THIRD_PARTY.md`.
 
 ## 0.9.2 - 2026-11-07
