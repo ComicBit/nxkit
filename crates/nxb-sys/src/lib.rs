@@ -15,3 +15,4 @@ pub mod sha256;
 pub mod stdio;
 pub mod system;
 pub mod zlib;
+pub mod zstd;
